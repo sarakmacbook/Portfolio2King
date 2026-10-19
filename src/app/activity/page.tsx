@@ -1,3 +1,5 @@
+import DatabaseSetup from "@/components/DatabaseSetup";
+import { isDatabaseConfigured } from "@/db";
 import Link from "next/link";
 import { TX_KINDS, type TxKind } from "@/lib/constants";
 import { KIND_META, TYPE_META, fmtDate, money, qty } from "@/lib/format";
@@ -6,6 +8,7 @@ import { getRecentActivity } from "@/lib/portfolio";
 export const dynamic = "force-dynamic";
 
 export default async function ActivityPage({ searchParams }: { searchParams: Promise<{ kind?: string }> }) {
+  if (!isDatabaseConfigured()) return <DatabaseSetup />;
   const { kind } = await searchParams;
   const active = TX_KINDS.includes(kind as TxKind) ? (kind as TxKind) : null;
   const all = await getRecentActivity(500);

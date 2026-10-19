@@ -1,3 +1,5 @@
+import DatabaseSetup from "@/components/DatabaseSetup";
+import { isDatabaseConfigured } from "@/db";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
@@ -12,6 +14,7 @@ import { assetCost, assetValue, ensureSchema, getAllAssets, getAssetTransactions
 export const dynamic = "force-dynamic";
 
 export default async function AssetPage({ params }: { params: Promise<{ id: string }> }) {
+  if (!isDatabaseConfigured()) return <DatabaseSetup />;
   const { id: idStr } = await params;
   const id = Number(idStr);
   if (!Number.isInteger(id)) notFound();

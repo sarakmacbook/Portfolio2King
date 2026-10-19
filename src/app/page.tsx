@@ -1,3 +1,5 @@
+import DatabaseSetup from "@/components/DatabaseSetup";
+import { isDatabaseConfigured } from "@/db";
 import Link from "next/link";
 import AddAssetDialog from "@/components/AddAssetDialog";
 import { Donut, HistoryChart, type Point } from "@/components/Charts";
@@ -17,6 +19,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function Dashboard() {
+  if (!isDatabaseConfigured()) return <DatabaseSetup />;
   const [list, snaps, activity] = await Promise.all([getAllAssets(), getSnapshots(), getRecentActivity(6)]);
   const totals = computeTotals(list);
   const cashAccounts = list.filter((a) => a.type === "cash").map((a) => ({ id: a.id, name: a.name, quantity: a.quantity }));
