@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 export default function ErrorPage({ reset }: { reset: () => void }) {
   return (
     <section className="card mx-auto max-w-2xl space-y-4 p-8">
@@ -14,7 +16,7 @@ export default function ErrorPage({ reset }: { reset: () => void }) {
         Check /api/health for database connectivity and Vercel runtime logs for details.
         No portfolio data is displayed while this request is failing.
       </p>
-      <button className="btn-primary" onClick={reset}>Try again</button>
+      <div className="flex flex-wrap gap-3"><button className="btn-primary" onClick={reset}>Try again</button><Link className="btn-ghost" href="/database">Database settings</Link></div>
     </section>
   );
 }

@@ -3,9 +3,15 @@ import { assets, snapshots, transactions, type Asset, type AssetType, type Trans
 import { asc, desc, eq, sql } from "drizzle-orm";
 
 let schemaReady: Promise<void> | null = null;
+let schemaDatabaseUrl: string | undefined;
 
 /** Safety net so the app works even on a fresh database without drizzle-kit push. */
 export function ensureSchema() {
+  const url = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (url !== schemaDatabaseUrl) {
+    schemaReady = null;
+    schemaDatabaseUrl = url;
+  }
   if (!schemaReady) {
     schemaReady = (async () => {
       await db.execute(sql`
