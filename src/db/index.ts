@@ -20,8 +20,12 @@ const globalForDb = globalThis as typeof globalThis & {
   __portfolioDb?: Db;
 };
 
+export function isDatabaseConfigured(): boolean {
+  return Boolean(process.env.DATABASE_URL?.trim() || process.env.POSTGRES_URL?.trim());
+}
+
 function resolveDatabaseUrl(): string {
-  const url = process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
+  const url = process.env.DATABASE_URL?.trim() || process.env.POSTGRES_URL?.trim();
   if (!url) {
     throw new Error(
       "DATABASE_URL is not set. Locally: copy .env.example to .env.local. " +

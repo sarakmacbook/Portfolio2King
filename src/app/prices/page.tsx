@@ -1,3 +1,5 @@
+import DatabaseSetup from "@/components/DatabaseSetup";
+import { isDatabaseConfigured } from "@/db";
 import Link from "next/link";
 import BulkPriceForm, { type PriceRow } from "@/components/BulkPriceForm";
 import { getAllAssets } from "@/lib/portfolio";
@@ -5,6 +7,7 @@ import { getAllAssets } from "@/lib/portfolio";
 export const dynamic = "force-dynamic";
 
 export default async function PricesPage() {
+  if (!isDatabaseConfigured()) return <DatabaseSetup />;
   const list = await getAllAssets();
   const rows: PriceRow[] = list
     .filter((a) => a.type !== "cash")
