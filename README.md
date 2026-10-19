@@ -14,6 +14,61 @@ npm run dev                  # http://localhost:3000
 
 Check the database connection at `GET /api/health` → `{ "ok": true }`.
 
+## Connect a database from the web UI
+
+Open **Database** in the navigation (or `/database`). If no connection is
+configured, the dashboard shows this same wizard.
+
+1. Answer questions about hosting, budget, usage, and desired features. Optional
+   notes become a checklist for you to verify with the provider; they are not
+   automatically analyzed or sent to any external service.
+2. Compare PostgreSQL, MySQL, SQLite, and MongoDB. **Only PostgreSQL is currently
+   supported** by Ledgerly’s Drizzle schema. The other types are informational,
+   not working database adapters.
+3. Choose Neon, Supabase, or an existing PostgreSQL server. Recommendations are
+   deterministic guidance, not provisioning or a guarantee about provider prices.
+4. Set `DATABASE_SETUP_TOKEN` on the server to a strong random secret of at least
+   32 characters, then restart/redeploy. Generate one with:
+   `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
+   For local development, put it in `.env.local`; on Vercel, use a private
+   environment variable. Never use a `NEXT_PUBLIC_` prefix.
+5. Enter that administrator key and the PostgreSQL connection string in the
+   connection form. **Test connection** checks connectivity and `USAGE` / `CREATE`
+   permissions on the public schema without writing portfolio data. It does not
+   verify compatibility of pre-existing tables. Use a dedicated database.
+6. In local development, confirm the app-wide change and click **Save & connect**.
+   This writes a mode-0600 `.env.local` file atomically, preserves unrelated
+   assignments, and updates the running connection. Existing data is not migrated
+   or deleted. Open the dashboard to create the tables.
+
+File saving is disabled in production unless a persistent self-hosted server
+explicitly sets `ALLOW_DATABASE_SETUP_WRITE=true`. It is **always disabled on
+Vercel** because function filesystems are ephemeral. On Vercel, you can test
+through the UI, then set the verified URL as `DATABASE_URL` in Project →
+Settings → Environment Variables and redeploy. The wizard explains these steps;
+it does not claim to save a temporary in-memory connection or provision a service.
+Environment-variable configuration without the wizard remains supported.
+
+### Setup security and limitations
+
+- The setup key protects both test and save operations. Keep it private; disable
+  web setup by removing it and restarting/redeploying once setup is complete.
+- Requests must be same-origin. Testing is administrator-only because it makes
+  outbound database connections. Only give the key to trusted administrators.
+  Per-instance throttling is not a distributed rate limiter; use hosting-level
+  protection for public deployments.
+- Connection strings and keys are never returned by the API or saved to browser
+  storage. Use HTTPS for hosted deployments. URL visibility is off by default.
+- Remote connections verify TLS certificates. Self-signed/private-CA servers need
+  a trusted CA configured on the app server (e.g. `NODE_EXTRA_CA_CERTS`), not a
+  disabled certificate check. URL certificate-file parameters are rejected.
+- Saving switches the database for the entire app. This is not per-user database
+  selection, and Ledgerly does not yet implement user authentication/data isolation.
+  Restrict access to your deployment before storing sensitive portfolio data.
+- Self-hosted file saving applies to one server/process; restart other replicas
+  with the same configuration. Prefer centrally managed environment variables
+  for replicated production deployments.
+
 ## Deploy on Vercel
 
 The repo is Vercel-ready (`vercel.json`, Node ≥ 20.9 — see `.nvmrc` /
@@ -93,6 +148,7 @@ vercel --prod
 | `npm run start`     | Run the production build               |
 | `npm run lint`      | ESLint                                 |
 | `npm run typecheck` | `tsc --noEmit`                         |
+| `npm test` | Database recommendations, URL validation, and protected setup API tests (mocked PostgreSQL) |
 | `npm run db:push`   | Push schema to `DATABASE_URL`          |
 | `npm run db:generate` / `db:migrate` | Generate / apply SQL migrations |
 | `npm run db:studio` | Drizzle Studio                         |
@@ -102,6 +158,6 @@ vercel --prod
 - `src/db/index.ts` creates the `pg` pool lazily (first query, not import),
   reuses it across warm invocations via `globalThis`, caps it at 1 connection
   per function instance on Vercel, and enables TLS automatically for remote
-  databases. Always use your provider's **pooler** endpoint.
+  databases with certificate verification. Always use your provider's **pooler** endpoint.
 - All pages render dynamically (`force-dynamic`) since holdings change on
   every write.

@@ -1,5 +1,6 @@
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool, type PoolConfig } from "pg";
+import { connectionConfig } from "@/lib/database-connection";
 
 /**
  * Database client — safe for Vercel (serverless) and local development.
@@ -37,29 +38,10 @@ function resolveDatabaseUrl(): string {
 }
 
 function poolConfig(connectionString: string): PoolConfig {
-  let isLocal = false;
-  let sslDisabled = false;
-  try {
-    const parsed = new URL(connectionString);
-    isLocal = ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname);
-    sslDisabled = parsed.searchParams.get("sslmode") === "disable";
-  } catch {
-    // Let pg surface a proper connection-string parse error at query time.
-  }
-
-  const onServerless = Boolean(process.env.VERCEL);
-
   return {
-    connectionString,
-    // One connection per serverless instance avoids exhausting the database
-    // when Vercel scales functions out; locally a small pool is faster.
-    max: onServerless ? 1 : 10,
-    idleTimeoutMillis: onServerless ? 10_000 : 30_000,
-    connectionTimeoutMillis: 10_000,
-    // Managed Postgres (Neon, Supabase, Vercel Postgres) requires TLS.
-    // `rejectUnauthorized: false` matches their pooler endpoints; the
-    // connection is still encrypted.
-    ssl: isLocal || sslDisabled ? undefined : { rejectUnauthorized: false },
+    ...connectionConfig(connectionString),
+    max: process.env.VERCEL ? 1 : 10,
+    idleTimeoutMillis: process.env.VERCEL ? 10_000 : 30_000,
   };
 }
 
@@ -98,4 +80,13 @@ export const db: Db = new Proxy({} as Db, {
 export function getPool(): Pool {
   getDb();
   return globalForDb.__portfolioPool!;
+}
+
+/** Invalidate the client after an administrator changes local configuration. */
+export async function resetDatabaseConnection() {
+  const oldPool = globalForDb.__portfolioPool;
+  cached = undefined;
+  globalForDb.__portfolioPool = undefined;
+  globalForDb.__portfolioDb = undefined;
+  await oldPool?.end();
 }
