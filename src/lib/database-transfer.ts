@@ -1,0 +1,135 @@
+import type { PoolClient } from "pg";
+import { getPool } from "@/db";
+import { assets, snapshots, transactions } from "@/db/schema";
+import { asc } from "drizzle-orm";
+import { db } from "@/db";
+import { createBackup, type PortfolioBackup } from "@/lib/database-backup";
+import { ensureSchema } from "@/lib/portfolio";
+
+export type ImportMode = "replace" | "merge";
+
+export type ImportSummary = {
+  mode: ImportMode;
+  assets: number;
+  transactions: number;
+  snapshots: number;
+};
+
+/** Read every portfolio table and build a portable backup document. */
+export async function exportBackup(): Promise<PortfolioBackup> {
+  await ensureSchema();
+  const [assetRows, transactionRows, snapshotRows] = await Promise.all([
+    db.select().from(assets).orderBy(asc(assets.id)),
+    db.select().from(transactions).orderBy(asc(transactions.id)),
+    db.select().from(snapshots).orderBy(asc(snapshots.date)),
+  ]);
+  return createBackup(assetRows, transactionRows, snapshotRows);
+}
+
+async function insertAsset(client: PoolClient, asset: PortfolioBackup["tables"]["assets"][number], id?: number) {
+  const values = [
+    asset.type,
+    asset.name,
+    asset.symbol,
+    asset.quantity,
+    asset.avgCost,
+    asset.currentPrice,
+    asset.realizedPnl,
+    asset.notes,
+    asset.priceUpdatedAt,
+    asset.createdAt,
+  ];
+  if (id === undefined) {
+    const result = await client.query<{ id: number }>(
+      `INSERT INTO assets (type, name, symbol, quantity, avg_cost, current_price, realized_pnl, notes, price_updated_at, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      values,
+    );
+    return result.rows[0].id;
+  }
+  await client.query(
+    `INSERT INTO assets (id, type, name, symbol, quantity, avg_cost, current_price, realized_pnl, notes, price_updated_at, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+    [id, ...values],
+  );
+  return id;
+}
+
+async function insertTransaction(client: PoolClient, tx: PortfolioBackup["tables"]["transactions"][number], assetId: number, id?: number) {
+  const values = [assetId, tx.kind, tx.quantity, tx.price, tx.fee, tx.date, tx.note, tx.createdAt];
+  if (id === undefined) {
+    await client.query(
+      `INSERT INTO transactions (asset_id, kind, quantity, price, fee, date, note, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      values,
+    );
+  } else {
+    await client.query(
+      `INSERT INTO transactions (id, asset_id, kind, quantity, price, fee, date, note, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [id, ...values],
+    );
+  }
+}
+
+async function insertSnapshot(client: PoolClient, snapshot: PortfolioBackup["tables"]["snapshots"][number], upsert: boolean) {
+  await client.query(
+    `INSERT INTO snapshots (date, total_value, cost_basis, cash_value) VALUES ($1,$2,$3,$4)
+     ${upsert ? "ON CONFLICT (date) DO UPDATE SET total_value = EXCLUDED.total_value, cost_basis = EXCLUDED.cost_basis, cash_value = EXCLUDED.cash_value" : ""}`,
+    [snapshot.date, snapshot.totalValue, snapshot.costBasis, snapshot.cashValue],
+  );
+}
+
+/** Keep serial sequences ahead of any explicitly restored ids. */
+async function resetSequences(client: PoolClient) {
+  await client.query(
+    `SELECT setval(pg_get_serial_sequence('assets', 'id'), COALESCE((SELECT MAX(id) FROM assets), 1), EXISTS (SELECT 1 FROM assets))`,
+  );
+  await client.query(
+    `SELECT setval(pg_get_serial_sequence('transactions', 'id'), COALESCE((SELECT MAX(id) FROM transactions), 1), EXISTS (SELECT 1 FROM transactions))`,
+  );
+}
+
+/**
+ * Import a validated backup in a single transaction: either it applies
+ * completely or the database is left untouched.
+ *
+ * - `replace`: wipe the current portfolio, then restore the backup with
+ *   its original ids (a true restore — export first if unsure).
+ * - `merge`: keep current data; backup assets/transactions are inserted
+ *   with fresh ids (transactions are remapped to the new asset ids) and
+ *   snapshots for a date already present are overwritten by the backup.
+ */
+export async function importBackup(backup: PortfolioBackup, mode: ImportMode): Promise<ImportSummary> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    if (mode === "replace") {
+      await client.query("DELETE FROM snapshots");
+      await client.query("DELETE FROM transactions");
+      await client.query("DELETE FROM assets");
+      for (const asset of backup.tables.assets) await insertAsset(client, asset, asset.id);
+      for (const tx of backup.tables.transactions) await insertTransaction(client, tx, tx.assetId, tx.id);
+      for (const snapshot of backup.tables.snapshots) await insertSnapshot(client, snapshot, false);
+    } else {
+      const idMap = new Map<number, number>();
+      for (const asset of backup.tables.assets) idMap.set(asset.id, await insertAsset(client, asset));
+      for (const tx of backup.tables.transactions) await insertTransaction(client, tx, idMap.get(tx.assetId)!);
+      for (const snapshot of backup.tables.snapshots) await insertSnapshot(client, snapshot, true);
+    }
+    await resetSequences(client);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  return {
+    mode,
+    assets: backup.tables.assets.length,
+    transactions: backup.tables.transactions.length,
+    snapshots: backup.tables.snapshots.length,
+  };
+}

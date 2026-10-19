@@ -69,6 +69,34 @@ Environment-variable configuration without the wizard remains supported.
   with the same configuration. Prefer centrally managed environment variables
   for replicated production deployments.
 
+## Export & import the database
+
+Open **Database** → **Export & import database** (below the setup wizard):
+
+- **Export database** downloads one portable JSON file
+  (`ledgerly-backup-YYYY-MM-DD.json`, format version 1) containing every
+  asset, transaction, and snapshot in the currently connected PostgreSQL
+  database. It is plain JSON — store it, diff it, or move your portfolio
+  between providers (e.g. Neon → Supabase) without depending on `pg_dump`
+  or a specific PostgreSQL version.
+- **Import database** accepts such a backup (up to 10 MB) in two modes:
+  - **Merge** keeps existing data and inserts the backup with fresh asset
+    ids (transactions are remapped; snapshots for dates already present
+    are overwritten).
+  - **Replace** deletes all current data and restores the backup exactly,
+    including ids. It requires an explicit confirmation checkbox and a
+    final browser confirmation — export a backup first.
+- Imports are strictly validated before anything is written: unknown
+  formats/versions, duplicate or dangling ids, invalid kinds/dates/numbers,
+  and transaction histories that oversell an asset are rejected, and derived
+  balances (quantity / average cost / realized PnL) are recomputed from the
+  transactions rather than trusted from the file. The whole import runs in
+  a single transaction, so a failed import leaves the database unchanged.
+- If `DATABASE_SETUP_TOKEN` is set on the server, the same administrator
+  key is required for export and import; otherwise (like the rest of this
+  unauthenticated app) they are open — restrict access to your deployment
+  before storing sensitive data, and treat backup files as sensitive too.
+
 ## Deploy on Vercel
 
 The repo is Vercel-ready (`vercel.json`, Node ≥ 20.9 — see `.nvmrc` /
@@ -148,7 +176,7 @@ vercel --prod
 | `npm run start`     | Run the production build               |
 | `npm run lint`      | ESLint                                 |
 | `npm run typecheck` | `tsc --noEmit`                         |
-| `npm test` | Database recommendations, URL validation, and protected setup API tests (mocked PostgreSQL) |
+| `npm test` | Database recommendations, URL validation, protected setup API tests (mocked PostgreSQL), and backup format validation tests |
 | `npm run db:push`   | Push schema to `DATABASE_URL`          |
 | `npm run db:generate` / `db:migrate` | Generate / apply SQL migrations |
 | `npm run db:studio` | Drizzle Studio                         |
