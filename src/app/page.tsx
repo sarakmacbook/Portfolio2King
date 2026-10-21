@@ -118,6 +118,13 @@ export default async function Dashboard() {
         />
       </div>
 
+      <section className="card overflow-hidden">
+        <div className="flex items-center justify-between px-5 pt-5">
+          <h2 className="font-semibold text-slate-900">Holdings</h2>
+        </div>
+        <HoldingsTable rows={rows} />
+      </section>
+
       <div className="grid gap-6 lg:grid-cols-5">
         <section className="card p-5 lg:col-span-3">
           <h2 className="mb-3 font-semibold text-slate-900">Value history</h2>
@@ -128,13 +135,6 @@ export default async function Dashboard() {
           <Donut slices={slices} centerLabel="Total" />
         </section>
       </div>
-
-      <section className="card overflow-hidden">
-        <div className="flex items-center justify-between px-5 pt-5">
-          <h2 className="font-semibold text-slate-900">Holdings</h2>
-        </div>
-        <HoldingsTable rows={rows} />
-      </section>
 
       <section className="card p-5">
         <div className="mb-3 flex items-center justify-between">
