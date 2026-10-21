@@ -12,8 +12,8 @@ import type { Asset, Snapshot, Transaction } from "../src/db/schema";
 const now = new Date("2026-01-02T03:04:05.000Z");
 
 const assets: Asset[] = [
-  { id: 1, type: "cash", name: "Main cash", symbol: "", quantity: 900, avgCost: 1, currentPrice: 1, realizedPnl: 0, notes: "", priceUpdatedAt: now, createdAt: now },
-  { id: 2, type: "stock", name: "Apple", symbol: "AAPL", quantity: 10, avgCost: 100, currentPrice: 150, realizedPnl: 0, notes: "core", priceUpdatedAt: now, createdAt: now },
+  { id: 1, type: "cash", name: "Main cash", symbol: "", cryptoCategory: "volatile", quantity: 900, avgCost: 1, currentPrice: 1, realizedPnl: 0, notes: "", priceUpdatedAt: now, createdAt: now },
+  { id: 2, type: "stock", name: "Apple", symbol: "AAPL", cryptoCategory: "volatile", quantity: 10, avgCost: 100, currentPrice: 150, realizedPnl: 0, notes: "core", priceUpdatedAt: now, createdAt: now },
 ];
 const transactions: Transaction[] = [
   { id: 1, assetId: 1, kind: "deposit", quantity: 900, price: 1, fee: 0, date: "2026-01-01", note: "", createdAt: now },

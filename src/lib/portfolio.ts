@@ -20,6 +20,7 @@ export function ensureSchema() {
           type text NOT NULL,
           name text NOT NULL,
           symbol text NOT NULL DEFAULT '',
+          crypto_category text NOT NULL DEFAULT 'volatile',
           quantity double precision NOT NULL DEFAULT 0,
           avg_cost double precision NOT NULL DEFAULT 0,
           current_price double precision NOT NULL DEFAULT 0,
@@ -28,6 +29,7 @@ export function ensureSchema() {
           price_updated_at timestamptz NOT NULL DEFAULT now(),
           created_at timestamptz NOT NULL DEFAULT now()
         )`);
+      await db.execute(sql`ALTER TABLE assets ADD COLUMN IF NOT EXISTS crypto_category text NOT NULL DEFAULT 'volatile'`);
       await db.execute(sql`
         CREATE TABLE IF NOT EXISTS transactions (
           id serial PRIMARY KEY,

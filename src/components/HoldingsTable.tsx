@@ -11,6 +11,7 @@ export type HoldingRow = {
   type: AssetType;
   name: string;
   symbol: string;
+  cryptoCategory: "stablecoin" | "volatile";
   quantity: number;
   avgCost: number;
   currentPrice: number;
@@ -125,7 +126,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                         </span>
                         <span className="block text-xs text-slate-500">
                           {r.symbol && r.symbol !== r.name ? `${r.symbol} · ` : ""}
-                          {TYPE_META[r.type].label}
+                          {r.type === "crypto" ? (r.cryptoCategory === "stablecoin" ? "Crypto · Stablecoin" : "Crypto · Volatile") : TYPE_META[r.type].label}
                         </span>
                       </span>
                     </Link>

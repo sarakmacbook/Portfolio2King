@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/db";
-import { ASSET_TYPES, TX_KINDS, assets, transactions, type AssetType, type TxKind } from "@/db/schema";
+import { ASSET_TYPES, CRYPTO_CATEGORIES, TX_KINDS, assets, transactions, type AssetType, type CryptoCategory, type TxKind } from "@/db/schema";
 import { kindsFor } from "@/lib/format";
 import { fetchMarketPrice, PRICE_PROVIDERS } from "@/lib/market-prices";
 import { ensureSchema, getAssetTransactions, recomputeAsset, recordSnapshot, replay, today } from "@/lib/portfolio";
@@ -74,6 +74,8 @@ export async function createAsset(_prev: ActionState, fd: FormData): Promise<Act
     if (!ASSET_TYPES.includes(type)) throw new Error("Invalid asset type");
     const name = str(fd, "name");
     const symbol = str(fd, "symbol").toUpperCase();
+    const requestedCategory = str(fd, "cryptoCategory") as CryptoCategory;
+    const cryptoCategory: CryptoCategory = type === "crypto" && CRYPTO_CATEGORIES.includes(requestedCategory) ? requestedCategory : "volatile";
     if (!name && !symbol) throw new Error("Name or symbol is required");
     const quantity = num(fd, "quantity");
     const isCash = type === "cash";
@@ -91,7 +93,7 @@ export async function createAsset(_prev: ActionState, fd: FormData): Promise<Act
 
     const [row] = await db
       .insert(assets)
-      .values({ type, name: name || symbol, symbol, currentPrice, notes })
+      .values({ type, name: name || symbol, symbol, cryptoCategory, currentPrice, notes })
       .returning({ id: assets.id });
     newId = row.id;
 
@@ -131,9 +133,13 @@ export async function updateAsset(_prev: ActionState, fd: FormData): Promise<Act
     const name = str(fd, "name");
     const symbol = str(fd, "symbol").toUpperCase();
     if (!name && !symbol) throw new Error("Name or symbol is required");
+    const requestedCategory = str(fd, "cryptoCategory") as CryptoCategory;
+    const cryptoCategory = asset.type === "crypto" && CRYPTO_CATEGORIES.includes(requestedCategory)
+      ? requestedCategory
+      : asset.cryptoCategory;
     await db
       .update(assets)
-      .set({ name: name || symbol, symbol, notes: str(fd, "notes") })
+      .set({ name: name || symbol, symbol, cryptoCategory, notes: str(fd, "notes") })
       .where(eq(assets.id, id));
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Failed to update" };

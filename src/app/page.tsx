@@ -5,7 +5,6 @@ import AddAssetDialog from "@/components/AddAssetDialog";
 import { Donut, HistoryChart, type Point } from "@/components/Charts";
 import HoldingsTable, { type HoldingRow } from "@/components/HoldingsTable";
 import RefreshPricesButton from "@/components/RefreshPricesButton";
-import { ASSET_TYPES } from "@/lib/constants";
 import { KIND_META, TYPE_META, fmtDate, money, pct, pnlColor, qty } from "@/lib/format";
 import {
   assetCost,
@@ -33,6 +32,7 @@ export default async function Dashboard() {
       type: a.type,
       name: a.name,
       symbol: a.symbol,
+      cryptoCategory: a.cryptoCategory,
       quantity: a.quantity,
       avgCost: a.avgCost,
       currentPrice: a.currentPrice,
@@ -55,11 +55,19 @@ export default async function Dashboard() {
   const prev = points.length > 1 ? points[points.length - 2] : null;
   const change = prev ? totals.totalValue - prev.value : 0;
 
-  const slices = ASSET_TYPES.map((type) => ({
-    label: TYPE_META[type].label,
-    value: totals.byType[type],
-    color: TYPE_META[type].color,
-  })).filter((s) => s.value > 0);
+  const stablecoinValue = list
+    .filter((asset) => asset.type === "crypto" && asset.cryptoCategory === "stablecoin")
+    .reduce((sum, asset) => sum + assetValue(asset), 0);
+  const volatileCryptoValue = list
+    .filter((asset) => asset.type === "crypto" && asset.cryptoCategory !== "stablecoin")
+    .reduce((sum, asset) => sum + assetValue(asset), 0);
+  const slices = [
+    { label: "Cash", value: totals.byType.cash, color: TYPE_META.cash.color },
+    { label: "Stocks", value: totals.byType.stock, color: TYPE_META.stock.color },
+    { label: "Crypto · Stablecoin", value: stablecoinValue, color: "#14b8a6" },
+    { label: "Crypto · Volatile", value: volatileCryptoValue, color: TYPE_META.crypto.color },
+    { label: "Other", value: totals.byType.other, color: TYPE_META.other.color },
+  ].filter((slice) => slice.value > 0);
 
   if (list.length === 0) {
     return (

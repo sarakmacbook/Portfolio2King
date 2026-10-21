@@ -233,7 +233,7 @@ export function PriceForm({ assetId, currentPrice }: { assetId: number; currentP
 export function EditAssetButton({
   asset,
 }: {
-  asset: { id: number; name: string; symbol: string; notes: string };
+  asset: { id: number; name: string; symbol: string; notes: string; type: AssetType; cryptoCategory: "stablecoin" | "volatile" };
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -252,7 +252,7 @@ function EditAssetForm({
   asset,
   onDone,
 }: {
-  asset: { id: number; name: string; symbol: string; notes: string };
+  asset: { id: number; name: string; symbol: string; notes: string; type: AssetType; cryptoCategory: "stablecoin" | "volatile" };
   onDone: () => void;
 }) {
   const [state, action] = useActionState<ActionState, FormData>(updateAsset, {});
@@ -272,6 +272,15 @@ function EditAssetForm({
           <input name="symbol" className="input uppercase" defaultValue={asset.symbol} />
         </div>
       </div>
+      {asset.type === "crypto" && (
+        <div>
+          <label className="label">Crypto subcategory</label>
+          <select name="cryptoCategory" className="input" defaultValue={asset.cryptoCategory}>
+            <option value="stablecoin">Stablecoin</option>
+            <option value="volatile">Volatile asset</option>
+          </select>
+        </div>
+      )}
       <div>
         <label className="label">Notes</label>
         <textarea name="notes" rows={3} className="input" defaultValue={asset.notes} />
