@@ -4,6 +4,7 @@ import Link from "next/link";
 import AddAssetDialog from "@/components/AddAssetDialog";
 import { Donut, HistoryChart, type Point } from "@/components/Charts";
 import HoldingsTable, { type HoldingRow } from "@/components/HoldingsTable";
+import RefreshPricesButton from "@/components/RefreshPricesButton";
 import { ASSET_TYPES } from "@/lib/constants";
 import { KIND_META, TYPE_META, fmtDate, money, pct, pnlColor, qty } from "@/lib/format";
 import {
@@ -93,9 +94,7 @@ export default async function Dashboard() {
           )}
         </div>
         <div className="flex gap-2">
-          <Link href="/prices" className="btn-ghost">
-            Update prices
-          </Link>
+          <RefreshPricesButton />
           <AddAssetDialog cashAccounts={cashAccounts} />
         </div>
       </div>

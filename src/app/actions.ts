@@ -3,12 +3,13 @@
 import { db } from "@/db";
 import { ASSET_TYPES, TX_KINDS, assets, transactions, type AssetType, type TxKind } from "@/db/schema";
 import { kindsFor } from "@/lib/format";
+import { fetchMarketPrice, PRICE_PROVIDERS } from "@/lib/market-prices";
 import { ensureSchema, getAssetTransactions, recomputeAsset, recordSnapshot, replay, today } from "@/lib/portfolio";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-export type ActionState = { error?: string; ok?: boolean; ts?: number };
+export type ActionState = { error?: string; message?: string; ok?: boolean; ts?: number };
 
 function str(fd: FormData, key: string) {
   return String(fd.get(key) ?? "").trim();
@@ -178,6 +179,45 @@ export async function bulkUpdatePrices(_prev: ActionState, fd: FormData): Promis
   }
   refresh();
   return { ok: true, ts: Date.now() };
+}
+
+export async function autoRefreshCryptoPrices(_prev: ActionState): Promise<ActionState> {
+  try {
+    await ensureSchema();
+    const cryptoAssets = (await db.select().from(assets)).filter((asset) => asset.type === "crypto" && asset.symbol.trim());
+    if (!cryptoAssets.length) throw new Error("Add a crypto holding with a symbol first.");
+
+    const results = await Promise.all(
+      cryptoAssets.map(async (asset) => {
+        try {
+          // Ask all supported CEX/DEX feeds together; the first valid quote wins.
+          const price = await Promise.any(
+            PRICE_PROVIDERS.map((provider) => fetchMarketPrice(provider, asset.symbol, "USDT")),
+          );
+          return { asset, price };
+        } catch {
+          return { asset, price: null };
+        }
+      }),
+    );
+
+    const found = results.filter((result): result is { asset: (typeof cryptoAssets)[number]; price: number } => result.price !== null);
+    if (!found.length) throw new Error("No exchange returned a price. Check your asset symbols and try again.");
+    const updatedAt = new Date();
+    for (const { asset, price } of found) {
+      await db.update(assets).set({ currentPrice: price, priceUpdatedAt: updatedAt }).where(eq(assets.id, asset.id));
+    }
+    await recordSnapshot();
+    refresh();
+    const missing = cryptoAssets.length - found.length;
+    return {
+      ok: true,
+      message: `Refreshed ${found.length} crypto price${found.length === 1 ? "" : "s"}${missing ? ` · ${missing} unavailable` : ""}`,
+      ts: Date.now(),
+    };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Failed to refresh live prices", ts: Date.now() };
+  }
 }
 
 export async function addTransaction(_prev: ActionState, fd: FormData): Promise<ActionState> {
