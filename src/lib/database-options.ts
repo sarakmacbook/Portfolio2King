@@ -20,7 +20,7 @@ export const providers = [
 ] as const;
 
 export function recommendDatabase(r: Requirements) {
-  const provider: (typeof providers)[number]["id"] = r.features === "control" || r.hosting === "local" ? "postgres" : r.features === "auth" ? "supabase" : "neon";
+  const provider = r.features === "control" || r.hosting === "local" ? "postgres" : r.features === "auth" ? "supabase" : "neon";
   const reasons = ["PostgreSQL matches Ledgerly’s relational holdings, transactions, and reporting schema."];
   if (provider === "neon") reasons.push("Neon’s pooled connections fit hosted and serverless deployments.");
   if (provider === "supabase") reasons.push("Supabase fits your interest in authentication or file storage; those features are not automatically enabled in Ledgerly.");
