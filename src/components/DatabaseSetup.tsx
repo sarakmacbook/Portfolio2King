@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { databaseTypes, providers, recommendDatabase, type Requirements } from "@/lib/database-options";
 
-type Status = { configured: boolean; setupEnabled: boolean; canSave: boolean; vercel: boolean };
+type Status = { configured: boolean; databaseVariable: "DATABASE_URL" | "POSTGRES_URL" | null; setupEnabled: boolean; canSave: boolean; vercel: boolean };
 const steps = ["Your requirements", "Choose a database", "Connect & verify"];
 
 export default function DatabaseSetup() {
@@ -49,7 +49,7 @@ export default function DatabaseSetup() {
       if (!response.ok) throw new Error(result.error || "Could not complete database setup.");
       setMessage(result.message);
       setTested(true);
-      if (action === "save") { setSaved(true); setStatus((previous) => previous ? { ...previous, configured: true } : previous); setUrl(""); setKey(""); }
+      if (action === "save") { setSaved(true); setStatus((previous) => previous ? { ...previous, configured: true, databaseVariable: "DATABASE_URL" } : previous); setUrl(""); setKey(""); }
     } catch (e) {
       setTested(false);
       setError(e instanceof Error ? e.message : "Request failed. Please try again.");
@@ -64,8 +64,16 @@ export default function DatabaseSetup() {
           <h1 className="mt-2 text-3xl font-semibold tracking-tight">A home for your portfolio</h1>
           <p className="mt-2 max-w-2xl text-slate-500">Tell us what you need. We’ll help you choose a database and securely verify your connection.</p>
         </div>
-        {status && <span className={`rounded-full px-3 py-1 text-xs font-medium ${status.configured ? "bg-indigo-50 text-indigo-700" : "bg-amber-50 text-amber-800"}`}>{saved ? "Connected" : status.configured ? "Connection configured · not yet verified" : "Not connected"}</span>}
+        {status && <span className={`rounded-full px-3 py-1 text-xs font-medium ${status.databaseVariable ? "bg-indigo-50 text-indigo-700" : "bg-amber-50 text-amber-800"}`}>{saved ? "Connected" : status.databaseVariable ? `${status.databaseVariable} detected · not yet verified` : "Not connected"}</span>}
       </div>
+
+      {status && <div className={`rounded-xl border p-4 text-sm ${status.databaseVariable ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-indigo-200 bg-indigo-50 text-slate-700"}`}>
+        <p className="font-semibold">{status.databaseVariable ? <>Database setting detected: <code className="rounded bg-white/80 px-1.5 py-0.5">{status.databaseVariable}</code></> : <>Looking for <code className="rounded bg-white/80 px-1.5 py-0.5">DATABASE_URL</code>?</>}</p>
+        {status.databaseVariable ? <>
+          <p className="mt-1">The app reads <code>{status.databaseVariable}</code> automatically, so you do not need to paste the connection string here. This confirms the setting exists, but does not verify the database is reachable.</p>
+          <a className="mt-2 inline-block font-medium text-indigo-700 underline" href="/api/health">Check database connection</a>
+        </> : <p className="mt-1">In Vercel, open your project → <strong>Settings → Environment Variables</strong> and search for <code>DATABASE_URL</code>. This app also detects <code>POSTGRES_URL</code> when provided by a Vercel database integration. If Vercel says the database is connected but neither setting appears here, attach it to this project and environment, then redeploy. You should not need to paste the URL into this website.</p>}
+      </div>}
 
       <ol className="grid grid-cols-3 gap-2" aria-label="Setup progress">
         {steps.map((label, index) => <li key={label} aria-current={step === index ? "step" : undefined} className={`border-t-2 pt-3 text-sm ${index === step ? "border-indigo-600 font-semibold text-indigo-700" : "border-slate-200 text-slate-500"}`}><span className="mr-2">0{index + 1}</span>{label}</li>)}

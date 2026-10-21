@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { readFile, rename, writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import { Pool } from "pg";
-import { isDatabaseConfigured, resetDatabaseConnection } from "@/db";
+import { getDatabaseUrlVariable, resetDatabaseConnection } from "@/db";
 import { connectionConfig, validateDatabaseUrl } from "@/lib/database-connection";
 
 export const runtime = "nodejs";
@@ -15,7 +15,8 @@ function canSave() {
 function enabled() { return (process.env.DATABASE_SETUP_TOKEN?.length ?? 0) >= 32; }
 
 export async function GET() {
-  return Response.json({ configured: isDatabaseConfigured(), setupEnabled: enabled(), canSave: canSave(), vercel: Boolean(process.env.VERCEL) }, { headers: { "Cache-Control": "no-store" } });
+  const databaseVariable = getDatabaseUrlVariable();
+  return Response.json({ configured: databaseVariable !== null, databaseVariable, setupEnabled: enabled(), canSave: canSave(), vercel: Boolean(process.env.VERCEL) }, { headers: { "Cache-Control": "no-store" } });
 }
 
 // Per-instance throttling is defense in depth, not a distributed rate limiter.

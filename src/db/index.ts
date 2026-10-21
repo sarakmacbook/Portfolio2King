@@ -21,12 +21,22 @@ const globalForDb = globalThis as typeof globalThis & {
   __portfolioDb?: Db;
 };
 
+export type DatabaseUrlVariable = "DATABASE_URL" | "POSTGRES_URL";
+
+/** Returns the configured variable name only; never expose its secret value. */
+export function getDatabaseUrlVariable(): DatabaseUrlVariable | null {
+  if (process.env.DATABASE_URL?.trim()) return "DATABASE_URL";
+  if (process.env.POSTGRES_URL?.trim()) return "POSTGRES_URL";
+  return null;
+}
+
 export function isDatabaseConfigured(): boolean {
-  return Boolean(process.env.DATABASE_URL?.trim() || process.env.POSTGRES_URL?.trim());
+  return getDatabaseUrlVariable() !== null;
 }
 
 function resolveDatabaseUrl(): string {
-  const url = process.env.DATABASE_URL?.trim() || process.env.POSTGRES_URL?.trim();
+  const variable = getDatabaseUrlVariable();
+  const url = variable ? process.env[variable]?.trim() : undefined;
   if (!url) {
     throw new Error(
       "DATABASE_URL is not set. Locally: copy .env.example to .env.local. " +
