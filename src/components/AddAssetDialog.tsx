@@ -43,8 +43,35 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
   const [q, setQ] = useState("");
   const [cost, setCost] = useState("");
   const [fee, setFee] = useState("");
+  const [name, setName] = useState("");
+  const [symbol, setSymbol] = useState("");
+  const [currentPrice, setCurrentPrice] = useState("");
+  const [topAssets, setTopAssets] = useState<Array<{ id: string; name: string; symbol: string; price: number; rank: number | null }>>([]);
+  const [discovering, setDiscovering] = useState(false);
+  const [discoveryError, setDiscoveryError] = useState("");
   const isCash = type === "cash";
   const total = (Number(q) || 0) * (Number(cost) || 0) + (Number(fee) || 0);
+
+  async function discoverTopAssets() {
+    setDiscovering(true);
+    setDiscoveryError("");
+    try {
+      const response = await fetch("/api/prices/top");
+      const data = (await response.json()) as { error?: string; assets?: typeof topAssets };
+      if (!response.ok) throw new Error(data.error || "Could not load top assets");
+      setTopAssets(data.assets || []);
+    } catch (error) {
+      setDiscoveryError(error instanceof Error ? error.message : "Could not load top assets");
+    } finally {
+      setDiscovering(false);
+    }
+  }
+
+  function chooseCrypto(asset: (typeof topAssets)[number]) {
+    setName(asset.name);
+    setSymbol(asset.symbol);
+    setCurrentPrice(String(asset.price));
+  }
 
   const placeholders: Record<AssetType, { name: string; symbol: string }> = {
     cash: { name: "e.g. Chase Checking", symbol: "USD" },
@@ -74,14 +101,47 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
         ))}
       </div>
 
+      {type === "crypto" && (
+        <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Find a top crypto asset</p>
+              <p className="text-xs text-slate-500">Live market ranking and USD price. No API key is required.</p>
+            </div>
+            <button type="button" className="btn-ghost shrink-0" onClick={discoverTopAssets} disabled={discovering}>
+              {discovering ? "Loading…" : topAssets.length ? "Refresh" : "Show top assets"}
+            </button>
+          </div>
+          {discoveryError && <p className="mt-2 text-xs text-rose-600">{discoveryError}</p>}
+          {topAssets.length > 0 && (
+            <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+              {topAssets.map((asset) => (
+                <button
+                  key={asset.id}
+                  type="button"
+                  onClick={() => chooseCrypto(asset)}
+                  className={`min-w-24 rounded-xl border px-3 py-2 text-left transition ${
+                    symbol === asset.symbol ? "border-indigo-500 bg-white ring-2 ring-indigo-100" : "border-slate-200 bg-white hover:border-indigo-300"
+                  }`}
+                >
+                  <span className="block text-xs text-slate-400">#{asset.rank || "—"}</span>
+                  <span className="block font-semibold text-slate-900">{asset.symbol}</span>
+                  <span className="block text-xs text-slate-500">{money(asset.price)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label className="label">{isCash ? "Account name" : "Name"}</label>
-          <input name="name" className="input" placeholder={placeholders[type].name} autoFocus />
+          <input name="name" className="input" placeholder={placeholders[type].name} value={name} onChange={(event) => setName(event.target.value)} autoFocus />
         </div>
         <div>
           <label className="label">{isCash ? "Currency / tag" : "Symbol / ticker"}</label>
-          <input name="symbol" className="input uppercase" placeholder={placeholders[type].symbol} />
+          <input name="symbol" className="input uppercase" placeholder={placeholders[type].symbol} value={symbol} onChange={(event) => setSymbol(event.target.value.toUpperCase())} />
         </div>
       </div>
 
@@ -123,7 +183,14 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
             </div>
             <div>
               <label className="label">Current price</label>
-              <input name="currentPrice" inputMode="decimal" className="input" placeholder="same as buy" />
+              <input
+                name="currentPrice"
+                inputMode="decimal"
+                className="input"
+                placeholder="same as buy"
+                value={currentPrice}
+                onChange={(event) => setCurrentPrice(event.target.value)}
+              />
             </div>
           </div>
           <div className="grid gap-4 sm:grid-cols-3">
