@@ -27,8 +27,8 @@ export default async function PricesPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Update prices</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Enter the latest market prices for your stocks, crypto and other assets in one go. A daily snapshot is saved
-          so you can track value over time.
+          Fetch live crypto prices from a CEX or DEX, or enter prices manually. Review the changes before saving; a
+          daily snapshot is stored so you can track value over time.
         </p>
       </div>
       <section className="card overflow-hidden">
