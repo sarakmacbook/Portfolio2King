@@ -26,4 +26,59 @@
 
 body {
   font-feature-settings: "tnum" 1, "cv11" 1;
+  overflow-x: hidden;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.theme-toggle {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: none;
+  place-items: center;
+  border-radius: .75rem;
+  color: white;
+  background: rgb(255 255 255 / .12);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / .2);
+  transition: background-color 150ms ease, transform 150ms ease;
+}
+.theme-toggle:hover { background: rgb(255 255 255 / .2); }
+.theme-toggle:active { transform: scale(.94); }
+.theme-sun { display: none; }
+html.dark .theme-sun { display: inline; }
+html.dark .theme-moon { display: none; }
+
+/* Dark theme. These rules also cover utility-colored text throughout server pages. */
+html.dark { color-scheme: dark; }
+html.dark body { background: #0b1120; color: #e2e8f0; }
+html.dark .site-header { background-image: linear-gradient(135deg, #1e1b4b, #312e81, #4c1d95); }
+html.dark .card { border-color: rgb(51 65 85 / .8); background: #111827; box-shadow: 0 1px 2px rgb(0 0 0 / .2), 0 8px 24px rgb(0 0 0 / .14); }
+html.dark .input { border-color: #334155; background: #0f172a; color: #f1f5f9; }
+html.dark .input::placeholder { color: #64748b; }
+html.dark .input:focus { border-color: #818cf8; --tw-ring-color: rgb(99 102 241 / .2); }
+html.dark .btn-ghost, html.dark .btn-danger { border-color: #334155; background: #111827; }
+html.dark .btn-ghost { color: #cbd5e1; }
+html.dark .btn-ghost:hover, html.dark .btn-danger:hover { background: #1e293b; }
+html.dark .text-slate-900, html.dark .text-slate-800 { color: #f1f5f9; }
+html.dark .text-slate-700, html.dark .text-slate-600 { color: #cbd5e1; }
+html.dark .text-slate-500 { color: #94a3b8; }
+html.dark .text-slate-400 { color: #64748b; }
+html.dark .border-slate-100, html.dark .divide-slate-100 > :not(:last-child) { border-color: #1e293b; }
+html.dark .border-slate-200 { border-color: #334155; }
+html.dark .bg-white { background-color: #111827; }
+html.dark .bg-slate-50, html.dark .hover\:bg-slate-50:hover, html.dark .hover\:bg-slate-50\/80:hover { background-color: #1e293b; }
+html.dark .bg-slate-100, html.dark .hover\:bg-slate-100:hover { background-color: #334155; }
+html.dark .bg-slate-900 { background-color: #e2e8f0; color: #0f172a; }
+html.dark .text-indigo-600 { color: #a5b4fc; }
+
+@media (max-width: 639px) {
+  .site-header nav { max-width: calc(100vw - 7.25rem); scrollbar-width: none; }
+  .site-header nav::-webkit-scrollbar { display: none; }
+  .site-header nav a { padding-inline: .65rem; font-size: .8125rem; }
+  .card { border-radius: 1rem; }
+  input, select, textarea { font-size: 16px !important; } /* Prevent iOS form zoom. */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body, .theme-toggle { transition: none; }
 }
