@@ -53,7 +53,20 @@ test("setup endpoint protects secrets and persists only on allowed servers", asy
     assert.equal((await POST(request({ ...valid, connectionString: "mysql://user:secret@host/db" }))).status, 400);
     const initialStatus = await (await GET()).json();
     assert.equal(initialStatus.setupEnabled, true);
+    assert.equal(initialStatus.configured, false);
+    assert.equal(initialStatus.databaseVariable, null);
     assert.ok(!JSON.stringify(initialStatus).includes(token));
+
+    process.env.POSTGRES_URL = "postgresql://demo:canary-secret@db.example/portfolio";
+    const postgresStatus = await (await GET()).json();
+    assert.equal(postgresStatus.databaseVariable, "POSTGRES_URL");
+    assert.ok(!JSON.stringify(postgresStatus).includes("canary-secret"));
+    process.env.DATABASE_URL = "postgresql://demo:another-secret@db.example/portfolio";
+    const databaseStatus = await (await GET()).json();
+    assert.equal(databaseStatus.databaseVariable, "DATABASE_URL", "DATABASE_URL takes precedence when both are set");
+    assert.ok(!JSON.stringify(databaseStatus).includes("another-secret"));
+    delete process.env.DATABASE_URL;
+    delete process.env.POSTGRES_URL;
 
     const query = t.mock.method(Pool.prototype, "query", async () => ({ rows: [{ allowed: true }] }));
     t.mock.method(Pool.prototype, "end", async () => {});
@@ -84,7 +97,9 @@ test("setup endpoint protects secrets and persists only on allowed servers", asy
     assert.match(file, /private%24password/);
     assert.equal((file.match(/^DATABASE_URL=/gm) ?? []).length, 1);
     assert.equal((await stat(".env.local")).mode & 0o777, 0o600);
-    assert.equal((await (await GET()).json()).configured, true);
+    const savedStatus = await (await GET()).json();
+    assert.equal(savedStatus.configured, true);
+    assert.equal(savedStatus.databaseVariable, "DATABASE_URL");
     assert.ok(!(await saved.text()).includes("private"));
   } finally {
     process.chdir(cwd);
