@@ -12,6 +12,33 @@ function todayStr() {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 }
 
+/** A short, synthesized two-coin chime—no audio file or network request needed. */
+function playDepositChime(context: AudioContext) {
+  const start = context.currentTime;
+  const master = context.createGain();
+  master.gain.setValueAtTime(0.18, start);
+  master.connect(context.destination);
+
+  [
+    { delay: 0, frequency: 1318.51 },
+    { delay: 0.13, frequency: 1760 },
+  ].forEach(({ delay, frequency }) => {
+    const oscillator = context.createOscillator();
+    const envelope = context.createGain();
+    const at = start + delay;
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(frequency, at);
+    oscillator.frequency.exponentialRampToValueAtTime(frequency * 1.06, at + 0.16);
+    envelope.gain.setValueAtTime(0.0001, at);
+    envelope.gain.exponentialRampToValueAtTime(0.9, at + 0.012);
+    envelope.gain.exponentialRampToValueAtTime(0.0001, at + 0.28);
+    oscillator.connect(envelope);
+    envelope.connect(master);
+    oscillator.start(at);
+    oscillator.stop(at + 0.3);
+  });
+}
+
 export function TransactionForm({
   assetId,
   assetType,
@@ -32,6 +59,8 @@ export function TransactionForm({
   const [price, setPrice] = useState(currentPrice ? String(currentPrice) : "");
   const [fee, setFee] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
+  const audioRef = useRef<AudioContext | null>(null);
+  const submittedKindRef = useRef<TxKind | null>(null);
 
   useEffect(() => {
     if (state.ok) {
@@ -39,8 +68,21 @@ export function TransactionForm({
       setFee("");
       const note = formRef.current?.querySelector<HTMLInputElement>("input[name=note]");
       if (note) note.value = "";
+      if (submittedKindRef.current === "deposit" && audioRef.current) {
+        void audioRef.current.resume().then(() => playDepositChime(audioRef.current!));
+      }
+      submittedKindRef.current = null;
     }
   }, [state.ts, state.ok]);
+
+  function prepareTransactionFeedback() {
+    submittedKindRef.current = kind;
+    if (kind !== "deposit") return;
+
+    // Creating/resuming the context during the submit gesture keeps sound working on iOS.
+    audioRef.current ??= new AudioContext();
+    void audioRef.current.resume();
+  }
 
   const isCash = assetType === "cash";
   const isIncome = kind === "dividend";
@@ -51,7 +93,7 @@ export function TransactionForm({
   const canDrawDown = kind === "sell" || kind === "withdraw";
 
   return (
-    <form ref={formRef} action={action} className="space-y-4">
+    <form ref={formRef} action={action} onSubmit={prepareTransactionFeedback} className="space-y-4">
       <input type="hidden" name="assetId" value={assetId} />
       <input type="hidden" name="kind" value={kind} />
       <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
