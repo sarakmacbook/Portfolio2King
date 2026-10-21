@@ -130,7 +130,7 @@ export default async function Dashboard() {
           <h2 className="mb-3 font-semibold text-slate-900">Value history</h2>
           <HistoryChart points={points} />
         </section>
-        <section className="card p-5 lg:col-span-2">
+        <section className="card min-w-0 p-4 sm:p-5 lg:col-span-2">
           <h2 className="mb-4 font-semibold text-slate-900">Allocation</h2>
           <Donut slices={slices} centerLabel="Total" />
         </section>

@@ -14,10 +14,11 @@ export function Donut({ slices, centerLabel }: { slices: Slice[]; centerLabel: s
   const active = hover !== null ? slices[hover] : null;
 
   return (
-    <div className="flex flex-col items-center gap-6 sm:flex-row">
-      <div className="relative h-48 w-48 shrink-0">
-        <svg viewBox="0 0 180 180" className="h-full w-full -rotate-90">
-          <circle cx="90" cy="90" r={r} fill="none" stroke="#f1f5f9" strokeWidth="22" />
+    <div className="allocation-chart w-full min-w-0">
+      <div className="allocation-content flex min-w-0 flex-col items-center gap-4">
+      <div className="relative h-40 w-40 shrink-0 sm:h-44 sm:w-44">
+        <svg viewBox="0 0 180 180" className="h-full w-full -rotate-90" role="img" aria-label="Portfolio allocation chart">
+          <circle className="donut-track" cx="90" cy="90" r={r} fill="none" strokeWidth="22" />
           {total > 0 &&
             slices.map((s, i) => {
               const frac = Math.max(0, s.value) / total;
@@ -52,7 +53,7 @@ export function Donut({ slices, centerLabel }: { slices: Slice[]; centerLabel: s
           )}
         </div>
       </div>
-      <ul className="w-full space-y-2">
+      <ul className="min-w-0 w-full space-y-1">
         {slices.map((s, i) => (
           <li
             key={s.label}
@@ -66,14 +67,15 @@ export function Donut({ slices, centerLabel }: { slices: Slice[]; centerLabel: s
               <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: s.color }} />
               <span className="truncate text-slate-700">{s.label}</span>
             </span>
-            <span className="ml-3 flex shrink-0 gap-3 tabular-nums">
+            <span className="ml-2 flex shrink-0 gap-2 tabular-nums">
               <span className="text-slate-500">{total > 0 ? ((s.value / total) * 100).toFixed(1) : "0.0"}%</span>
-              <span className="w-24 text-right font-medium text-slate-900">{money(s.value, { compact: true })}</span>
+              <span className="w-20 text-right font-medium text-slate-900">{money(s.value, { compact: true })}</span>
             </span>
           </li>
         ))}
         {slices.length === 0 && <li className="text-sm text-slate-400">No holdings yet</li>}
       </ul>
+      </div>
     </div>
   );
 }

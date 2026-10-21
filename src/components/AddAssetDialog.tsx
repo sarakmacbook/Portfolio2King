@@ -4,9 +4,22 @@ import { useActionState, useState } from "react";
 import { createAsset, type ActionState } from "@/app/actions";
 import { ASSET_TYPES, type AssetType } from "@/lib/constants";
 import { TYPE_META, money } from "@/lib/format";
+import { CAMBODIAN_BANKS, type CambodianBank } from "@/lib/cambodian-banks";
 import { ErrorNote, Modal, SubmitButton } from "./ui";
 
 export type CashAccount = { id: number; name: string; quantity: number };
+
+function BankLogo({ bank, small = false }: { bank: CambodianBank; small?: boolean }) {
+  return (
+    <span
+      className={`${small ? "h-7 w-7 text-[8px]" : "h-9 w-9 text-[10px]"} grid shrink-0 place-items-center rounded-lg font-bold text-white shadow-sm`}
+      style={{ backgroundColor: bank.color }}
+      aria-hidden="true"
+    >
+      {bank.short}
+    </span>
+  );
+}
 
 function todayStr() {
   const d = new Date();
@@ -51,6 +64,7 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
   const [discoveryError, setDiscoveryError] = useState("");
   const isCash = type === "cash";
   const total = (Number(q) || 0) * (Number(cost) || 0) + (Number(fee) || 0);
+  const selectedBank = CAMBODIAN_BANKS.find((bank) => bank.name === name);
 
   async function discoverTopAssets() {
     setDiscovering(true);
@@ -131,6 +145,41 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {isCash && (
+        <div>
+          <label className="label">Cambodian bank</label>
+          <details className="bank-picker relative">
+            <summary className="input flex cursor-pointer list-none items-center justify-between gap-3">
+              <span className="flex min-w-0 items-center gap-2">
+                {selectedBank ? <BankLogo bank={selectedBank} small /> : <span className="grid h-7 w-7 place-items-center rounded-lg bg-slate-100 text-xs">🏦</span>}
+                <span className={selectedBank ? "truncate text-slate-900" : "text-slate-400"}>
+                  {selectedBank?.name || "Choose a bank"}
+                </span>
+              </span>
+              <span className="text-xs text-slate-400">▼</span>
+            </summary>
+            <div className="absolute z-30 mt-2 grid max-h-72 w-full grid-cols-1 gap-1 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-xl sm:grid-cols-2">
+              {CAMBODIAN_BANKS.map((bank) => (
+                <button
+                  key={bank.name}
+                  type="button"
+                  className={`flex items-center gap-2 rounded-xl p-2 text-left text-sm transition hover:bg-slate-50 ${name === bank.name ? "bg-indigo-50 font-semibold text-indigo-700" : "text-slate-700"}`}
+                  onClick={(event) => {
+                    setName(bank.name);
+                    setSymbol("USD");
+                    event.currentTarget.closest("details")?.removeAttribute("open");
+                  }}
+                >
+                  <BankLogo bank={bank} small />
+                  <span>{bank.name}</span>
+                </button>
+              ))}
+            </div>
+          </details>
+          <p className="mt-1 text-xs text-slate-400">Choose a bank or enter a custom account name below.</p>
         </div>
       )}
 
