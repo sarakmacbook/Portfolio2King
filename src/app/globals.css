@@ -82,11 +82,15 @@ html.dark .allocation-chart .bg-slate-50 { background-color: #1e293b; }
 }
 
 @media (max-width: 639px) {
-  .site-header nav { max-width: calc(100vw - 7.25rem); scrollbar-width: none; }
-  .site-header nav::-webkit-scrollbar { display: none; }
-  .site-header nav a { padding-inline: .65rem; font-size: .8125rem; }
+  .site-header { padding-top: env(safe-area-inset-top); }
   .card { border-radius: 1rem; }
   input, select, textarea { font-size: 16px !important; } /* Prevent iOS form zoom. */
+}
+
+/* iOS standalone web clips need breathing room around the home indicator. */
+@media (display-mode: standalone) {
+  .site-header { padding-top: env(safe-area-inset-top); }
+  body { min-height: 100dvh; }
 }
 
 @media (prefers-reduced-motion: reduce) {
