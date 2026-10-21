@@ -84,11 +84,41 @@ const P = { t: 16, r: 12, b: 24, l: 12 };
 
 export type Point = { date: string; value: number; cost: number };
 
+type HistoryRange = "1M" | "6M" | "1Y" | "ALL";
+const HISTORY_RANGES: Array<{ value: HistoryRange; label: string; months?: number }> = [
+  { value: "1M", label: "1 month", months: 1 },
+  { value: "6M", label: "6 months", months: 6 },
+  { value: "1Y", label: "1 year", months: 12 },
+  { value: "ALL", label: "All time" },
+];
+
 export function HistoryChart({ points }: { points: Point[] }) {
   const [hover, setHover] = useState<number | null>(null);
+  const [range, setRange] = useState<HistoryRange>("6M");
+
+  const visiblePoints = useMemo(() => {
+    const selected = HISTORY_RANGES.find((item) => item.value === range);
+    if (!selected?.months || points.length === 0) return points;
+    const latest = new Date(`${points[points.length - 1].date}T00:00:00Z`);
+    const cutoff = new Date(latest);
+    cutoff.setUTCMonth(cutoff.getUTCMonth() - selected.months);
+    const cutoffDate = cutoff.toISOString().slice(0, 10);
+    return points.filter((point) => point.date >= cutoffDate);
+  }, [points, range]);
+
+  const lifetime = useMemo(() => {
+    if (!points.length) return null;
+    let high = points[0];
+    let low = points[0];
+    for (const point of points.slice(1)) {
+      if (point.value > high.value) high = point;
+      if (point.value < low.value) low = point;
+    }
+    return { high, low };
+  }, [points]);
 
   const { path, area, costPath, xs, ys, min, max } = useMemo(() => {
-    const vals = points.flatMap((p) => [p.value, p.cost]);
+    const vals = visiblePoints.flatMap((p) => [p.value, p.cost]);
     let min = Math.min(...vals);
     let max = Math.max(...vals);
     if (!isFinite(min)) {
@@ -102,16 +132,16 @@ export function HistoryChart({ points }: { points: Point[] }) {
     const pad = (max - min) * 0.1;
     min -= pad;
     max += pad;
-    const n = points.length;
-    const xs = points.map((_, i) => P.l + (n === 1 ? (W - P.l - P.r) / 2 : (i / (n - 1)) * (W - P.l - P.r)));
+    const n = visiblePoints.length;
+    const xs = visiblePoints.map((_, i) => P.l + (n === 1 ? (W - P.l - P.r) / 2 : (i / (n - 1)) * (W - P.l - P.r)));
     const y = (v: number) => P.t + (1 - (v - min) / (max - min)) * (H - P.t - P.b);
-    const ys = points.map((p) => y(p.value));
-    const cys = points.map((p) => y(p.cost));
+    const ys = visiblePoints.map((p) => y(p.value));
+    const cys = visiblePoints.map((p) => y(p.cost));
     const line = (arr: number[]) => arr.map((v, i) => `${i ? "L" : "M"}${xs[i].toFixed(1)},${v.toFixed(1)}`).join(" ");
     const path = line(ys);
     const area = n ? `${path} L${xs[n - 1]},${H - P.b} L${xs[0]},${H - P.b} Z` : "";
     return { path, area, costPath: line(cys), xs, ys, min, max };
-  }, [points]);
+  }, [visiblePoints]);
 
   if (points.length === 0) {
     return (
@@ -121,13 +151,42 @@ export function HistoryChart({ points }: { points: Point[] }) {
     );
   }
 
-  const up = points[points.length - 1].value >= points[0].value;
+  const up = visiblePoints[visiblePoints.length - 1].value >= visiblePoints[0].value;
   const stroke = up ? "#4f46e5" : "#e11d48";
-  const h = hover !== null ? points[hover] : points[points.length - 1];
+  const h = hover !== null ? visiblePoints[hover] : visiblePoints[visiblePoints.length - 1];
 
   return (
     <div>
-      <div className="mb-2 flex items-baseline justify-between text-sm">
+      <div className="mb-4 flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1" aria-label="History period">
+        {HISTORY_RANGES.map((item) => (
+          <button
+            key={item.value}
+            type="button"
+            onClick={() => { setRange(item.value); setHover(null); }}
+            className={`flex-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition sm:text-sm ${
+              range === item.value ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+            }`}
+            aria-pressed={range === item.value}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      {lifetime && (
+        <div className="mb-4 grid grid-cols-2 gap-3">
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">All-time high</div>
+            <div className="mt-0.5 font-semibold tabular-nums text-slate-900">{money(lifetime.high.value)}</div>
+            <div className="text-xs text-slate-500">{fmtDate(lifetime.high.date)}</div>
+          </div>
+          <div className="rounded-xl border border-rose-100 bg-rose-50/60 px-3 py-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">All-time low</div>
+            <div className="mt-0.5 font-semibold tabular-nums text-slate-900">{money(lifetime.low.value)}</div>
+            <div className="text-xs text-slate-500">{fmtDate(lifetime.low.date)}</div>
+          </div>
+        </div>
+      )}
+      <div className="mb-2 flex flex-col gap-1 text-sm sm:flex-row sm:items-baseline sm:justify-between">
         <span className="text-slate-500">{fmtDate(h.date)}</span>
         <span className="flex gap-4">
           <span>
@@ -167,7 +226,7 @@ export function HistoryChart({ points }: { points: Point[] }) {
         <path d={area} fill="url(#hist-fill)" />
         <path d={costPath} fill="none" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
         <path d={path} fill="none" stroke={stroke} strokeWidth="2.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
-        {points.length === 1 && <circle cx={xs[0]} cy={ys[0]} r="4" fill={stroke} />}
+        {visiblePoints.length === 1 && <circle cx={xs[0]} cy={ys[0]} r="4" fill={stroke} />}
         {hover !== null && (
           <>
             <line x1={xs[hover]} x2={xs[hover]} y1={P.t} y2={H - P.b} stroke="#cbd5e1" vectorEffect="non-scaling-stroke" />
@@ -175,10 +234,10 @@ export function HistoryChart({ points }: { points: Point[] }) {
           </>
         )}
         <text x={P.l} y={H - 6} fontSize="11" fill="#94a3b8">
-          {fmtDate(points[0].date)}
+          {fmtDate(visiblePoints[0].date)}
         </text>
         <text x={W - P.r} y={H - 6} fontSize="11" fill="#94a3b8" textAnchor="end">
-          {fmtDate(points[points.length - 1].date)}
+          {fmtDate(visiblePoints[visiblePoints.length - 1].date)}
         </text>
       </svg>
       <span className="sr-only">

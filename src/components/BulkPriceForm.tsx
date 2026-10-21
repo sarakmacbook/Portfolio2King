@@ -1,9 +1,10 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { bulkUpdatePrices, type ActionState } from "@/app/actions";
 import type { AssetType } from "@/lib/constants";
 import { TYPE_META, money, pct, pnlColor, qty } from "@/lib/format";
+import { PRICE_PROVIDERS, PROVIDER_LABELS, type PriceProvider } from "@/lib/market-prices";
 import { ErrorNote, SubmitButton } from "./ui";
 
 export type PriceRow = {
@@ -17,12 +18,52 @@ export type PriceRow = {
 };
 
 export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
-  const [state, action] = useActionState<ActionState, FormData>(bulkUpdatePrices, {});
   const [values, setValues] = useState<Record<number, string>>({});
+  const [state, action] = useActionState<ActionState, FormData>(async (previous, formData) => {
+    const result = await bulkUpdatePrices(previous, formData);
+    if (result.ok) setValues({});
+    return result;
+  }, {});
+  const [provider, setProvider] = useState<PriceProvider>("bybit");
+  const [quote, setQuote] = useState<"USD" | "USDT">("USDT");
+  const [fetching, setFetching] = useState(false);
+  const [liveMessage, setLiveMessage] = useState("");
 
-  useEffect(() => {
-    if (state.ok) setValues({});
-  }, [state.ok, state.ts]);
+  async function loadLivePrices() {
+    const crypto = rows.filter((row) => row.type === "crypto" && row.symbol.trim());
+    if (!crypto.length) {
+      setLiveMessage("Add a symbol to at least one crypto asset first.");
+      return;
+    }
+    setFetching(true);
+    setLiveMessage("");
+    try {
+      const response = await fetch("/api/prices/live", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, quote, assets: crypto.map(({ id, symbol }) => ({ id, symbol })) }),
+      });
+      const data = (await response.json()) as {
+        error?: string;
+        found?: number;
+        results?: Array<{ id?: number; price?: number; error?: string }>;
+      };
+      if (!response.ok) throw new Error(data.error || "Could not reach the exchange");
+      const prices: Record<number, string> = {};
+      for (const result of data.results || []) {
+        if (result.id && result.price) prices[result.id] = String(result.price);
+      }
+      setValues((current) => ({ ...current, ...prices }));
+      const missing = crypto.length - (data.found || 0);
+      setLiveMessage(
+        `${data.found || 0} live price${data.found === 1 ? "" : "s"} loaded${missing ? ` · ${missing} unavailable` : ""}. Review, then save.`,
+      );
+    } catch (error) {
+      setLiveMessage(error instanceof Error ? error.message : "Could not load live prices");
+    } finally {
+      setFetching(false);
+    }
+  }
 
   const changes = rows.filter((r) => {
     const v = values[r.id];
@@ -32,6 +73,30 @@ export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
 
   return (
     <form action={action}>
+      <div className="border-b border-slate-100 bg-indigo-50/50 p-4 sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="min-w-0 flex-1">
+            <label className="label">Crypto price source</label>
+            <select className="input" value={provider} onChange={(event) => setProvider(event.target.value as PriceProvider)}>
+              {PRICE_PROVIDERS.map((value) => <option key={value} value={value}>{PROVIDER_LABELS[value]}</option>)}
+            </select>
+          </div>
+          <div className="sm:w-32">
+            <label className="label">Quote</label>
+            <select className="input" value={quote} onChange={(event) => setQuote(event.target.value as "USD" | "USDT")}>
+              <option value="USDT">USDT</option>
+              <option value="USD">USD</option>
+            </select>
+          </div>
+          <button type="button" className="btn-primary sm:min-w-40" onClick={loadLivePrices} disabled={fetching}>
+            {fetching ? "Fetching…" : "Fetch live prices"}
+          </button>
+        </div>
+        <div className="mt-2 flex flex-col justify-between gap-1 text-xs text-slate-500 sm:flex-row">
+          <span>Uses public market-data APIs only. API keys and exchange account access are not required.</span>
+          {liveMessage && <span className="font-medium text-indigo-600">{liveMessage}</span>}
+        </div>
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[640px] text-sm">
           <thead className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-slate-500">
