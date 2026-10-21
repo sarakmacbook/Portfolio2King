@@ -71,6 +71,16 @@ html.dark .bg-slate-100, html.dark .hover\:bg-slate-100:hover { background-color
 html.dark .bg-slate-900 { background-color: #e2e8f0; color: #0f172a; }
 html.dark .text-indigo-600 { color: #a5b4fc; }
 
+/* Allocation chart adapts to the card itself, not only the viewport. */
+.allocation-chart { container-type: inline-size; }
+.donut-track { stroke: #e2e8f0; }
+html.dark .donut-track { stroke: #334155; }
+html.dark .allocation-chart .bg-slate-50 { background-color: #1e293b; }
+
+@container (min-width: 390px) {
+  .allocation-content { flex-direction: row; gap: 1.25rem; }
+}
+
 @media (max-width: 639px) {
   .site-header nav { max-width: calc(100vw - 7.25rem); scrollbar-width: none; }
   .site-header nav::-webkit-scrollbar { display: none; }
