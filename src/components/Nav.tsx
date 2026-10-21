@@ -39,19 +39,26 @@ export default function Nav() {
         >
           {open ? "×" : "☰"}
         </button>
-        {open && (
-          <nav
-            id="mobile-menu"
-            className="absolute inset-x-4 top-[calc(100%+.5rem)] z-50 grid gap-1 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl"
-            aria-label="Mobile navigation"
-          >
-            {links.map((link) => (
-              <Link key={link.href} href={link.href} className={linkClass(link.href, true)} onClick={() => setOpen(false)}>
-                {link.label}
-              </Link>
-            ))}
-          </nav>
-        )}
+        <nav
+          id="mobile-menu"
+          className={`mobile-menu-panel absolute inset-x-4 top-[calc(100%+.5rem)] z-50 grid gap-1 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl ${
+            open ? "mobile-menu-open" : "mobile-menu-closed"
+          }`}
+          aria-label="Mobile navigation"
+          aria-hidden={!open}
+        >
+          {links.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={linkClass(link.href, true)}
+              onClick={() => setOpen(false)}
+              tabIndex={open ? 0 : -1}
+            >
+              {link.label}
+            </Link>
+          ))}
+        </nav>
       </div>
     </>
   );

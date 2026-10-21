@@ -45,6 +45,26 @@ body {
 .theme-toggle:hover { background: rgb(255 255 255 / .2); }
 .theme-toggle:active { transform: scale(.94); }
 .theme-sun { display: none; }
+
+/* Keep mobile menu motion on the compositor for smooth 60 Hz animation. */
+.mobile-menu-panel {
+  transform-origin: top center;
+  transition: opacity 160ms ease-out, transform 160ms cubic-bezier(.2, .8, .2, 1);
+  will-change: opacity, transform;
+  backface-visibility: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+.mobile-menu-open {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
+  pointer-events: auto;
+}
+.mobile-menu-closed {
+  opacity: 0;
+  transform: translate3d(0, -8px, 0) scale(.98);
+  pointer-events: none;
+}
+
 html.dark .theme-sun { display: inline; }
 html.dark .theme-moon { display: none; }
 
@@ -94,5 +114,5 @@ html.dark .allocation-chart .bg-slate-50 { background-color: #1e293b; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  body, .theme-toggle { transition: none; }
+  body, .theme-toggle, .mobile-menu-panel { transition: none; }
 }
