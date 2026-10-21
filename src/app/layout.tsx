@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { Analytics } from "@vercel/analytics/next";
 import Nav from "@/components/Nav";
 import ThemeToggle from "@/components/ThemeToggle";
 import "./globals.css";
@@ -47,6 +48,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <footer className="mx-auto max-w-6xl px-4 pb-[calc(2.5rem+env(safe-area-inset-bottom))] text-center text-xs text-slate-400 sm:px-6">
           All values entered manually · Amounts in USD
         </footer>
+        <Analytics />
       </body>
     </html>
   );
