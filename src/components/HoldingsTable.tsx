@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ASSET_TYPES, type AssetType } from "@/lib/constants";
 import { TYPE_META, money, pct, pnlColor, qty } from "@/lib/format";
+import CryptoLogo from "./CryptoLogo";
 
 export type HoldingRow = {
   id: number;
@@ -108,12 +109,16 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                 <tr key={r.id} className="group transition hover:bg-slate-50/80">
                   <td className="px-4 py-3">
                     <Link href={`/assets/${r.id}`} className="flex items-center gap-3">
-                      <span
-                        className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-xs font-bold text-white"
-                        style={{ background: TYPE_META[r.type].color }}
-                      >
-                        {(r.symbol || r.name).slice(0, 4).toUpperCase()}
-                      </span>
+                      {r.type === "crypto" ? (
+                        <CryptoLogo symbol={r.symbol} name={r.name} />
+                      ) : (
+                        <span
+                          className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-xs font-bold text-white"
+                          style={{ background: TYPE_META[r.type].color }}
+                        >
+                          {(r.symbol || r.name).slice(0, 4).toUpperCase()}
+                        </span>
+                      )}
                       <span className="min-w-0">
                         <span className="block truncate font-medium text-slate-900 group-hover:text-indigo-600">
                           {r.name}

@@ -8,6 +8,7 @@ import { assets } from "@/db/schema";
 import { deleteAsset, deleteTransaction } from "@/app/actions";
 import { EditAssetButton, PriceForm, TransactionForm } from "@/components/AssetForms";
 import { ConfirmSubmit } from "@/components/ui";
+import CryptoLogo from "@/components/CryptoLogo";
 import { KIND_META, TYPE_META, fmtDate, money, pct, pnlColor, qty } from "@/lib/format";
 import { assetCost, assetValue, ensureSchema, getAllAssets, getAssetTransactions } from "@/lib/portfolio";
 
@@ -42,12 +43,16 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-4">
-          <span
-            className="grid h-14 w-14 place-items-center rounded-2xl text-sm font-bold text-white shadow-sm"
-            style={{ background: meta.color }}
-          >
-            {(asset.symbol || asset.name).slice(0, 4).toUpperCase()}
-          </span>
+          {asset.type === "crypto" ? (
+            <CryptoLogo symbol={asset.symbol} name={asset.name} className="h-14 w-14 rounded-2xl" />
+          ) : (
+            <span
+              className="grid h-14 w-14 place-items-center rounded-2xl text-sm font-bold text-white shadow-sm"
+              style={{ background: meta.color }}
+            >
+              {(asset.symbol || asset.name).slice(0, 4).toUpperCase()}
+            </span>
+          )}
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-2xl font-semibold tracking-tight">{asset.name}</h1>

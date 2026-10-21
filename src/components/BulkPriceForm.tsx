@@ -6,6 +6,7 @@ import type { AssetType } from "@/lib/constants";
 import { TYPE_META, money, pct, pnlColor, qty } from "@/lib/format";
 import { PRICE_PROVIDERS, PROVIDER_LABELS, type PriceProvider } from "@/lib/market-prices";
 import { ErrorNote, SubmitButton } from "./ui";
+import CryptoLogo from "./CryptoLogo";
 
 export type PriceRow = {
   id: number;
@@ -118,7 +119,11 @@ export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
                 <tr key={r.id} className={changed ? "bg-indigo-50/40" : ""}>
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full" style={{ background: TYPE_META[r.type].color }} />
+                      {r.type === "crypto" ? (
+                        <CryptoLogo symbol={r.symbol} name={r.name} className="h-7 w-7 rounded-lg" />
+                      ) : (
+                        <span className="h-2 w-2 rounded-full" style={{ background: TYPE_META[r.type].color }} />
+                      )}
                       <span className="font-medium text-slate-900">{r.symbol || r.name}</span>
                       {r.symbol && <span className="truncate text-slate-500">{r.name}</span>}
                     </div>

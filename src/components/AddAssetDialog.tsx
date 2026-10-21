@@ -6,6 +6,7 @@ import { ASSET_TYPES, type AssetType } from "@/lib/constants";
 import { TYPE_META, money } from "@/lib/format";
 import { CAMBODIAN_BANKS, type CambodianBank } from "@/lib/cambodian-banks";
 import { ErrorNote, Modal, SubmitButton } from "./ui";
+import CryptoLogo from "./CryptoLogo";
 
 export type CashAccount = { id: number; name: string; quantity: number };
 
@@ -138,9 +139,14 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
                     symbol === asset.symbol ? "border-indigo-500 bg-white ring-2 ring-indigo-100" : "border-slate-200 bg-white hover:border-indigo-300"
                   }`}
                 >
-                  <span className="block text-xs text-slate-400">#{asset.rank || "—"}</span>
-                  <span className="block font-semibold text-slate-900">{asset.symbol}</span>
-                  <span className="block text-xs text-slate-500">{money(asset.price)}</span>
+                  <span className="flex items-center gap-2">
+                    <CryptoLogo symbol={asset.symbol} name={asset.name} className="h-8 w-8 rounded-lg" />
+                    <span>
+                      <span className="block text-[10px] text-slate-400">#{asset.rank || "—"}</span>
+                      <span className="block font-semibold text-slate-900">{asset.symbol}</span>
+                    </span>
+                  </span>
+                  <span className="mt-1 block text-xs text-slate-500">{money(asset.price)}</span>
                 </button>
               ))}
             </div>
