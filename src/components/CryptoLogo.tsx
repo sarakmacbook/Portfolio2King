@@ -25,7 +25,7 @@ export default function CryptoLogo({ symbol, name, className = "h-9 w-9" }: Prop
         <img
           src={`https://assets.coincap.io/assets/icons/${ticker}@2x.png`}
           alt={`${name || symbol} logo`}
-          className="absolute inset-0 h-full w-full bg-white object-cover"
+          className="crypto-logo-image absolute inset-0 h-full w-full bg-white object-cover"
           loading="lazy"
           onError={() => setFailed(true)}
         />

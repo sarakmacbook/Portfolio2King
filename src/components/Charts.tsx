@@ -223,7 +223,7 @@ export function HistoryChart({ points }: { points: Point[] }) {
           </linearGradient>
         </defs>
         {[0.25, 0.5, 0.75].map((f) => (
-          <line key={f} x1={P.l} x2={W - P.r} y1={P.t + f * (H - P.t - P.b)} y2={P.t + f * (H - P.t - P.b)} stroke="#f1f5f9" />
+          <line className="history-grid-line" key={f} x1={P.l} x2={W - P.r} y1={P.t + f * (H - P.t - P.b)} y2={P.t + f * (H - P.t - P.b)} />
         ))}
         <path d={area} fill="url(#hist-fill)" />
         <path d={costPath} fill="none" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
@@ -231,8 +231,8 @@ export function HistoryChart({ points }: { points: Point[] }) {
         {visiblePoints.length === 1 && <circle cx={xs[0]} cy={ys[0]} r="4" fill={stroke} />}
         {hover !== null && (
           <>
-            <line x1={xs[hover]} x2={xs[hover]} y1={P.t} y2={H - P.b} stroke="#cbd5e1" vectorEffect="non-scaling-stroke" />
-            <circle cx={xs[hover]} cy={ys[hover]} r="4" fill="white" stroke={stroke} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+            <line className="history-hover-line" x1={xs[hover]} x2={xs[hover]} y1={P.t} y2={H - P.b} vectorEffect="non-scaling-stroke" />
+            <circle className="history-hover-dot" cx={xs[hover]} cy={ys[hover]} r="4" stroke={stroke} strokeWidth="2" vectorEffect="non-scaling-stroke" />
           </>
         )}
         <text x={P.l} y={H - 6} fontSize="11" fill="#94a3b8">

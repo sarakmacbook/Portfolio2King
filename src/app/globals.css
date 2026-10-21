@@ -68,34 +68,108 @@ body {
 html.dark .theme-sun { display: inline; }
 html.dark .theme-moon { display: none; }
 
-/* Dark theme. These rules also cover utility-colored text throughout server pages. */
+/* Refined midnight theme: layered surfaces, softer contrast, and vivid accents. */
 html.dark { color-scheme: dark; }
-html.dark body { background: #0b1120; color: #e2e8f0; }
-html.dark .site-header { background-image: linear-gradient(135deg, #1e1b4b, #312e81, #4c1d95); }
-html.dark .card { border-color: rgb(51 65 85 / .8); background: #111827; box-shadow: 0 1px 2px rgb(0 0 0 / .2), 0 8px 24px rgb(0 0 0 / .14); }
-html.dark .input { border-color: #334155; background: #0f172a; color: #f1f5f9; }
-html.dark .input::placeholder { color: #64748b; }
-html.dark .input:focus { border-color: #818cf8; --tw-ring-color: rgb(99 102 241 / .2); }
-html.dark .btn-ghost, html.dark .btn-danger { border-color: #334155; background: #111827; }
-html.dark .btn-ghost { color: #cbd5e1; }
-html.dark .btn-ghost:hover, html.dark .btn-danger:hover { background: #1e293b; }
-html.dark .text-slate-900, html.dark .text-slate-800 { color: #f1f5f9; }
-html.dark .text-slate-700, html.dark .text-slate-600 { color: #cbd5e1; }
-html.dark .text-slate-500 { color: #94a3b8; }
-html.dark .text-slate-400 { color: #64748b; }
-html.dark .border-slate-100, html.dark .divide-slate-100 > :not(:last-child) { border-color: #1e293b; }
-html.dark .border-slate-200 { border-color: #334155; }
-html.dark .bg-white { background-color: #111827; }
-html.dark .bg-slate-50, html.dark .hover\:bg-slate-50:hover, html.dark .hover\:bg-slate-50\/80:hover { background-color: #1e293b; }
-html.dark .bg-slate-100, html.dark .hover\:bg-slate-100:hover { background-color: #334155; }
-html.dark .bg-slate-900 { background-color: #e2e8f0; color: #0f172a; }
-html.dark .text-indigo-600 { color: #a5b4fc; }
+html.dark body {
+  background-color: #080a12;
+  background-image:
+    radial-gradient(circle at 12% -10%, rgb(124 58 237 / .18), transparent 34rem),
+    radial-gradient(circle at 92% 20%, rgb(14 165 233 / .09), transparent 30rem),
+    linear-gradient(180deg, #0b0d17 0%, #080a12 72%);
+  background-attachment: fixed;
+  color: #e8eaf2;
+}
+html.dark .site-header {
+  border-bottom: 1px solid rgb(148 163 184 / .12);
+  background: rgb(10 12 23 / .82);
+  box-shadow: 0 8px 30px rgb(0 0 0 / .22);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+html.dark .site-header > div > a > span:first-child {
+  background: linear-gradient(135deg, rgb(139 92 246 / .55), rgb(56 189 248 / .3));
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / .16), 0 6px 18px rgb(109 40 217 / .25);
+}
+html.dark .theme-toggle { background: rgb(255 255 255 / .07); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .12); }
+html.dark .theme-toggle:hover { background: rgb(139 92 246 / .22); }
+html.dark .card {
+  border-color: rgb(99 108 137 / .3);
+  background: linear-gradient(145deg, rgb(21 25 42 / .94), rgb(15 18 31 / .94));
+  box-shadow: 0 1px 0 rgb(255 255 255 / .035) inset, 0 16px 42px rgb(0 0 0 / .24);
+}
+html.dark .input {
+  border-color: rgb(100 116 139 / .38);
+  background: rgb(8 11 22 / .72);
+  color: #f3f4f8;
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / .2);
+}
+html.dark .input::placeholder { color: #69738a; }
+html.dark .input:hover { border-color: rgb(139 92 246 / .52); }
+html.dark .input:focus {
+  border-color: #8b5cf6;
+  --tw-ring-color: rgb(139 92 246 / .17);
+  box-shadow: 0 0 0 4px rgb(139 92 246 / .13), inset 0 1px 2px rgb(0 0 0 / .2);
+}
+html.dark select.input option { background: #111525; color: #e8eaf2; }
+html.dark .btn-primary {
+  background: linear-gradient(135deg, #7c3aed, #6366f1);
+  box-shadow: 0 7px 18px rgb(99 102 241 / .22), inset 0 1px 0 rgb(255 255 255 / .14);
+}
+html.dark .btn-primary:hover { background: linear-gradient(135deg, #8b5cf6, #7377f5); }
+html.dark .btn-ghost, html.dark .btn-danger {
+  border-color: rgb(100 116 139 / .34);
+  background: rgb(255 255 255 / .045);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .035);
+}
+html.dark .btn-ghost { color: #d5d8e3; }
+html.dark .btn-ghost:hover { border-color: rgb(139 92 246 / .48); background: rgb(139 92 246 / .1); color: #fff; }
+html.dark .btn-danger { border-color: rgb(244 63 94 / .35); color: #fb7185; }
+html.dark .btn-danger:hover { background: rgb(244 63 94 / .11); }
+html.dark .text-slate-900, html.dark .text-slate-800 { color: #f4f4f8; }
+html.dark .text-slate-700, html.dark .text-slate-600 { color: #c5c9d6; }
+html.dark .text-slate-500 { color: #9299ac; }
+html.dark .text-slate-400 { color: #71798e; }
+html.dark .text-indigo-600, html.dark .text-indigo-700 { color: #a99cff; }
+html.dark .text-emerald-600, html.dark .text-emerald-700, html.dark .text-emerald-800 { color: #5ee4ad; }
+html.dark .text-rose-600, html.dark .text-rose-700, html.dark .text-rose-800 { color: #fb8395; }
+html.dark .text-amber-700, html.dark .text-amber-900, html.dark .text-amber-950 { color: #f8d477; }
+html.dark .text-orange-700 { color: #fbad72; }
+html.dark .text-sky-700 { color: #70d3f7; }
+html.dark .border-slate-100, html.dark .divide-slate-100 > :not(:last-child) { border-color: rgb(100 116 139 / .18); }
+html.dark .border-slate-200, html.dark .border-slate-300 { border-color: rgb(100 116 139 / .32); }
+html.dark .border-indigo-100, html.dark .border-indigo-200 { border-color: rgb(139 92 246 / .25); }
+html.dark .border-emerald-100, html.dark .border-emerald-200 { border-color: rgb(16 185 129 / .22); }
+html.dark .border-rose-100, html.dark .border-rose-200 { border-color: rgb(244 63 94 / .23); }
+html.dark .border-amber-300 { border-color: rgb(245 158 11 / .34); }
+html.dark .bg-white { background-color: #121625; }
+html.dark .crypto-logo-image { background-color: white; }
+html.dark .bg-slate-50, html.dark .hover\:bg-slate-50:hover, html.dark .hover\:bg-slate-50\/80:hover { background-color: rgb(255 255 255 / .035); }
+html.dark .bg-slate-100, html.dark .hover\:bg-slate-100:hover { background-color: rgb(100 116 139 / .14); }
+html.dark .bg-slate-900 { background-color: #eeeef5; color: #111322; }
+html.dark .bg-indigo-50, html.dark .bg-indigo-50\/40, html.dark .bg-indigo-50\/50 { background-color: rgb(124 58 237 / .1); }
+html.dark .bg-emerald-50, html.dark .bg-emerald-50\/60 { background-color: rgb(16 185 129 / .09); }
+html.dark .bg-rose-50, html.dark .bg-rose-50\/60 { background-color: rgb(244 63 94 / .09); }
+html.dark .bg-amber-50 { background-color: rgb(245 158 11 / .09); }
+html.dark .bg-orange-50 { background-color: rgb(249 115 22 / .09); }
+html.dark .bg-sky-50 { background-color: rgb(14 165 233 / .09); }
+html.dark .ring-indigo-100, html.dark .ring-indigo-200 { --tw-ring-color: rgb(139 92 246 / .2); }
+html.dark .ring-amber-200 { --tw-ring-color: rgb(245 158 11 / .22); }
+html.dark .ring-slate-200 { --tw-ring-color: rgb(100 116 139 / .24); }
+html.dark .ring-emerald-200 { --tw-ring-color: rgb(16 185 129 / .22); }
+html.dark .ring-rose-200 { --tw-ring-color: rgb(244 63 94 / .24); }
+html.dark footer { color: #626b80; }
 
 /* Allocation chart adapts to the card itself, not only the viewport. */
 .allocation-chart { container-type: inline-size; }
 .donut-track { stroke: #e2e8f0; }
-html.dark .donut-track { stroke: #334155; }
-html.dark .allocation-chart .bg-slate-50 { background-color: #1e293b; }
+.history-grid-line { stroke: #f1f5f9; }
+.history-hover-line { stroke: #cbd5e1; }
+.history-hover-dot { fill: white; }
+html.dark .donut-track { stroke: #292e46; }
+html.dark .history-grid-line { stroke: rgb(100 116 139 / .18); }
+html.dark .history-hover-line { stroke: #596177; }
+html.dark .history-hover-dot { fill: #15192a; }
+html.dark .allocation-chart .bg-slate-50 { background-color: rgb(139 92 246 / .09); }
 
 @container (min-width: 390px) {
   .allocation-content { flex-direction: row; gap: 1.25rem; }
