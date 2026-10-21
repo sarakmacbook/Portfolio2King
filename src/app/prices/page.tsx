@@ -25,7 +25,7 @@ export default async function PricesPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Update prices</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Refresh prices</h1>
         <p className="mt-1 text-sm text-slate-500">
           Fetch live crypto prices from a CEX or DEX, or enter prices manually. Review the changes before saving; a
           daily snapshot is stored so you can track value over time.
