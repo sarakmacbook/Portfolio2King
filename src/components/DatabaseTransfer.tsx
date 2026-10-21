@@ -12,9 +12,12 @@ export default function DatabaseTransfer() {
   const [file, setFile] = useState<File | null>(null);
   const [mode, setMode] = useState<Mode>("merge");
   const [confirmed, setConfirmed] = useState(false);
-  const [busy, setBusy] = useState<"export" | "import" | null>(null);
+  const [busy, setBusy] = useState<"export" | "import" | "clear" | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [clearPhrase, setClearPhrase] = useState("");
+  const [backupAcknowledged, setBackupAcknowledged] = useState(false);
+  const [clearError, setClearError] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -83,7 +86,43 @@ export default function DatabaseTransfer() {
     }
   }
 
+  async function clearDatabase() {
+    if (clearPhrase !== "DELETE ALL MY DATA" || !backupAcknowledged) return;
+    const finalWarning = [
+      "FINAL WARNING — PERMANENT DELETION",
+      "",
+      "This will immediately erase every asset, transaction, cash balance, and portfolio history snapshot.",
+      "",
+      "There is no undo button. The only recovery method is a previously exported backup file.",
+      "",
+      "Are you absolutely certain you want to permanently delete everything?",
+    ].join("\n");
+    if (!window.confirm(finalWarning)) return;
+
+    setBusy("clear");
+    setClearError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/database/clear", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ confirmation: clearPhrase, backupAcknowledged }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "Could not clear the database.");
+      setMessage(result.message);
+      setClearPhrase("");
+      setBackupAcknowledged(false);
+      window.setTimeout(() => { window.location.href = "/"; }, 1200);
+    } catch (e) {
+      setClearError(e instanceof Error ? e.message : "Could not clear the database.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const keyMissing = Boolean(status?.authRequired && !key);
+  const clearReady = clearPhrase === "DELETE ALL MY DATA" && backupAcknowledged;
 
   return (
     <section className="mx-auto mt-6 max-w-4xl space-y-6">
@@ -167,6 +206,62 @@ export default function DatabaseTransfer() {
               {busy === "import" ? "Importing…" : mode === "replace" ? "Replace database with backup" : "Merge backup into database"}
             </button>
           </form>
+        </div>
+      </div>
+
+      <div className="overflow-hidden rounded-2xl border-2 border-rose-500 bg-white shadow-[0_12px_40px_rgba(225,29,72,0.12)]">
+        <div className="bg-rose-600 px-5 py-3 text-white sm:px-8">
+          <p className="text-sm font-black uppercase tracking-[0.16em]">⚠ Critical danger zone</p>
+        </div>
+        <div className="space-y-5 p-5 sm:p-8">
+          <div>
+            <h2 className="text-xl font-bold text-rose-700">Permanently clear all portfolio data</h2>
+            <p className="mt-2 text-sm font-medium text-slate-700">
+              This erases every asset, cash balance, transaction, realized gain, and history snapshot from the connected database.
+              This action cannot be undone.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+            <p className="font-bold">Back up your data before continuing.</p>
+            <p className="mt-1">Use “Export database (.json)” above and verify the downloaded file is stored safely. A backup is the only way to recover after deletion.</p>
+          </div>
+
+          <label className="flex items-start gap-3 rounded-xl border border-rose-200 p-4 text-sm text-rose-800">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 shrink-0 accent-rose-600"
+              checked={backupAcknowledged}
+              disabled={busy !== null}
+              onChange={(e) => setBackupAcknowledged(e.target.checked)}
+            />
+            <span><strong>I understand there is no undo.</strong> I have exported a current backup, or I accept that this data will be permanently unrecoverable.</span>
+          </label>
+
+          <label className="block">
+            <span className="label text-rose-700">Type DELETE ALL MY DATA to confirm</span>
+            <input
+              className="input border-rose-300 focus:border-rose-500 focus:ring-rose-100"
+              value={clearPhrase}
+              onChange={(e) => setClearPhrase(e.target.value)}
+              placeholder="DELETE ALL MY DATA"
+              autoComplete="off"
+              spellCheck={false}
+              disabled={busy !== null}
+            />
+          </label>
+
+          {clearError && <p role="alert" className="rounded-xl bg-rose-50 p-4 text-sm font-medium text-rose-700">{clearError}</p>}
+
+          <button
+            type="button"
+            className="inline-flex w-full items-center justify-center rounded-xl bg-rose-600 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+            disabled={!status?.configured || busy !== null || keyMissing || !clearReady}
+            onClick={() => void clearDatabase()}
+          >
+            {busy === "clear" ? "Permanently deleting…" : "Permanently delete everything"}
+          </button>
+          <p className="text-xs text-slate-500">A final browser confirmation will appear before deletion starts. The server also verifies the exact confirmation phrase.</p>
         </div>
       </div>
     </section>
