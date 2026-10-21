@@ -60,23 +60,28 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
   const [name, setName] = useState("");
   const [symbol, setSymbol] = useState("");
   const [currentPrice, setCurrentPrice] = useState("");
-  const [topAssets, setTopAssets] = useState<Array<{ id: string; name: string; symbol: string; price: number; rank: number | null }>>([]);
+  const [notes, setNotes] = useState("");
+  const [cryptoQuery, setCryptoQuery] = useState("");
+  const [topAssets, setTopAssets] = useState<Array<{
+    id: string; name: string; symbol: string; price: number; rank: number | null; chain: string | null; contract: string | null;
+  }>>([]);
   const [discovering, setDiscovering] = useState(false);
   const [discoveryError, setDiscoveryError] = useState("");
   const isCash = type === "cash";
   const total = (Number(q) || 0) * (Number(cost) || 0) + (Number(fee) || 0);
   const selectedBank = CAMBODIAN_BANKS.find((bank) => bank.name === name);
 
-  async function discoverTopAssets() {
+  async function discoverTopAssets(query = "") {
     setDiscovering(true);
     setDiscoveryError("");
     try {
-      const response = await fetch("/api/prices/top");
+      const response = await fetch(`/api/prices/top${query.trim() ? `?q=${encodeURIComponent(query.trim())}` : ""}`);
       const data = (await response.json()) as { error?: string; assets?: typeof topAssets };
-      if (!response.ok) throw new Error(data.error || "Could not load top assets");
+      if (!response.ok) throw new Error(data.error || "Could not search crypto assets");
       setTopAssets(data.assets || []);
+      if (query.trim() && !data.assets?.length) setDiscoveryError("No matching crypto asset found. Check the name, symbol, or contract address.");
     } catch (error) {
-      setDiscoveryError(error instanceof Error ? error.message : "Could not load top assets");
+      setDiscoveryError(error instanceof Error ? error.message : "Could not search crypto assets");
     } finally {
       setDiscovering(false);
     }
@@ -86,6 +91,7 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
     setName(asset.name);
     setSymbol(asset.symbol);
     setCurrentPrice(String(asset.price));
+    if (asset.contract) setNotes(`Contract: ${asset.contract}${asset.chain ? ` · Chain: ${asset.chain}` : ""}`);
   }
 
   const placeholders: Record<AssetType, { name: string; symbol: string }> = {
@@ -118,13 +124,32 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
 
       {type === "crypto" && (
         <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-slate-900">Find a top crypto asset</p>
-              <p className="text-xs text-slate-500">Live market ranking and USD price. No API key is required.</p>
+          <div>
+            <p className="text-sm font-semibold text-slate-900">Find any crypto asset</p>
+            <p className="text-xs text-slate-500">Search by name, ticker, or token contract address across CEX and DEX markets.</p>
+          </div>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <div className="relative min-w-0 flex-1">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400">
+                <circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" />
+              </svg>
+              <input
+                className="input pl-9"
+                value={cryptoQuery}
+                onChange={(event) => setCryptoQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") { event.preventDefault(); void discoverTopAssets(cryptoQuery); }
+                }}
+                placeholder="Bitcoin, BTC, or 0x contract…"
+                autoComplete="off"
+                spellCheck={false}
+              />
             </div>
-            <button type="button" className="btn-ghost shrink-0" onClick={discoverTopAssets} disabled={discovering}>
-              {discovering ? "Loading…" : topAssets.length ? "Refresh" : "Show top assets"}
+            <button type="button" className="btn-primary shrink-0" onClick={() => void discoverTopAssets(cryptoQuery)} disabled={discovering || !cryptoQuery.trim()}>
+              {discovering ? "Searching…" : "Search"}
+            </button>
+            <button type="button" className="btn-ghost shrink-0" onClick={() => { setCryptoQuery(""); void discoverTopAssets(""); }} disabled={discovering}>
+              Top assets
             </button>
           </div>
           {discoveryError && <p className="mt-2 text-xs text-rose-600">{discoveryError}</p>}
@@ -147,6 +172,7 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
                     </span>
                   </span>
                   <span className="mt-1 block text-xs text-slate-500">{money(asset.price)}</span>
+                  {asset.chain && <span className="mt-0.5 block max-w-28 truncate text-[10px] capitalize text-slate-400">{asset.chain} · contract</span>}
                 </button>
               ))}
             </div>
@@ -285,7 +311,7 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
 
       <div>
         <label className="label">Notes</label>
-        <textarea name="notes" rows={2} className="input" placeholder="Optional — broker, wallet, strategy…" />
+        <textarea name="notes" rows={2} className="input" placeholder="Optional — broker, wallet, strategy…" value={notes} onChange={(event) => setNotes(event.target.value)} />
       </div>
 
       <ErrorNote error={state.error} />
