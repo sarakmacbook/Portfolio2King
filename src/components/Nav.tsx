@@ -26,10 +26,10 @@ export default function Nav() {
 
   return (
     <>
-      <nav className="hidden items-center gap-1 sm:flex" aria-label="Main navigation">
+      <nav className="hidden items-center gap-1 md:flex" aria-label="Main navigation">
         {links.map((link) => <Link key={link.href} href={link.href} className={linkClass(link.href)}>{link.label}</Link>)}
       </nav>
-      <div className="sm:hidden">
+      <div className="md:hidden">
         <button
           type="button"
           className="grid h-9 min-w-11 place-items-center rounded-xl bg-white/15 px-2 text-lg text-white ring-1 ring-white/20"

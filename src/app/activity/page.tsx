@@ -53,7 +53,7 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
       </div>
 
       <section className="card overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full min-w-[720px] text-sm">
             <thead className="border-b border-slate-100 bg-slate-50/60 text-left text-xs uppercase tracking-wide text-slate-500">
               <tr>
@@ -104,6 +104,40 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
             </tbody>
           </table>
         </div>
+
+        {/* Phones: transaction cards instead of a wide table. */}
+        <ul className="divide-y divide-slate-100 md:hidden">
+          {rows.map(({ tx, asset }) => {
+            const cashLike = asset.type === "cash" || tx.kind === "dividend";
+            return (
+              <li key={tx.id} className="px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <Link href={`/assets/${asset.id}`} className="flex items-center gap-2 font-medium text-slate-900">
+                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: TYPE_META[asset.type].color }} />
+                      <span className="truncate">{asset.symbol || asset.name}</span>
+                    </Link>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                      <span className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${KIND_META[tx.kind].badge}`}>
+                        {KIND_META[tx.kind].label}
+                      </span>
+                      <span>{fmtDate(tx.date)}</span>
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="font-semibold tabular-nums text-slate-900">{money(tx.quantity * tx.price)}</p>
+                    <p className="text-xs tabular-nums text-slate-500">
+                      {cashLike ? "cash" : `${qty(tx.quantity)} × ${money(tx.price)}`}
+                      {tx.fee ? ` · fee ${money(tx.fee)}` : ""}
+                    </p>
+                  </div>
+                </div>
+                {tx.note && <p className="mt-1 truncate text-xs text-slate-400">{tx.note}</p>}
+              </li>
+            );
+          })}
+          {rows.length === 0 && <li className="px-4 py-14 text-center text-sm text-slate-400">No transactions found.</li>}
+        </ul>
       </section>
     </div>
   );

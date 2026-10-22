@@ -22,16 +22,17 @@ export async function GET() {
   }
 
   try {
-    const [settings, subscribers, vapid] = await Promise.all([
+    const [settings, subscribers, vapid, telegram] = await Promise.all([
       getAlertSettings(),
       countPushSubscriptions(),
       getVapidConfig(),
+      telegramConfigured(),
     ]);
     return noStoreJson({
       configured: true,
       publicKey: vapid.publicKey,
       subscribers,
-      telegramConfigured: telegramConfigured(),
+      telegramConfigured: telegram,
       settings,
     });
   } catch {

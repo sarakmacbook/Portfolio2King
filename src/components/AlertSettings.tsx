@@ -48,7 +48,13 @@ export function TestAlertButton({
   );
 }
 
-export default function AlertSettingsForm({ settings }: { settings: AlertSettings }) {
+export default function AlertSettingsForm({
+  settings,
+  telegramConnected = true,
+}: {
+  settings: AlertSettings;
+  telegramConnected?: boolean;
+}) {
   const [state, action] = useActionState<AlertActionState, FormData>(
     (_previous, formData) => saveAlertSettingsAction(_previous, formData),
     {},
@@ -129,15 +135,20 @@ export default function AlertSettingsForm({ settings }: { settings: AlertSetting
             />
             Browser push (web clip)
           </label>
-          <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
+          <label className="flex items-start gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
             <input
               type="checkbox"
               name="channels"
               value="telegram"
               defaultChecked={settings.channels.includes("telegram")}
-              className="h-4 w-4 accent-indigo-600"
+              className="mt-0.5 h-4 w-4 accent-indigo-600"
             />
-            Telegram
+            <span>
+              Telegram
+              {!telegramConnected && (
+                <span className="block text-xs text-amber-700">Connect a bot above to deliver here.</span>
+              )}
+            </span>
           </label>
         </div>
       </fieldset>

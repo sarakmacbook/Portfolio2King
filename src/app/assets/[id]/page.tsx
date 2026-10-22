@@ -65,7 +65,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
       </Link>
 
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-center gap-4">
+        <div className="flex min-w-0 items-center gap-4">
           {asset.type === "crypto" ? (
             <CryptoLogo symbol={asset.symbol} name={asset.name} className="h-14 w-14 rounded-2xl" />
           ) : (
@@ -76,10 +76,10 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               {(asset.symbol || asset.name).slice(0, 4).toUpperCase()}
             </span>
           )}
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-semibold tracking-tight">{asset.name}</h1>
-              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${meta.badge}`}>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight sm:text-2xl">{asset.name}</h1>
+              <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${meta.badge}`}>
                 {meta.icon} {meta.label.replace(/s$/, "")}
               </span>
             </div>
@@ -189,7 +189,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
 
           <section className="card overflow-hidden">
             <h2 className="px-5 pt-5 font-semibold">Transaction history</h2>
-            <div className="overflow-x-auto">
+            <div className="hidden overflow-x-auto sm:block">
               <table className="mt-3 w-full min-w-[560px] text-sm">
                 <thead className="border-y border-slate-100 bg-slate-50/60 text-left text-xs uppercase tracking-wide text-slate-500">
                   <tr>
@@ -249,6 +249,47 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                 </tbody>
               </table>
             </div>
+
+            {/* Phones: one card per transaction, with the delete action inline. */}
+            <ul className="mt-3 divide-y divide-slate-100 border-t border-slate-100 sm:hidden">
+              {[...txs].reverse().map((t) => {
+                const income = t.kind === "dividend";
+                return (
+                  <li key={t.id} className="px-5 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${KIND_META[t.kind].badge}`}>
+                            {KIND_META[t.kind].label}
+                          </span>
+                          <span className="text-xs text-slate-500">{fmtDate(t.date)}</span>
+                        </div>
+                        <p className="mt-1 text-xs tabular-nums text-slate-500">
+                          {isCash || income ? money(t.quantity) : `${qty(t.quantity)} × ${money(t.price)}`}
+                          {t.fee > 0 ? ` · fee ${money(t.fee)}` : ""}
+                        </p>
+                        {t.note && <p className="mt-1 truncate text-xs text-slate-400">{t.note}</p>}
+                      </div>
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <span className="font-medium tabular-nums text-slate-900">{money(t.quantity * t.price)}</span>
+                        <form action={deleteTransaction}>
+                          <input type="hidden" name="id" value={t.id} />
+                          <ConfirmSubmit
+                            message="Delete this transaction? Holdings will be recalculated. (Linked cash entries are not removed automatically.)"
+                            className="rounded-lg px-2 py-1 text-xs text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+                          >
+                            Delete
+                          </ConfirmSubmit>
+                        </form>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+              {txs.length === 0 && (
+                <li className="px-5 py-12 text-center text-slate-400">No transactions yet. Record your first one above.</li>
+              )}
+            </ul>
           </section>
         </div>
       </div>
@@ -272,7 +313,7 @@ function Stat({
   return (
     <div className="card p-4">
       <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
-      <p className={`mt-2 truncate text-xl font-semibold tabular-nums ${cls}`}>{value}</p>
+      <p className={`mt-2 truncate text-lg font-semibold tabular-nums sm:text-xl ${cls}`}>{value}</p>
       {sub && <p className={`mt-0.5 text-xs ${subCls}`}>{sub}</p>}
     </div>
   );

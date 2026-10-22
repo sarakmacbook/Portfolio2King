@@ -29,7 +29,7 @@ the deployment before storing real portfolio data (see the
 - **One reporting currency: USD.** See below.
 
 **Contents:** [Supported currencies](#supported-currencies) ·
-[Arrange the dashboard](#arrange-the-dashboard) ·
+[Arrange the dashboard](#arrange-the-dashboard) · [Mobile layout](#mobile-layout) ·
 [Background refresh and alerts](#background-refresh-and-alerts) ·
 [Run locally](#run-locally) · [Self-host on your own server](#self-host-on-your-own-server) ·
 [Connect a database from the web UI](#connect-a-database-from-the-web-ui) ·
@@ -121,6 +121,23 @@ Details:
   cards stack in the saved order.
 - Saving the layout does not touch any holdings, balances or snapshots.
 
+## Mobile layout
+
+Every screen is built to work on a phone as well as a desktop:
+
+- **Navigation** collapses into a menu button below 768 px (tablets keep the
+  inline links), with the active page highlighted in both modes.
+- **Holdings** switches from a seven-column table to one card per holding below
+  768 px, with value, P/L, quantity × price and the weight bar. Sorting moves to a
+  **Sort** dropdown because the table header is not visible there.
+- **Activity**, **Refresh prices** and an asset's **transaction history** use the
+  same card pattern, so nothing requires horizontal scrolling to read.
+- **Forms and dialogs** stack to one column, the add-asset dialog becomes a
+  bottom sheet, and the page grid collapses from 4 → 2 → 1 columns.
+- **Charts** scale to the container width and support touch scrubbing.
+- Long names, notes and totals truncate or wrap instead of pushing the layout
+  sideways; inputs use a 16 px font on small screens so iOS does not zoom.
+
 ## Background refresh and alerts
 
 Ledgerly can keep crypto prices fresh on its own and notify you when a holding
@@ -169,26 +186,38 @@ or leave both unset — a pair is generated once on first use and stored in
 `app_settings`. Changing or clearing the database therefore requires re-enabling
 alerts in each browser. `VAPID_SUBJECT` should be a `mailto:` or `https:` contact.
 
-### Set up Telegram
+### Set up Telegram (no restart needed)
 
 1. Create a bot: message [@BotFather](https://t.me/BotFather), send `/newbot`,
    copy the token.
 2. Send your bot any message (a bot cannot start a chat with you).
-3. Find your chat id, e.g. by messaging [@userinfobot](https://t.me/userinfobot).
-4. Set the environment variables and restart:
+3. Open **Alerts** → **Telegram bot**, paste the token and click **Connect bot**.
 
-   ```bash
-   TELEGRAM_BOT_TOKEN=123456789:AA…your-token…
-   TELEGRAM_CHAT_ID=123456789          # or -100… for a group, or @channel
-   ```
+The chat id is filled in for you from the most recent message to the bot, so
+tools like @userinfobot are optional. If you prefer to be explicit, paste a
+numeric user id (`123456789`), a group id (`-1001234567890`) or `@channelname`
+and that is used instead. Click **Send test message** to confirm delivery.
 
-5. Open `/alerts` → **Send test message**.
+- The token is verified with Telegram's `getMe` before it is stored, so a typo is
+  rejected immediately with a clear message rather than failing silently later.
+- Credentials live in `app_settings` (`telegram.botToken`, `telegram.chatId`,
+  `telegram.botUsername`). They are never sent to the browser — the page only
+  shows a masked hint such as `123456789:••••Dsaw`.
+- If the server cannot reach `api.telegram.org` while saving, the credentials are
+  kept and the page warns you; send a test message once the network is back.
+- **Disconnect** removes the bot added in the app. Environment variables still
+  work exactly as before and are used whenever no bot is stored:
+
+  ```bash
+  TELEGRAM_BOT_TOKEN=123456789:AA…your-token…
+  TELEGRAM_CHAT_ID=123456789          # or -100… for a group, or @channel
+  ```
 
 Messages are plain text through the Telegram Bot API (no HTML/Markdown to
 escape). Failures are reported on the page — an invalid token says so, a wrong
 chat id tells you to start the chat first, and rate limits are retried on the
-next scheduled run. The token is only read from the environment and is never
-returned by an API or written to the alert log.
+next scheduled run. The token is never returned by an API or written to the
+alert log.
 
 ### Settings
 
@@ -296,8 +325,8 @@ chmod 600 .env.local
 | `DATABASE_SETUP_TOKEN` | No | Enables the web setup wizard and protects `/api/database`, export, and import. Must be at least 32 characters. |
 | `ALLOW_DATABASE_SETUP_WRITE` | No | Set to `true` on a persistent self-hosted server to let the wizard write `.env.local`. Always disabled on Vercel. |
 | `CRON_SECRET` | Recommended | Shared secret for `/api/cron/refresh-prices` and `/api/cron/daily-snapshot`, sent as `Authorization: Bearer …`. Without it the endpoints are unauthenticated (throttled per instance). |
-| `TELEGRAM_BOT_TOKEN` | No | Telegram bot token from [@BotFather](https://t.me/BotFather). Enables Telegram alerts. |
-| `TELEGRAM_CHAT_ID` | No | Chat, group, or `@channel` id that receives alerts. The bot must be allowed to post there. |
+| `TELEGRAM_BOT_TOKEN` | No | Telegram bot token from [@BotFather](https://t.me/BotFather). Optional — you can connect a bot on `/alerts` instead, which takes precedence. |
+| `TELEGRAM_CHAT_ID` | No | Chat, group, or `@channel` id that receives alerts. Optional when the bot is connected from `/alerts`. |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | No | Web Push key pair. When unset, a pair is generated once and stored in `app_settings`. |
 | `VAPID_SUBJECT` | No | Contact for push services, `mailto:` or `https:` (default `mailto:ledgerly@localhost`). |
 
@@ -707,7 +736,7 @@ vercel --prod
 | `npm run start`     | Run the production build               |
 | `npm run lint`      | ESLint                                 |
 | `npm run typecheck` | `tsc --noEmit`                         |
-| `npm test` | Database recommendations, URL validation, protected setup API tests (mocked PostgreSQL), backup format validation, crypto-search fallback, and alert rules/Telegram formatting tests |
+| `npm test` | Database recommendations, URL validation, protected setup API tests (mocked PostgreSQL), backup format validation, crypto-search fallback, dashboard layout helpers, and alert rules/Telegram bot tests (token + chat validation, chat detection, mocked API calls) |
 | `npm run db:push`   | Push schema to `DATABASE_URL`          |
 | `npm run db:generate` / `db:migrate` | Generate / apply SQL migrations |
 | `npm run db:studio` | Drizzle Studio                         |

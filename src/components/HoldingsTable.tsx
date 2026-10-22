@@ -24,6 +24,18 @@ export type HoldingRow = {
 };
 
 type SortKey = "name" | "value" | "pnl" | "pnlPct" | "weight";
+
+/** Mobile has no table header, so sorting is offered as a select instead. */
+const SORT_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "value:-1", label: "Value · high to low" },
+  { value: "value:1", label: "Value · low to high" },
+  { value: "name:1", label: "Name · A to Z" },
+  { value: "name:-1", label: "Name · Z to A" },
+  { value: "pnl:-1", label: "P/L · best first" },
+  { value: "pnl:1", label: "P/L · worst first" },
+  { value: "pnlPct:-1", label: "P/L % · best first" },
+  { value: "weight:-1", label: "Weight · largest first" },
+];
 type HoldingFilter = AssetType | "all" | "stablecoin" | "volatile";
 
 const FILTERS: Array<{ value: HoldingFilter; label: string }> = [
@@ -102,15 +114,36 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
             </button>
           ))}
         </div>
-        <input
-          className="input sm:max-w-56"
-          placeholder="Search name or symbol…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <input
+            className="input min-w-0 sm:max-w-56"
+            placeholder="Search name or symbol…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="Search holdings"
+          />
+          <label className="flex items-center gap-2 text-xs text-slate-500 md:hidden">
+            <span className="shrink-0">Sort</span>
+            <select
+              className="input min-w-0 py-1.5 text-sm"
+              value={`${sort.key}:${sort.dir}`}
+              onChange={(event) => {
+                const [key, dir] = event.target.value.split(":");
+                setSort({ key: key as SortKey, dir: dir === "1" ? 1 : -1 });
+              }}
+              aria-label="Sort holdings"
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[760px] text-sm">
           <thead className="text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
@@ -200,6 +233,71 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
           </tbody>
         </table>
       </div>
+
+      {/* Phones: one card per holding instead of a 760px-wide table. */}
+      <ul className="divide-y divide-slate-100 md:hidden">
+        {shown.map((r) => {
+          const isCash = r.type === "cash";
+          const subtitle = r.type === "crypto"
+            ? r.cryptoCategory === "stablecoin"
+              ? "Crypto · Stablecoin"
+              : "Crypto · Volatile"
+            : TYPE_META[r.type].label;
+          return (
+            <li key={r.id} className="px-4 py-3">
+              <Link href={`/assets/${r.id}`} className="flex items-start gap-3">
+                {r.type === "crypto" ? (
+                  <CryptoLogo symbol={r.symbol} name={r.name} />
+                ) : (
+                  <span
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-xs font-bold text-white"
+                    style={{ background: TYPE_META[r.type].color }}
+                  >
+                    {(r.symbol || r.name).slice(0, 4).toUpperCase()}
+                  </span>
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium text-slate-900">{r.name}</span>
+                  <span className="block truncate text-xs text-slate-500">
+                    {r.symbol && r.symbol !== r.name ? `${r.symbol} · ` : ""}
+                    {subtitle}
+                  </span>
+                </span>
+                <span className="shrink-0 text-right">
+                  <span className="block font-semibold tabular-nums text-slate-900">{money(r.value)}</span>
+                  <span className={`block text-xs tabular-nums ${isCash ? "text-slate-400" : pnlColor(r.pnl)}`}>
+                    {isCash ? "cash" : `${money(r.pnl, { sign: true })} · ${r.cost > 0 ? pct(r.pnlPct) : "—"}`}
+                  </span>
+                </span>
+              </Link>
+              <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
+                <span className="min-w-0 truncate tabular-nums">
+                  {isCash ? (
+                    "Balance"
+                  ) : (
+                    <>
+                      {qty(r.quantity)} × {money(r.currentPrice)}
+                      {r.dailyChangePct !== null && r.dailyChangePct !== undefined && (
+                        <span className={`ml-1 ${pnlColor(r.dailyChangePct)}`}>{pct(r.dailyChangePct)}</span>
+                      )}
+                    </>
+                  )}
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <span className="h-1.5 w-14 overflow-hidden rounded-full bg-slate-100">
+                    <span
+                      className="block h-full rounded-full"
+                      style={{ width: `${Math.min(100, r.weight * 100)}%`, background: TYPE_META[r.type].color }}
+                    />
+                  </span>
+                  <span className="w-10 text-right tabular-nums text-slate-600">{(r.weight * 100).toFixed(1)}%</span>
+                </span>
+              </div>
+            </li>
+          );
+        })}
+        {shown.length === 0 && <li className="px-4 py-12 text-center text-sm text-slate-400">No holdings match.</li>}
+      </ul>
     </div>
   );
 }

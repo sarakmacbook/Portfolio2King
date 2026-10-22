@@ -75,7 +75,7 @@ export default function DatabaseSetup() {
         </> : <p className="mt-1">In Vercel, open your project → <strong>Settings → Environment Variables</strong> and search for <code>DATABASE_URL</code>. This app also detects <code>POSTGRES_URL</code> when provided by a Vercel database integration. If Vercel says the database is connected but neither setting appears here, attach it to this project and environment, then redeploy. You should not need to paste the URL into this website.</p>}
       </div>}
 
-      <ol className="grid grid-cols-3 gap-2" aria-label="Setup progress">
+      <ol className="grid grid-cols-3 gap-2 text-xs sm:text-sm" aria-label="Setup progress">
         {steps.map((label, index) => <li key={label} aria-current={step === index ? "step" : undefined} className={`border-t-2 pt-3 text-sm ${index === step ? "border-indigo-600 font-semibold text-indigo-700" : "border-slate-200 text-slate-500"}`}><span className="mr-2">0{index + 1}</span>{label}</li>)}
       </ol>
 
