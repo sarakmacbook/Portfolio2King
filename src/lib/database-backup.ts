@@ -137,6 +137,16 @@ function idField(row: Record<string, unknown>, field: string): number {
   return value;
 }
 
+/** Optional dashboard position; legacy backups simply omit it. */
+function optionalOrderField(row: Record<string, unknown>): number | null {
+  const value = row.sortOrder;
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > 1_000_000) {
+    fail('Backup "sortOrder" must be a whole number between 0 and 1000000.');
+  }
+  return value;
+}
+
 function dateField(row: Record<string, unknown>, field: string): string {
   const value = stringField(row, field, 10);
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -200,6 +210,7 @@ export function parseBackup(input: unknown): PortfolioBackup {
       currentPrice: numberField(row, "currentPrice"),
       realizedPnl: numberField(row, "realizedPnl", { min: Number.NEGATIVE_INFINITY }),
       notes: stringField(row, "notes", 5_000),
+      sortOrder: optionalOrderField(row),
       priceUpdatedAt: timestampField(row, "priceUpdatedAt"),
       createdAt: timestampField(row, "createdAt"),
     };
