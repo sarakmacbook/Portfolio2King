@@ -14,8 +14,11 @@ export default async function PricesPage() {
   const list = await getAllAssets();
   const priceSnaps = await getAllPriceSnapshots();
   const t = today();
-  const staleCrypto = list.some(
-    (a) => a.type === "crypto" && a.symbol.trim() !== "" && localDateString(a.priceUpdatedAt) < t,
+  const stalePrices = list.some(
+    (a) =>
+      (a.type === "crypto" || a.type === "stock") &&
+      a.symbol.trim() !== "" &&
+      localDateString(a.priceUpdatedAt) < t,
   );
 
   const byAsset = new Map<number, PricePoint[]>();
@@ -54,12 +57,13 @@ export default async function PricesPage() {
 
   return (
     <div className="space-y-6">
-      <AutoDailySnapshot stale={staleCrypto} currentDate={t} />
+      <AutoDailySnapshot stale={stalePrices} currentDate={t} />
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Refresh prices</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Fetch live crypto prices from a CEX or DEX, or enter prices manually. Each asset&apos;s daily snapshot price
-          is saved automatically and tracked as its price history below.
+          Fetch live prices — crypto from a CEX or DEX, stocks and ETFs from Yahoo Finance — or enter prices
+          manually. Each asset&apos;s daily snapshot price is saved automatically and tracked as its price history
+          below.
         </p>
       </div>
       <section className="card overflow-hidden">

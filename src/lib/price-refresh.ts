@@ -68,7 +68,7 @@ export type RefreshOptions = {
   /** Evaluate thresholds and deliver alerts (scheduled/background runs). */
   dispatchAlerts?: boolean;
   /** Restrict to assets not yet priced today (legacy daily behaviour). */
-  onlyStaleCrypto?: boolean;
+  onlyStale?: boolean;
 };
 
 type SnapshotRow = { asset_id: number; price: number; date: string };
@@ -235,6 +235,9 @@ export async function refreshPricesWithAlerts(options: RefreshOptions = {}): Pro
         totalCrypto: 0,
         attemptedCrypto: 0,
         refreshedCrypto: 0,
+        totalStocks: 0,
+        attemptedStocks: 0,
+        refreshedStocks: 0,
         snapshottedAssets: 0,
         priceMoves: 0,
         alertsSent: 0,
@@ -253,6 +256,9 @@ export async function refreshPricesWithAlerts(options: RefreshOptions = {}): Pro
       totalCrypto: 0,
       attemptedCrypto: 0,
       refreshedCrypto: 0,
+      totalStocks: 0,
+      attemptedStocks: 0,
+      refreshedStocks: 0,
       snapshottedAssets: 0,
       priceMoves: 0,
       alertsSent: 0,
@@ -264,7 +270,7 @@ export async function refreshPricesWithAlerts(options: RefreshOptions = {}): Pro
 
   const previousPrices = new Map(before.map((asset) => [asset.id, asset.currentPrice] as const));
   const run = await runDailyPriceSnapshot({
-    onlyStaleCrypto: options.onlyStaleCrypto ?? false,
+    onlyStale: options.onlyStale ?? false,
     staleAfterMs: options.staleAfterMinutes ? options.staleAfterMinutes * 60_000 : undefined,
   });
 
@@ -310,8 +316,10 @@ export async function refreshPricesWithAlerts(options: RefreshOptions = {}): Pro
     }
 
     // 2. One failure alert per day when nothing could be refreshed.
-    if (run.attemptedCrypto > 0 && run.refreshedCrypto === 0) {
-      const failure = formatRefreshFailure(summary.date, run.attemptedCrypto);
+    const attemptedPrices = run.attemptedCrypto + run.attemptedStocks;
+    const refreshedPrices = run.refreshedCrypto + run.refreshedStocks;
+    if (attemptedPrices > 0 && refreshedPrices === 0) {
+      const failure = formatRefreshFailure(summary.date, attemptedPrices);
       const result = await dispatchAlert({
         dedupeKey: refreshFailureKey(summary.date),
         kind: "refresh_failure",

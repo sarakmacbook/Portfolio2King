@@ -222,8 +222,9 @@ export async function backgroundRefreshPrices(): Promise<{ refreshed: number; sk
       gateMinutes: settings.backgroundRefreshMinutes,
       dispatchAlerts: true,
     });
-    if (summary.refreshedCrypto > 0) revalidatePath("/", "layout");
-    return { refreshed: summary.refreshedCrypto, skipped: summary.skipped };
+    const refreshed = summary.refreshedCrypto + summary.refreshedStocks;
+    if (refreshed > 0) revalidatePath("/", "layout");
+    return { refreshed, skipped: summary.skipped };
   } catch {
     return { refreshed: 0, skipped: "error" };
   }

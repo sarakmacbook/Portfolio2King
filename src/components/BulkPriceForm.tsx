@@ -34,8 +34,9 @@ export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
 
   async function loadLivePrices() {
     const crypto = rows.filter((row) => row.type === "crypto" && row.symbol.trim());
-    if (!crypto.length) {
-      setLiveMessage("Add a symbol to at least one crypto asset first.");
+    const stocks = rows.filter((row) => row.type === "stock" && row.symbol.trim());
+    if (!crypto.length && !stocks.length) {
+      setLiveMessage("Add a symbol to at least one stock or crypto asset first.");
       return;
     }
     setFetching(true);
@@ -44,22 +45,37 @@ export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
       const response = await fetch("/api/prices/live", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider, quote, assets: crypto.map(({ id, symbol }) => ({ id, symbol })) }),
+        body: JSON.stringify({
+          provider,
+          quote,
+          // Crypto uses the chosen exchange; stocks always use Yahoo Finance.
+          assets: [
+            ...crypto.map(({ id, symbol }) => ({ id, symbol, type: "crypto" as const })),
+            ...stocks.map(({ id, symbol }) => ({ id, symbol, type: "stock" as const })),
+          ],
+        }),
       });
       const data = (await response.json()) as {
         error?: string;
         found?: number;
         results?: Array<{ id?: number; price?: number; error?: string }>;
       };
-      if (!response.ok) throw new Error(data.error || "Could not reach the exchange");
+      if (!response.ok) throw new Error(data.error || "Could not reach the price source");
       const prices: Record<number, string> = {};
       for (const result of data.results || []) {
         if (result.id && result.price) prices[result.id] = String(result.price);
       }
       setValues((current) => ({ ...current, ...prices }));
-      const missing = crypto.length - (data.found || 0);
+      const total = crypto.length + stocks.length;
+      const missing = total - (data.found || 0);
+      const parts = [
+        crypto.length ? `${crypto.length} crypto` : "",
+        stocks.length ? `${stocks.length} stock${stocks.length === 1 ? "" : "s"}` : "",
+      ].filter(Boolean);
       setLiveMessage(
-        `${data.found || 0} live price${data.found === 1 ? "" : "s"} loaded${missing ? ` · ${missing} unavailable` : ""}. Review, then save.`,
+        `${data.found || 0} live price${data.found === 1 ? "" : "s"} loaded (${parts.join(" + ")})${
+          missing ? ` · ${missing} unavailable` : ""
+        }. Review, then save.`,
       );
     } catch (error) {
       setLiveMessage(error instanceof Error ? error.message : "Could not load live prices");
@@ -96,7 +112,9 @@ export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
           </button>
         </div>
         <div className="mt-2 flex flex-col justify-between gap-1 text-xs text-slate-500 sm:flex-row">
-          <span>Uses public market-data APIs only. API keys and exchange account access are not required.</span>
+          <span>
+            Crypto uses the exchange above; stocks use Yahoo Finance. Public market-data APIs only — no API keys.
+          </span>
           {liveMessage && <span className="font-medium text-indigo-600">{liveMessage}</span>}
         </div>
       </div>

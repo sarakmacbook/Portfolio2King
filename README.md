@@ -5,9 +5,9 @@ Next.js 16 (App Router) app backed by PostgreSQL through Drizzle ORM: you run it
 on your own machine, VPS, or home server, point it at your own database, and the
 data stays there.
 
-Prices are entered by hand, with optional one-click crypto quotes from public
-exchange APIs. There is no hosted account, no analytics, and no proprietary
-backend. Ledgerly has **no authentication or per-user data isolation** — protect
+Prices are entered by hand, with optional one-click quotes from public exchange
+APIs (crypto) and Yahoo Finance (stocks). There is no hosted account, no
+analytics, and no proprietary backend. Ledgerly has **no authentication or per-user data isolation** — protect
 the deployment before storing real portfolio data (see the
 [self-hosting security checklist](#self-hosting-security-checklist)).
 
@@ -16,8 +16,9 @@ the deployment before storing real portfolio data (see the
 - Cash accounts (with a Cambodian bank picker), stocks, crypto, and other assets.
 - Buys, sells, deposits, withdrawals, and income, with average cost and realized
   / unrealized P/L replayed from the full transaction history.
-- Manual prices plus live crypto prices from Bybit, OKX, Binance, Coinbase,
-  Kraken, or DexScreener — no API keys required.
+- Manual prices plus live crypto quotes from Bybit, OKX, Binance, Coinbase,
+  Kraken, or DexScreener, and live stock/ETF quotes from Yahoo Finance — no API
+  keys required.
 - Crypto asset search that falls back automatically between public data
   providers when one is rate-limited or down.
 - Daily per-asset price snapshots and portfolio snapshots, allocation donut and
@@ -89,8 +90,10 @@ whose tags record the original currency.
 
 - FX rates, currency conversion, historical FX, or rate lookups.
 - Per-currency subtotals, allocation by currency, or a currency selector.
-- Per-asset currencies — stock and crypto prices are assumed to be USD (USDT is
-  treated as equivalent).
+- Per-asset currencies — every price is stored in USD (USDT is treated as
+  equivalent). A stock quoted in another currency is converted once, when the
+  quote is fetched (see [stock prices](#stock-prices-yahoo-finance)); there is no
+  FX table, no historical FX, and no way to view an asset in its local currency.
 - Changing the reporting currency. That needs a code change to `CURRENCY` plus
   reconciling every stored number; the schema deliberately has no currency
   column, which is also why backups move cleanly between instances.
@@ -515,7 +518,7 @@ curl -fsS -H "Authorization: Bearer $CRON_SECRET" \
 */15 * * * * /usr/local/bin/ledgerly-refresh
 ```
 
-Every run refreshes live crypto prices, records the daily snapshot, and sends
+Every run refreshes live crypto and stock prices, records the daily snapshot, and sends
 Web Push / Telegram alerts for moves beyond the threshold — and, at the time you
 picked, the portfolio update. The daily `/api/cron/daily-snapshot` endpoint
 remains for existing schedules and does the same thing.
@@ -812,6 +815,37 @@ vercel --prod
   registered by the alerts page, so notifications arrive even when the tab is
   backgrounded (a fully closed browser still depends on the browser/OS push
   service, which is outside the app’s control).
+
+### Stock prices (Yahoo Finance)
+
+Stocks and ETFs are priced through Yahoo Finance's public chart endpoint
+(`/v8/finance/chart/<symbol>`). Like the crypto providers, it needs no API key
+and no account.
+
+- **Symbols are Yahoo's**: `AAPL`, `MSFT`, `VOO`, `BRK-B` (class shares),
+  `7203.T` (Tokyo), `VOD.L` (London), `^GSPC` (indices). A dotted class share
+  such as `BRK.B` is retried with a dash automatically, because Tokyo-style
+  dotted suffixes must keep their dot.
+- **Everything is stored in USD.** Yahoo reports the listing currency, so a
+  London quote in pence (`GBp`) is divided by 100 and converted with Yahoo's
+  `GBPUSD=X` rate; `ZAc` and `ILA` are handled the same way. If no FX rate can be
+  fetched the quote is rejected with a clear message instead of storing a number
+  that is wrong by 100×.
+- **Which price**: `meta.regularMarketPrice`, falling back to the last close
+  when a symbol has not traded that session. Quotes are delayed market data, not
+  a real-time feed.
+- **Politeness**: requests are serialised with a small gap and retried once on
+  the second Yahoo host, so a portfolio of 30 holdings does not trip the rate
+  limit. A `429` from Yahoo is reported ("try again in a minute") and the holding
+  keeps its previous price until the next refresh.
+- **Both refresh paths use it**: the one-click **Fetch live prices** button on
+  `/prices` (crypto from your chosen exchange, stocks from Yahoo in the same
+  click) and the scheduled/background refresh, which stores the daily price
+  snapshot so stock price history and alerts work exactly like crypto.
+
+> Yahoo's endpoint is unofficial and can change or rate-limit without notice.
+> Failures never corrupt prices: the previous value is kept and the refresh
+> summary reports how many holdings could not be priced.
 
 ### Crypto search providers
 
