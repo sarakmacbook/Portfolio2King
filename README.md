@@ -142,6 +142,30 @@ Every screen is built to work on a phone as well as a desktop:
 - Long names, notes and totals truncate or wrap instead of pushing the layout
   sideways; inputs use a 16 px font on small screens so iOS does not zoom.
 
+## Web clip tab bar
+
+Installed to the Home Screen (iOS **Share → Add to Home Screen**, Android
+**Install app**), Ledgerly opens without browser chrome and switches to a compact
+tab strip: **Home · Prices · Activity · Alerts · Database**, grey when inactive,
+black and underlined for the current section.
+
+- The strip only appears in **standalone** display mode (`display-mode:
+  standalone`, or `navigator.standalone` on iOS). A normal browser tab keeps the
+  gradient header and its menu; nothing changes there.
+- The mode is detected by the inline script in the root layout, before first
+  paint, so there is no flash of the wrong header and no hydration mismatch. The
+  strip is always in the markup and hidden with CSS.
+- The header becomes a sticky white strip with safe-area padding, and the status
+  bar switches to `default` (dark text on light) to match. Dark mode gets a dark
+  strip.
+- The brand lockup, hamburger menu and theme switch are hidden in this mode to
+  keep the strip clean; the theme follows the value saved in a browser session.
+- Tab labels are the short ones from `src/lib/nav-links.ts`; the desktop menu
+  uses the long labels from the same list.
+
+**Preview it without installing:** in Chrome/Edge DevTools → **⋮ → More tools →
+Rendering → Emulate CSS media feature `display-mode` → `standalone`**.
+
 ## Background refresh and alerts
 
 Ledgerly can keep crypto prices fresh on its own, notify you when a holding
