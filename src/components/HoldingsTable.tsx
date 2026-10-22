@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ASSET_TYPES, type AssetType } from "@/lib/constants";
+import type { AssetType } from "@/lib/constants";
 import { TYPE_META, money, pct, pnlColor, qty } from "@/lib/format";
 import CryptoLogo from "./CryptoLogo";
 
@@ -23,22 +23,41 @@ export type HoldingRow = {
 };
 
 type SortKey = "name" | "value" | "pnl" | "pnlPct" | "weight";
+type HoldingFilter = AssetType | "all" | "stablecoin" | "volatile";
+
+const FILTERS: Array<{ value: HoldingFilter; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "cash", label: "Cash" },
+  { value: "stock", label: "Stocks" },
+  { value: "stablecoin", label: "Stablecoins" },
+  { value: "volatile", label: "Volatile crypto" },
+  { value: "other", label: "Other" },
+];
 
 export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
-  const [filter, setFilter] = useState<AssetType | "all">("all");
+  const [filter, setFilter] = useState<HoldingFilter>("all");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "value", dir: -1 });
 
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: rows.length };
-    for (const r of rows) c[r.type] = (c[r.type] ?? 0) + 1;
+    const c: Record<string, number> = { all: rows.length, stablecoin: 0, volatile: 0 };
+    for (const r of rows) {
+      c[r.type] = (c[r.type] ?? 0) + 1;
+      if (r.type === "crypto") c[r.cryptoCategory] = (c[r.cryptoCategory] ?? 0) + 1;
+    }
     return c;
   }, [rows]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return rows
-      .filter((r) => filter === "all" || r.type === filter)
+      .filter((r) => {
+        if (filter === "all") return true;
+        if (filter === "stablecoin" || filter === "volatile") {
+          return r.type === "crypto" && r.cryptoCategory === filter;
+        }
+        return r.type === filter;
+      })
       .filter((r) => !q || r.name.toLowerCase().includes(q) || r.symbol.toLowerCase().includes(q))
       .sort((a, b) => {
         const k = sort.key;
@@ -66,18 +85,18 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
     <div>
       <div className="flex flex-col gap-3 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex gap-1 overflow-x-auto">
-          {(["all", ...ASSET_TYPES] as const).map((t) => (
+          {FILTERS.map(({ value, label }) => (
             <button
-              key={t}
+              key={value}
               type="button"
-              onClick={() => setFilter(t)}
+              onClick={() => setFilter(value)}
               className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                filter === t ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                filter === value ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
               }`}
             >
-              {t === "all" ? "All" : TYPE_META[t].label}
-              <span className={`ml-1.5 text-xs ${filter === t ? "text-slate-300" : "text-slate-400"}`}>
-                {counts[t] ?? 0}
+              {label}
+              <span className={`ml-1.5 text-xs ${filter === value ? "text-slate-300" : "text-slate-400"}`}>
+                {counts[value] ?? 0}
               </span>
             </button>
           ))}
