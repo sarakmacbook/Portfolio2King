@@ -153,14 +153,18 @@ an installed web clip) and/or **Telegram**.
 | `GET /api/cron/refresh-prices` | Your scheduler | Yes |
 | `GET /api/cron/daily-snapshot` | Existing daily schedules / Vercel Cron | Yes |
 
-- Each automatic run compares every stock and crypto holding with **yesterday’s
-  close** (the latest price snapshot before today). Holdings without history are
-  compared with the price they had at the previous refresh.
-- An alert fires when the move is at least the configured threshold (default
-  **±5 %**). Cash is never alerted.
-- Alerts are deduplicated per asset, direction, day, and 5-point severity band
-  (`price:2:2026-10-22:up:2`), so a 15-minute schedule sends one message when a
-  coin jumps 6 % and a second only if it escalates past 10 %.
+- Each automatic run compares every stock and crypto holding over the configured
+  **window**: **day** (the latest price snapshot before today, i.e. yesterday’s
+  close) or **month** (the latest snapshot at least 30 days back). Holdings
+  without enough history — including new buys — are compared with the price they
+  had at the previous refresh, and a month rule with less than 30 days of history
+  says so in the message (“the earliest recorded price (12 days ago)”).
+- An alert fires when the move over that window is at least the configured
+  threshold (default **±5 %**). Cash is never alerted.
+- Alerts are deduplicated per asset, window, direction, day, and 5-point severity
+  band (`price:2:2026-10-22:day:up:2`), so a 15-minute schedule sends one message
+  when a coin jumps 6 % and a second only if it escalates past 10 %. Day and
+  month rules keep separate histories and never suppress each other.
 - If every price provider fails, one **“Price refresh failed”** alert is sent per
   day instead of silently keeping stale prices.
 - The server decides whether a refresh is due (`refresh.intervalMinutes`), so
@@ -227,6 +231,7 @@ Configure on `/alerts`; values live in the `app_settings` table.
 | --- | --- | --- |
 | Automatic alerts | on | on/off (manual tests still work when off) |
 | Threshold | 5 % | 0.5 – 50 % |
+| Comparison window | day | day (vs yesterday’s close) or month (vs 30 days ago) |
 | Channels | push + telegram | any combination |
 | Background refresh | 15 min | off, or 5 – 720 min |
 

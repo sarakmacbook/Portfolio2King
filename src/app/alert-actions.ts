@@ -7,9 +7,11 @@ import {
   MAX_THRESHOLD_PCT,
   MIN_REFRESH_MINUTES,
   MIN_THRESHOLD_PCT,
+  parseAlertWindow,
   parseChannels,
   parseRefreshMinutes,
   parseThresholdPct,
+  type AlertWindow,
 } from "@/lib/alert-rules";
 import { refreshPricesWithAlerts } from "@/lib/price-refresh";
 import {
@@ -32,6 +34,10 @@ export type AlertActionState = {
   warning?: string;
 };
 
+function describeWindow(window: AlertWindow): string {
+  return window === "month" ? "30 days" : "a day";
+}
+
 const TEST_COOLDOWN_MS = 15_000;
 let lastTestAt = 0;
 
@@ -50,17 +56,21 @@ export async function saveAlertSettingsAction(
     if (backgroundRefreshMinutes === null) {
       throw new Error(`Background refresh must be off (0) or between ${MIN_REFRESH_MINUTES} and ${MAX_REFRESH_MINUTES} minutes.`);
     }
+    const window = parseAlertWindow(formData.get("window") ?? "day");
+    if (window === null) {
+      throw new Error("Comparison window must be a day or a month.");
+    }
     const channels = parseChannels(formData.getAll("channels"));
     const enabled = formData.get("enabled") === "on";
 
-    await saveAlertSettings({ enabled, thresholdPct, channels, backgroundRefreshMinutes });
+    await saveAlertSettings({ enabled, thresholdPct, window, channels, backgroundRefreshMinutes });
     revalidatePath("/alerts");
     revalidatePath("/", "layout");
     return {
       ok: true,
       ts: Date.now(),
       message: enabled
-        ? `Saved. Alerts fire when a holding moves ±${thresholdPct}%.`
+        ? `Saved. Alerts fire when a holding moves ±${thresholdPct}% over ${describeWindow(window)}.`
         : "Saved. Automatic alerts are turned off.",
     };
   } catch (error) {

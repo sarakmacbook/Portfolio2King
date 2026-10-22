@@ -53,7 +53,8 @@ export default async function AlertsPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Alerts</h1>
         <p className="mt-1 max-w-2xl text-sm text-slate-500">
           Refresh prices in the background and get notified on this device (web clip) and in Telegram when a holding
-          moves beyond your threshold. Last price update: <strong className="text-slate-700">{timeAgo(lastRefresh)}</strong>.
+          moves beyond your threshold over a day or a month. Last price update:{" "}
+          <strong className="text-slate-700">{timeAgo(lastRefresh)}</strong>.
         </p>
       </div>
 
@@ -83,7 +84,7 @@ export default async function AlertsPage() {
       <section className="card p-5 sm:p-6">
         <h2 className="text-base font-semibold text-slate-900">Alert rules</h2>
         <p className="mt-1 mb-5 text-sm text-slate-500">
-          Thresholds apply to stocks and crypto. Cash is never alerted.
+          Thresholds apply to stocks and crypto, measured over the window you choose. Cash is never alerted.
         </p>
         <AlertSettingsForm settings={settings} telegramConnected={telegram.configured} />
       </section>
@@ -139,7 +140,8 @@ export default async function AlertsPage() {
         </div>
         {recent.length === 0 ? (
           <p className="px-5 py-10 text-center text-sm text-slate-400">
-            No alerts yet. They appear here once a holding moves beyond {settings.thresholdPct}%.
+            No alerts yet. They appear here once a holding moves beyond {settings.thresholdPct}% over{" "}
+            {settings.window === "month" ? "30 days" : "a day"}.
           </p>
         ) : (
           <ul className="divide-y divide-slate-100">

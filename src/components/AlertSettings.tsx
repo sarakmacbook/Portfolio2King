@@ -80,7 +80,7 @@ export default function AlertSettingsForm({
         </span>
       </label>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div>
           <label className="label" htmlFor="thresholdPct">
             Alert threshold (%)
@@ -97,7 +97,20 @@ export default function AlertSettingsForm({
             className="input"
           />
           <p className="mt-1 text-xs text-slate-400">
-            Compared with yesterday&apos;s close, or the price at the previous refresh for new holdings.
+            The move must reach this size within the window to alert.
+          </p>
+        </div>
+        <div>
+          <label className="label" htmlFor="window">
+            Compare over
+          </label>
+          <select id="window" name="window" defaultValue={settings.window} className="input">
+            <option value="day">Day — vs yesterday&apos;s close</option>
+            <option value="month">Month — vs the price 30 days ago</option>
+          </select>
+          <p className="mt-1 text-xs text-slate-400">
+            Month rules catch slower swings; day rules catch single-session moves. New holdings without history compare
+            with the previous refresh.
           </p>
         </div>
         <div>
@@ -155,7 +168,7 @@ export default function AlertSettingsForm({
 
       <div className="flex flex-wrap items-center gap-3">
         <SubmitButton>Save alert settings</SubmitButton>
-        <span className="text-xs text-slate-400">Alerts are deduplicated: at most one per asset, direction and day.</span>
+        <span className="text-xs text-slate-400">Alerts are deduplicated: at most one per asset, window, direction and day.</span>
       </div>
       <Note state={state} />
     </form>
