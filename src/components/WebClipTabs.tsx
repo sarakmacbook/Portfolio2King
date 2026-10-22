@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { NAV_LINKS, isActivePath } from "@/lib/nav-links";
+import { toggleTheme } from "@/lib/theme";
 
 /**
  * The tab strip shown when Ledgerly is running as an installed web clip
@@ -45,6 +46,18 @@ export default function WebClipTabs() {
             </Link>
           );
         })}
+        {/* No React state: the icon is chosen by the `dark` class in CSS, so the
+            server and client markup stay identical. */}
+        <button
+          type="button"
+          className="webclip-theme"
+          onClick={() => toggleTheme()}
+          aria-label="Toggle color theme"
+          title="Toggle color theme"
+        >
+          <span className="theme-moon" aria-hidden="true">☾</span>
+          <span className="theme-sun" aria-hidden="true">☀</span>
+        </button>
       </div>
     </nav>
   );

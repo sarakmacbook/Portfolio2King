@@ -276,6 +276,44 @@ html[data-webclip="true"] .site-tools { display: none; }
 .webclip-tab.is-active:hover { color: #0a0a0a; }
 .webclip-tab.is-active::after { background: #0a0a0a; }
 
+/* Theme control inside the strip. It carries no state of its own: the moon is
+   shown in the light theme (tap → dark) and the sun in the dark theme. */
+html[data-webclip="true"] .webclip-theme {
+  display: inline-flex;
+  flex: none;
+  align-self: center;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  margin-bottom: 0.25rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #8a8a8e;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 140ms ease, background-color 140ms ease, transform 120ms ease;
+}
+html.dark .webclip-theme { color: #8a90a0; }
+html[data-webclip="true"] .webclip-theme:active { transform: scale(.92); }
+/* Hover is reserved for real pointers: on a phone a tap would otherwise leave
+   the button stuck in its hover state, which reads as a grey blob. */
+@media (hover: hover) and (pointer: fine) {
+  html[data-webclip="true"] .webclip-theme:hover { color: #3f3f46; background: rgb(15 23 42 / .06); }
+  html.dark .webclip-theme:hover { color: #f4f5f9; background: rgb(148 163 184 / .12); }
+}
+
+/* On the narrowest phones the five labels come first; the control is dropped
+   rather than pushing a tab off screen (the header switch is unavailable in
+   web clip mode, so below 350 px the system theme is used). */
+@media (max-width: 349px) {
+  html[data-webclip="true"] .webclip-theme { display: none; }
+}
+
 /* Dark theme keeps the same geometry with surfaces that match the app. */
 html.dark[data-webclip="true"] .site-header {
   background: rgb(11 13 23 / .92);
