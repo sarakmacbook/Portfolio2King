@@ -3,12 +3,16 @@ import { afterEach, test } from "node:test";
 import {
   DEFAULT_ALERT_SETTINGS,
   SETTING_KEYS,
+  baselineCutoffDate,
+  daysBetweenIso,
+  describeBaseline,
   detectPriceMoves,
   formatAlertText,
   formatMovePercent,
   formatPriceMove,
   formatRefreshFailure,
   parseAlertSettings,
+  parseAlertWindow,
   parseChannels,
   parsePushSubscription,
   parseRefreshMinutes,
@@ -16,6 +20,7 @@ import {
   priceAlertKey,
   refreshFailureKey,
   settingsToRows,
+  shiftIsoDate,
   telegramConfigFromEnv,
   telegramRequest,
 } from "../src/lib/alert-rules";
@@ -35,12 +40,14 @@ test("parseAlertSettings falls back to defaults and honours stored values", () =
   const parsed = parseAlertSettings({
     [SETTING_KEYS.enabled]: "false",
     [SETTING_KEYS.thresholdPct]: "2.5",
+    [SETTING_KEYS.window]: "month",
     [SETTING_KEYS.channels]: "telegram",
     [SETTING_KEYS.backgroundRefreshMinutes]: "30",
   });
   assert.deepEqual(parsed, {
     enabled: false,
     thresholdPct: 2.5,
+    window: "month",
     channels: ["telegram"],
     backgroundRefreshMinutes: 30,
   });
@@ -49,6 +56,34 @@ test("parseAlertSettings falls back to defaults and honours stored values", () =
   assert.deepEqual(parseAlertSettings({ [SETTING_KEYS.channels]: "" }).channels, []);
   // Unknown channels are ignored, order is canonical.
   assert.deepEqual(parseChannels("telegram,push,email"), ["push", "telegram"]);
+});
+
+test("comparison windows parse, default to a day, and shift dates safely", () => {
+  assert.equal(parseAlertWindow("day"), "day");
+  assert.equal(parseAlertWindow(" DAY "), "day");
+  assert.equal(parseAlertWindow("month"), "month");
+  assert.equal(parseAlertWindow("monthly"), "month");
+  assert.equal(parseAlertWindow("week"), null);
+  assert.equal(parseAlertWindow(""), null);
+  assert.equal(parseAlertWindow(null), null);
+
+  // Unknown or missing values fall back to the daily rule.
+  assert.equal(parseAlertSettings({ [SETTING_KEYS.window]: "year" }).window, "day");
+  assert.equal(parseAlertSettings({}).window, DEFAULT_ALERT_SETTINGS.window);
+
+  assert.equal(shiftIsoDate("2026-10-22", -1), "2026-10-21");
+  assert.equal(shiftIsoDate("2026-03-01", -1), "2026-02-28");
+  assert.equal(shiftIsoDate("2026-01-01", -30), "2025-12-02");
+  assert.equal(daysBetweenIso("2026-09-22", "2026-10-22"), 30);
+  assert.equal(daysBetweenIso("2026-10-22", "2026-10-22"), 0);
+
+  assert.equal(baselineCutoffDate("day", "2026-10-22"), "2026-10-21");
+  assert.equal(baselineCutoffDate("month", "2026-10-22"), "2026-09-22");
+
+  assert.equal(describeBaseline("day", 1), "yesterday's close");
+  assert.equal(describeBaseline("month", 30), "the price 30 days ago");
+  // Short history must not be described as a full month.
+  assert.equal(describeBaseline("month", 5, true), "the earliest recorded price (5 days ago)");
 });
 
 test("invalid settings fall back instead of breaking the page", () => {
@@ -72,12 +107,19 @@ test("invalid settings fall back instead of breaking the page", () => {
 });
 
 test("settings rows round-trip through the parser", () => {
-  const settings = { enabled: false, thresholdPct: 7.5, channels: ["push"] as const, backgroundRefreshMinutes: 60 };
+  const settings = {
+    enabled: false,
+    thresholdPct: 7.5,
+    window: "month" as const,
+    channels: ["push"] as const,
+    backgroundRefreshMinutes: 60,
+  };
   const rows = settingsToRows({ ...settings, channels: [...settings.channels] });
   const map = Object.fromEntries(rows.map((row) => [row.key, row.value]));
   assert.deepEqual(parseAlertSettings(map), {
     enabled: false,
     thresholdPct: 7.5,
+    window: "month",
     channels: ["push"],
     backgroundRefreshMinutes: 60,
   });
@@ -145,12 +187,17 @@ test("price alert keys dedupe per day but escalate with severity", () => {
   const otherDay = priceAlertKey(base, "2026-10-23");
   const down = priceAlertKey({ ...base, direction: "down", changePct: -0.06 }, "2026-10-22");
 
-  assert.equal(small, "price:7:2026-10-22:up:1");
+  assert.equal(small, "price:7:2026-10-22:day:up:1");
   assert.equal(same, small);
   assert.notEqual(bigger, small);
-  assert.equal(bigger, "price:7:2026-10-22:up:3");
+  assert.equal(bigger, "price:7:2026-10-22:day:up:3");
   assert.notEqual(otherDay, small);
   assert.notEqual(down, small);
+
+  // A month rule records its own alerts, so it never shadows the day rule.
+  const monthly = priceAlertKey(base, "2026-10-22", "month");
+  assert.equal(monthly, "price:7:2026-10-22:month:up:1");
+  assert.notEqual(monthly, small);
   assert.equal(refreshFailureKey("2026-10-22"), "refresh-failure:2026-10-22");
 });
 

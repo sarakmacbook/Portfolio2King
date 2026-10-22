@@ -8,11 +8,15 @@ import {
   pruneAlertEvents,
 } from "@/lib/alerts";
 import {
+  baselineCutoffDate,
+  daysBetweenIso,
+  describeBaseline,
   detectPriceMoves,
   formatPriceMove,
   formatRefreshFailure,
   priceAlertKey,
   refreshFailureKey,
+  type AlertWindow,
   type PriceBaseline,
 } from "@/lib/alert-rules";
 import { ensureSchema, runDailyPriceSnapshot, today, type DailySnapshotRunResult } from "@/lib/portfolio";
@@ -36,23 +40,66 @@ export type RefreshOptions = {
   onlyStaleCrypto?: boolean;
 };
 
-/**
- * Baselines for alert comparisons: the most recent close before today, or — for
- * assets without history — the price they had before this refresh.
- */
-async function loadBaselines(previousPrices: Map<number, number>): Promise<Map<number, PriceBaseline>> {
-  const baselines = new Map<number, PriceBaseline>();
-  const result = await db.execute<{ asset_id: number; price: number }>(sql`
-    SELECT DISTINCT ON (asset_id) asset_id, price
+type SnapshotRow = { asset_id: number; price: number; date: string };
+
+/** Latest snapshot per asset on or before an ISO date. */
+async function latestSnapshotOnOrBefore(cutoff: string): Promise<SnapshotRow[]> {
+  const result = await db.execute<SnapshotRow>(sql`
+    SELECT DISTINCT ON (asset_id) asset_id, price, date::text AS date
     FROM price_snapshots
-    WHERE date < ${today()}::date AND price > 0
+    WHERE price > 0 AND date <= ${cutoff}::date
     ORDER BY asset_id, date DESC
   `);
-  for (const row of result.rows) {
-    baselines.set(Number(row.asset_id), { price: Number(row.price), label: "yesterday's close" });
+  return result.rows;
+}
+
+/** Oldest snapshot per asset before today — used when the window is not covered. */
+async function oldestSnapshotBefore(todayIso: string): Promise<SnapshotRow[]> {
+  const result = await db.execute<SnapshotRow>(sql`
+    SELECT DISTINCT ON (asset_id) asset_id, price, date::text AS date
+    FROM price_snapshots
+    WHERE price > 0 AND date < ${todayIso}::date
+    ORDER BY asset_id, date ASC
+  `);
+  return result.rows;
+}
+
+/**
+ * Baselines for alert comparisons, based on the configured window:
+ *
+ * - **day** — the latest close before today ("yesterday's close"), falling back
+ *   to the price at the previous refresh for holdings without history.
+ * - **month** — the latest close at least 30 days back. With less history the
+ *   oldest recorded price is used and the message says so, so a three-day-old
+ *   portfolio never claims a 30-day move.
+ */
+async function loadBaselines(
+  previousPrices: Map<number, number>,
+  window: AlertWindow,
+): Promise<Map<number, PriceBaseline>> {
+  const todayIso = today();
+  const baselines = new Map<number, PriceBaseline>();
+
+  const cutoff = baselineCutoffDate(window, todayIso);
+  for (const row of await latestSnapshotOnOrBefore(cutoff)) {
+    const id = Number(row.asset_id);
+    const gap = daysBetweenIso(row.date, todayIso);
+    baselines.set(id, { price: Number(row.price), label: describeBaseline(window, gap) });
   }
+
+  if (window === "month") {
+    for (const row of await oldestSnapshotBefore(todayIso)) {
+      const id = Number(row.asset_id);
+      if (baselines.has(id)) continue;
+      const gap = daysBetweenIso(row.date, todayIso);
+      baselines.set(id, { price: Number(row.price), label: describeBaseline(window, gap, true) });
+    }
+  }
+
   for (const [id, price] of previousPrices) {
-    if (!baselines.has(id) && price > 0) baselines.set(id, { price, label: "the last refresh" });
+    if (!baselines.has(id) && price > 0) {
+      baselines.set(id, { price, label: "the last refresh" });
+    }
   }
   return baselines;
 }
@@ -131,16 +178,16 @@ export async function refreshPricesWithAlerts(options: RefreshOptions = {}): Pro
 
   const errors = new Set<string>();
 
-  // 1. Threshold alerts for price moves.
+  // 1. Threshold alerts for price moves over the configured window.
   const after = await loadAssets();
-  const baselines = await loadBaselines(previousPrices);
+  const baselines = await loadBaselines(previousPrices, settings.window);
   const moves = detectPriceMoves(baselines, after, settings.thresholdPct);
   summary.priceMoves = moves.length;
 
   for (const move of moves) {
     const alert = formatPriceMove(move);
     const result = await dispatchAlert({
-      dedupeKey: priceAlertKey(move, summary.date),
+      dedupeKey: priceAlertKey(move, summary.date, settings.window),
       kind: "price_move",
       assetId: move.assetId,
       title: alert.title,

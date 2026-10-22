@@ -7,11 +7,20 @@
 export const ALERT_CHANNELS = ["push", "telegram"] as const;
 export type AlertChannel = (typeof ALERT_CHANNELS)[number];
 
+/** Window a price move is measured over: one day, or one month (30 days). */
+export const ALERT_WINDOWS = ["day", "month"] as const;
+export type AlertWindow = (typeof ALERT_WINDOWS)[number];
+
+/** How far back each window looks, in days. A month is a fixed 30 days. */
+export const WINDOW_DAYS: Record<AlertWindow, number> = { day: 1, month: 30 };
+
 export type AlertSettings = {
   /** Master switch for automatic alerts (does not affect manual test sends). */
   enabled: boolean;
   /** Percentage move that triggers an alert, e.g. 5 → ±5 %. */
   thresholdPct: number;
+  /** Compare against yesterday's close, or against the price ~30 days ago. */
+  window: AlertWindow;
   channels: AlertChannel[];
   /** While the app is open, refresh prices at most this often. 0 disables it. */
   backgroundRefreshMinutes: number;
@@ -25,6 +34,7 @@ export const MAX_REFRESH_MINUTES = 720;
 export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
   enabled: true,
   thresholdPct: 5,
+  window: "day",
   channels: ["push", "telegram"],
   backgroundRefreshMinutes: 15,
 };
@@ -33,6 +43,7 @@ export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
 export const SETTING_KEYS = {
   enabled: "alerts.enabled",
   thresholdPct: "alerts.thresholdPct",
+  window: "alerts.window",
   channels: "alerts.channels",
   backgroundRefreshMinutes: "refresh.intervalMinutes",
 } as const;
@@ -51,6 +62,51 @@ export function parseThresholdPct(raw: unknown): number | null {
   if (value < MIN_THRESHOLD_PCT || value > MAX_THRESHOLD_PCT) return null;
   // One decimal is enough; keeps alert keys stable.
   return Math.round(value * 10) / 10;
+}
+
+/** Accepts `day`, `month` (and common spellings); anything else is invalid. */
+export function parseAlertWindow(raw: unknown): AlertWindow | null {
+  if (raw === null || raw === undefined) return null;
+  const value = String(raw).trim().toLowerCase();
+  if (["day", "daily", "1d", "24h", "yesterday"].includes(value)) return "day";
+  if (["month", "monthly", "30d", "30 days"].includes(value)) return "month";
+  return null;
+}
+
+/** Shifts an ISO date (`YYYY-MM-DD`) by whole days, in UTC. */
+export function shiftIsoDate(date: string, days: number): string {
+  const [year, month, day] = date.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, day + days));
+  return shifted.toISOString().slice(0, 10);
+}
+
+/** Whole days between two ISO dates (positive when `later` is after `earlier`). */
+export function daysBetweenIso(earlier: string, later: string): number {
+  const toUtc = (value: string) => {
+    const [year, month, day] = value.split("-").map(Number);
+    return Date.UTC(year, month - 1, day);
+  };
+  return Math.round((toUtc(later) - toUtc(earlier)) / 86_400_000);
+}
+
+/**
+ * Latest snapshot date a move is measured from: yesterday for a day window,
+ * 30 days back for a month window.
+ */
+export function baselineCutoffDate(window: AlertWindow, today: string): string {
+  return shiftIsoDate(today, -WINDOW_DAYS[window]);
+}
+
+/**
+ * Wording for the baseline price an alert compares against.
+ * `earliest` marks the fallback used when there is less than a full window of
+ * history, so the message never claims a 30-day move from a 5-day-old price.
+ */
+export function describeBaseline(window: AlertWindow, gapDays: number, earliest = false): string {
+  const ago = gapDays <= 1 ? "yesterday" : `${gapDays} days ago`;
+  if (earliest) return `the earliest recorded price (${ago})`;
+  if (window === "day") return gapDays <= 1 ? "yesterday's close" : `the close ${ago}`;
+  return `the price ${ago}`;
 }
 
 export function parseChannels(raw: unknown): AlertChannel[] {
@@ -77,6 +133,7 @@ export function parseAlertSettings(values: Record<string, string | null | undefi
   return {
     enabled: parseBooleanSetting(values[SETTING_KEYS.enabled], DEFAULT_ALERT_SETTINGS.enabled),
     thresholdPct: threshold ?? DEFAULT_ALERT_SETTINGS.thresholdPct,
+    window: parseAlertWindow(values[SETTING_KEYS.window]) ?? DEFAULT_ALERT_SETTINGS.window,
     // An explicitly empty channel list is respected ("no channels").
     channels:
       values[SETTING_KEYS.channels] === undefined || values[SETTING_KEYS.channels] === null
@@ -90,6 +147,7 @@ export function settingsToRows(settings: AlertSettings): Array<{ key: string; va
   return [
     { key: SETTING_KEYS.enabled, value: settings.enabled ? "true" : "false" },
     { key: SETTING_KEYS.thresholdPct, value: String(settings.thresholdPct) },
+    { key: SETTING_KEYS.window, value: settings.window },
     { key: SETTING_KEYS.channels, value: settings.channels.join(",") },
     { key: SETTING_KEYS.backgroundRefreshMinutes, value: String(settings.backgroundRefreshMinutes) },
   ];
@@ -158,12 +216,13 @@ export function detectPriceMoves(
 }
 
 /**
- * One alert per asset, per direction, per day, per 5-point severity bucket, so a
- * 15 % crash still alerts after a 6 % dip but a flat market does not repeat.
+ * One alert per asset, per window, per direction, per day, per 5-point severity
+ * bucket, so a 15 % crash still alerts after a 6 % dip but a flat market does
+ * not repeat. Day and month rules never dedupe each other.
  */
-export function priceAlertKey(move: PriceMove, date: string): string {
+export function priceAlertKey(move: PriceMove, date: string, window: AlertWindow = "day"): string {
   const severity = Math.max(1, Math.floor(Math.abs(move.changePct) * 100 / 5));
-  return `price:${move.assetId}:${date}:${move.direction}:${severity}`;
+  return `price:${move.assetId}:${date}:${window}:${move.direction}:${severity}`;
 }
 
 export function refreshFailureKey(date: string): string {
