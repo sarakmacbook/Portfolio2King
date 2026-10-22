@@ -28,8 +28,6 @@ export const assets = pgTable("assets", {
   currentPrice: doublePrecision("current_price").notNull().default(0),
   realizedPnl: doublePrecision("realized_pnl").notNull().default(0),
   notes: text("notes").notNull().default(""),
-  /** Explicit dashboard position; null keeps the legacy type/name ordering. */
-  sortOrder: integer("sort_order"),
   priceUpdatedAt: timestamp("price_updated_at", { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

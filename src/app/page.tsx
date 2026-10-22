@@ -4,13 +4,9 @@ import Link from "next/link";
 import AddAssetDialog from "@/components/AddAssetDialog";
 import AutoDailySnapshot from "@/components/AutoDailySnapshot";
 import { Donut, HistoryChart, type Point } from "@/components/Charts";
-import DashboardLayout from "@/components/DashboardLayout";
 import HoldingsTable, { type HoldingRow } from "@/components/HoldingsTable";
 import RefreshPricesButton from "@/components/RefreshPricesButton";
-import { loadDashboardOrder, loadGroupOrder } from "@/lib/asset-order-db";
-import { allocationSlices } from "@/lib/dashboard-layout";
-import type { HoldingGroupKey } from "@/lib/holdings-groups";
-import { KIND_META, fmtDate, money, pct, pnlColor, qty } from "@/lib/format";
+import { KIND_META, TYPE_META, fmtDate, money, pct, pnlColor, qty } from "@/lib/format";
 import {
   assetCost,
   assetValue,
@@ -29,12 +25,10 @@ export const dynamic = "force-dynamic";
 export default async function Dashboard() {
   if (!isDatabaseConfigured()) return <DatabaseSetup />;
   const list = await getAllAssets();
-  const [snaps, priceSnaps, activity, groupOrder, dashboardOrder] = await Promise.all([
+  const [snaps, priceSnaps, activity] = await Promise.all([
     getSnapshots(),
     getAllPriceSnapshots(),
     getRecentActivity(6),
-    loadGroupOrder(),
-    loadDashboardOrder(),
   ]);
   const totals = computeTotals(list);
   const t = today();
@@ -90,15 +84,13 @@ export default async function Dashboard() {
   const volatileCryptoValue = list
     .filter((asset) => asset.type === "crypto" && asset.cryptoCategory !== "stablecoin")
     .reduce((sum, asset) => sum + assetValue(asset), 0);
-  const groupValues: Record<HoldingGroupKey, number> = {
-    cash: totals.byType.cash,
-    stock: totals.byType.stock,
-    "crypto-stablecoin": stablecoinValue,
-    "crypto-volatile": volatileCryptoValue,
-    other: totals.byType.other,
-  };
-  // Slice + legend order follows the saved category order (see Arrange holdings).
-  const slices = allocationSlices(groupOrder, groupValues);
+  const slices = [
+    { label: "Cash", value: totals.byType.cash, color: TYPE_META.cash.color },
+    { label: "Stocks", value: totals.byType.stock, color: TYPE_META.stock.color },
+    { label: "Crypto · Stablecoin", value: stablecoinValue, color: "#14b8a6" },
+    { label: "Crypto · Volatile", value: volatileCryptoValue, color: TYPE_META.crypto.color },
+    { label: "Other", value: totals.byType.other, color: TYPE_META.other.color },
+  ].filter((slice) => slice.value > 0);
 
   if (list.length === 0) {
     return (
@@ -157,63 +149,54 @@ export default async function Dashboard() {
         />
       </div>
 
-      <DashboardLayout
-        initialOrder={dashboardOrder}
-        blocks={{
-          holdings: (
-            <section className="card overflow-hidden">
-              <div className="flex items-center justify-between px-5 pt-5">
-                <h2 className="font-semibold text-slate-900">Holdings</h2>
-              </div>
-              <HoldingsTable rows={rows} initialGroupOrder={groupOrder} />
-            </section>
-          ),
-          history: (
-            <section className="card p-5">
-              <h2 className="mb-3 font-semibold text-slate-900">Value history</h2>
-              <HistoryChart points={points} />
-            </section>
-          ),
-          allocation: (
-            <section className="card min-w-0 p-4 sm:p-5">
-              <h2 className="mb-4 font-semibold text-slate-900">Allocation</h2>
-              <Donut slices={slices} centerLabel="Total" />
-            </section>
-          ),
-          activity: (
-            <section className="card p-5">
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="font-semibold text-slate-900">Recent activity</h2>
-                <Link href="/activity" className="text-sm font-medium text-indigo-600 hover:underline">
-                  View all →
+      <section className="card overflow-hidden">
+        <div className="flex items-center justify-between px-5 pt-5">
+          <h2 className="font-semibold text-slate-900">Holdings</h2>
+        </div>
+        <HoldingsTable rows={rows} />
+      </section>
+
+      <div className="grid gap-6 lg:grid-cols-5">
+        <section className="card p-5 lg:col-span-3">
+          <h2 className="mb-3 font-semibold text-slate-900">Value history</h2>
+          <HistoryChart points={points} />
+        </section>
+        <section className="card min-w-0 p-4 sm:p-5 lg:col-span-2">
+          <h2 className="mb-4 font-semibold text-slate-900">Allocation</h2>
+          <Donut slices={slices} centerLabel="Total" />
+        </section>
+      </div>
+
+      <section className="card p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="font-semibold text-slate-900">Recent activity</h2>
+          <Link href="/activity" className="text-sm font-medium text-indigo-600 hover:underline">
+            View all →
+          </Link>
+        </div>
+        <ul className="divide-y divide-slate-100">
+          {activity.map(({ tx, asset }) => (
+            <li key={tx.id} className="flex items-center justify-between gap-4 py-3 text-sm">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${KIND_META[tx.kind].badge}`}>
+                  {KIND_META[tx.kind].label}
+                </span>
+                <Link href={`/assets/${asset.id}`} className="truncate font-medium text-slate-800 hover:text-indigo-600">
+                  {asset.symbol || asset.name}
                 </Link>
+                <span className="hidden truncate text-slate-500 sm:inline">
+                  {asset.type === "cash" || tx.kind === "dividend" ? "" : `${qty(tx.quantity)} @ ${money(tx.price)}`}
+                </span>
               </div>
-              <ul className="divide-y divide-slate-100">
-                {activity.map(({ tx, asset }) => (
-                  <li key={tx.id} className="flex items-center justify-between gap-4 py-3 text-sm">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${KIND_META[tx.kind].badge}`}>
-                        {KIND_META[tx.kind].label}
-                      </span>
-                      <Link href={`/assets/${asset.id}`} className="truncate font-medium text-slate-800 hover:text-indigo-600">
-                        {asset.symbol || asset.name}
-                      </Link>
-                      <span className="hidden truncate text-slate-500 sm:inline">
-                        {asset.type === "cash" || tx.kind === "dividend" ? "" : `${qty(tx.quantity)} @ ${money(tx.price)}`}
-                      </span>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-4">
-                      <span className="font-medium tabular-nums text-slate-900">{money(tx.quantity * tx.price)}</span>
-                      <span className="w-24 text-right text-xs text-slate-400">{fmtDate(tx.date)}</span>
-                    </div>
-                  </li>
-                ))}
-                {activity.length === 0 && <li className="py-6 text-center text-sm text-slate-400">No activity yet</li>}
-              </ul>
-            </section>
-          ),
-        }}
-      />
+              <div className="flex shrink-0 items-center gap-4">
+                <span className="font-medium tabular-nums text-slate-900">{money(tx.quantity * tx.price)}</span>
+                <span className="w-24 text-right text-xs text-slate-400">{fmtDate(tx.date)}</span>
+              </div>
+            </li>
+          ))}
+          {activity.length === 0 && <li className="py-6 text-center text-sm text-slate-400">No activity yet</li>}
+        </ul>
+      </section>
     </div>
   );
 }
