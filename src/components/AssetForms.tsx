@@ -4,39 +4,13 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import { addTransaction, updateAsset, updatePrice, type ActionState } from "@/app/actions";
 import type { AssetType, TxKind } from "@/lib/constants";
 import { KIND_META, kindsFor, money, qty } from "@/lib/format";
+import { playMoneyChime } from "@/lib/sounds";
 import type { CashAccount } from "./AddAssetDialog";
 import { ErrorNote, Modal, SubmitButton } from "./ui";
 
 function todayStr() {
   const d = new Date();
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-}
-
-/** A short, synthesized two-coin chime—no audio file or network request needed. */
-function playDepositChime(context: AudioContext) {
-  const start = context.currentTime;
-  const master = context.createGain();
-  master.gain.setValueAtTime(0.18, start);
-  master.connect(context.destination);
-
-  [
-    { delay: 0, frequency: 1318.51 },
-    { delay: 0.13, frequency: 1760 },
-  ].forEach(({ delay, frequency }) => {
-    const oscillator = context.createOscillator();
-    const envelope = context.createGain();
-    const at = start + delay;
-    oscillator.type = "sine";
-    oscillator.frequency.setValueAtTime(frequency, at);
-    oscillator.frequency.exponentialRampToValueAtTime(frequency * 1.06, at + 0.16);
-    envelope.gain.setValueAtTime(0.0001, at);
-    envelope.gain.exponentialRampToValueAtTime(0.9, at + 0.012);
-    envelope.gain.exponentialRampToValueAtTime(0.0001, at + 0.28);
-    oscillator.connect(envelope);
-    envelope.connect(master);
-    oscillator.start(at);
-    oscillator.stop(at + 0.3);
-  });
 }
 
 export function TransactionForm({
@@ -69,7 +43,7 @@ export function TransactionForm({
       const note = formRef.current?.querySelector<HTMLInputElement>("input[name=note]");
       if (note) note.value = "";
       if (submittedKindRef.current === "deposit" && audioRef.current) {
-        void audioRef.current.resume().then(() => playDepositChime(audioRef.current!));
+        void audioRef.current.resume().then(() => playMoneyChime(audioRef.current!));
       }
       submittedKindRef.current = null;
     }
