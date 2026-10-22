@@ -23,6 +23,8 @@ import {
   today,
 } from "@/lib/portfolio";
 import { refreshPricesWithAlerts } from "@/lib/price-refresh";
+import { clearDashboardOrder, saveDashboardOrder } from "@/lib/dashboard-order-db";
+import { isDashboardBlockKey } from "@/lib/dashboard-layout";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -309,4 +311,43 @@ export async function deleteAsset(fd: FormData) {
   await recordSnapshot();
   refresh();
   redirect("/");
+}
+
+function parseDashboardOrder(raw: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("Could not read the dashboard layout. Reload the page and try again.");
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("The dashboard layout is empty.");
+  if (parsed.length > 32) throw new Error("Too many dashboard sections.");
+  const keys = parsed.map((value) => (typeof value === "string" ? value.trim() : ""));
+  if (keys.some((key) => !isDashboardBlockKey(key))) {
+    throw new Error("The dashboard layout contains an unknown section.");
+  }
+  return keys;
+}
+
+/** Saves the dashboard card order from the "Arrange layout" mode. */
+export async function saveDashboardLayout(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  try {
+    await ensureSchema();
+    await saveDashboardOrder(parseDashboardOrder(str(fd, "order")));
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not save the dashboard layout" };
+  }
+  refresh();
+  return { ok: true, message: "Dashboard layout saved.", ts: Date.now() };
+}
+
+/** Restores the default dashboard card order. */
+export async function resetDashboardLayout(_prev: ActionState, _fd: FormData): Promise<ActionState> {
+  try {
+    await clearDashboardOrder();
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not reset the dashboard layout" };
+  }
+  refresh();
+  return { ok: true, message: "Dashboard layout reset to the default.", ts: Date.now() };
 }

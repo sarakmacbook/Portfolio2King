@@ -29,6 +29,7 @@ the deployment before storing real portfolio data (see the
 - **One reporting currency: USD.** See below.
 
 **Contents:** [Supported currencies](#supported-currencies) ·
+[Arrange the dashboard](#arrange-the-dashboard) ·
 [Background refresh and alerts](#background-refresh-and-alerts) ·
 [Run locally](#run-locally) · [Self-host on your own server](#self-host-on-your-own-server) ·
 [Connect a database from the web UI](#connect-a-database-from-the-web-ui) ·
@@ -96,6 +97,29 @@ whose tags record the original currency.
 > A true multi-currency ledger (KHR cash next to USD stocks) would need a
 > currency on each account plus a dated FX-rate table, and every total/snapshot
 > would have to convert at capture time. That is a feature, not a setting.
+
+## Arrange the dashboard
+
+The dashboard cards — **Holdings**, **Value history**, **Allocation** and
+**Recent activity** — can be moved up and down as whole blocks:
+
+1. Click **⇅ Arrange layout** above the cards.
+2. Drag a card's dashed header (the one with the grip dots), or use its **▲ / ▼**
+   buttons — the touch-friendly and keyboard-accessible path.
+3. Click **Save layout**. Nothing is written until you save; **Cancel** discards
+   pending moves and **Reset to default** restores Holdings → Value history →
+   Allocation → Recent activity.
+
+Details:
+
+- The layout is stored in `app_settings` under `dashboard.order` as a
+  comma-separated list of card keys. Unknown keys are dropped, duplicates removed,
+  and missing cards appended in their default spot, so a stale tab or a
+  hand-edited setting cannot break the page.
+- The two charts stay side by side (Value history 3/5, Allocation 2/5) whenever
+  they are next to each other, and full-width cards start a new row. On phones the
+  cards stack in the saved order.
+- Saving the layout does not touch any holdings, balances or snapshots.
 
 ## Background refresh and alerts
 
