@@ -3,6 +3,7 @@
 import { useActionState, useState } from "react";
 import { createAsset, type ActionState } from "@/app/actions";
 import { ASSET_TYPES, type AssetType } from "@/lib/constants";
+import type { CryptoCategory } from "@/db/schema";
 import { TYPE_META, money } from "@/lib/format";
 import { CAMBODIAN_BANKS, type CambodianBank } from "@/lib/cambodian-banks";
 import { ErrorNote, Modal, SubmitButton } from "./ui";
@@ -54,6 +55,7 @@ export default function AddAssetDialog({
 function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount[]; defaultType: AssetType }) {
   const [state, action] = useActionState<ActionState, FormData>(createAsset, {});
   const [type, setType] = useState<AssetType>(defaultType);
+  const [cryptoCategory, setCryptoCategory] = useState<CryptoCategory>("volatile");
   const [q, setQ] = useState("");
   const [cost, setCost] = useState("");
   const [fee, setFee] = useState("");
@@ -91,6 +93,8 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
     setName(asset.name);
     setSymbol(asset.symbol);
     setCurrentPrice(String(asset.price));
+    const stableSymbols = new Set(["USDT", "USDC", "DAI", "FDUSD", "TUSD", "USDE", "PYUSD", "USDD", "FRAX"]);
+    setCryptoCategory(stableSymbols.has(asset.symbol.toUpperCase()) ? "stablecoin" : "volatile");
     if (asset.contract) setNotes(`Contract: ${asset.contract}${asset.chain ? ` · Chain: ${asset.chain}` : ""}`);
   }
 
@@ -104,6 +108,7 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
   return (
     <form action={action} className="space-y-5">
       <input type="hidden" name="type" value={type} />
+      <input type="hidden" name="cryptoCategory" value={cryptoCategory} />
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {ASSET_TYPES.map((t) => (
           <button
@@ -123,7 +128,27 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
       </div>
 
       {type === "crypto" && (
-        <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3">
+        <div className="space-y-3">
+          <fieldset>
+            <legend className="label">Crypto subcategory</legend>
+            <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1">
+              <button
+                type="button"
+                onClick={() => setCryptoCategory("stablecoin")}
+                className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${cryptoCategory === "stablecoin" ? "bg-white text-emerald-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+              >
+                ◉ Stablecoin
+              </button>
+              <button
+                type="button"
+                onClick={() => setCryptoCategory("volatile")}
+                className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${cryptoCategory === "volatile" ? "bg-white text-amber-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+              >
+                ◆ Volatile asset
+              </button>
+            </div>
+          </fieldset>
+          <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3">
           <div>
             <p className="text-sm font-semibold text-slate-900">Find any crypto asset</p>
             <p className="text-xs text-slate-500">Search by name, ticker, or token contract address across CEX and DEX markets.</p>
@@ -177,6 +202,7 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
               ))}
             </div>
           )}
+          </div>
         </div>
       )}
 

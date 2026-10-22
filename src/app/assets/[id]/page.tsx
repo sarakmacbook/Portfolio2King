@@ -67,7 +67,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           </div>
         </div>
         <div className="flex gap-2">
-          <EditAssetButton asset={{ id: asset.id, name: asset.name, symbol: asset.symbol, notes: asset.notes }} />
+          <EditAssetButton asset={{ id: asset.id, name: asset.name, symbol: asset.symbol, notes: asset.notes, type: asset.type, cryptoCategory: asset.cryptoCategory }} />
           <form action={deleteAsset}>
             <input type="hidden" name="id" value={asset.id} />
             <ConfirmSubmit message={`Delete "${asset.name}" and all of its transactions? This cannot be undone.`}>

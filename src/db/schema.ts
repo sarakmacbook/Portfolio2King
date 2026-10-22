@@ -13,11 +13,15 @@ import { ASSET_TYPES, TX_KINDS, type AssetType, type TxKind } from "../lib/const
 export { ASSET_TYPES, TX_KINDS };
 export type { AssetType, TxKind };
 
+export const CRYPTO_CATEGORIES = ["stablecoin", "volatile"] as const;
+export type CryptoCategory = (typeof CRYPTO_CATEGORIES)[number];
+
 export const assets = pgTable("assets", {
   id: serial("id").primaryKey(),
   type: text("type").$type<AssetType>().notNull(),
   name: text("name").notNull(),
   symbol: text("symbol").notNull().default(""),
+  cryptoCategory: text("crypto_category").$type<CryptoCategory>().notNull().default("volatile"),
   quantity: doublePrecision("quantity").notNull().default(0),
   avgCost: doublePrecision("avg_cost").notNull().default(0),
   currentPrice: doublePrecision("current_price").notNull().default(0),

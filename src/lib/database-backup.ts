@@ -1,4 +1,4 @@
-import { ASSET_TYPES, TX_KINDS, type Asset, type AssetType, type Snapshot, type Transaction, type TxKind } from "@/db/schema";
+import { ASSET_TYPES, CRYPTO_CATEGORIES, TX_KINDS, type Asset, type AssetType, type CryptoCategory, type Snapshot, type Transaction, type TxKind } from "@/db/schema";
 import { replay } from "@/lib/portfolio";
 
 /**
@@ -161,11 +161,16 @@ export function parseBackup(input: unknown): PortfolioBackup {
   const assets: BackupAsset[] = rows(input.tables.assets, "assets").map((row) => {
     const type = stringField(row, "type", 32);
     if (!(ASSET_TYPES as readonly string[]).includes(type)) fail(`Unknown asset type "${type}".`);
+    const rawCategory = row.cryptoCategory;
+    const cryptoCategory: CryptoCategory = typeof rawCategory === "string" && (CRYPTO_CATEGORIES as readonly string[]).includes(rawCategory)
+      ? rawCategory as CryptoCategory
+      : "volatile"; // Backward compatibility with version 1 backups created before subcategories.
     return {
       id: idField(row, "id"),
       type: type as AssetType,
       name: stringField(row, "name", 200, { allowEmpty: false }),
       symbol: stringField(row, "symbol", 64),
+      cryptoCategory,
       quantity: numberField(row, "quantity"),
       avgCost: numberField(row, "avgCost"),
       currentPrice: numberField(row, "currentPrice"),
