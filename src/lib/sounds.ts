@@ -1,74 +1,45 @@
 "use client";
 
-/** A short synthesized ATM cash-dispensing sound—no audio file or network request needed. */
+/** A short synthesized two-coin “ting ting” chime—no audio file or network request needed. */
 export function playMoneyChime(context: AudioContext) {
   const start = context.currentTime;
-  const output = context.createGain();
-  output.gain.setValueAtTime(0.0001, start);
-  output.gain.exponentialRampToValueAtTime(0.2, start + 0.025);
-  output.gain.setValueAtTime(0.2, start + 0.58);
-  output.gain.exponentialRampToValueAtTime(0.0001, start + 0.82);
-  output.connect(context.destination);
+  const master = context.createGain();
+  master.gain.setValueAtTime(0.16, start);
+  master.gain.exponentialRampToValueAtTime(0.0001, start + 0.72);
+  master.connect(context.destination);
 
-  // Low mechanical motor hum from the ATM rollers.
-  const motor = context.createOscillator();
-  const motorGain = context.createGain();
-  motor.type = "sawtooth";
-  motor.frequency.setValueAtTime(82, start);
-  motor.frequency.linearRampToValueAtTime(106, start + 0.18);
-  motor.frequency.linearRampToValueAtTime(88, start + 0.72);
-  motorGain.gain.setValueAtTime(0.18, start);
-  motorGain.gain.linearRampToValueAtTime(0.08, start + 0.75);
-  motor.connect(motorGain);
-  motorGain.connect(output);
-  motor.start(start);
-  motor.stop(start + 0.8);
-
-  // Filtered noise gives the sound of notes moving through rubber rollers.
-  const frameCount = Math.ceil(context.sampleRate * 0.82);
-  const buffer = context.createBuffer(1, frameCount, context.sampleRate);
-  const channel = buffer.getChannelData(0);
-  for (let i = 0; i < frameCount; i++) channel[i] = Math.random() * 2 - 1;
-  const noise = context.createBufferSource();
-  const filter = context.createBiquadFilter();
-  const noiseGain = context.createGain();
-  filter.type = "bandpass";
-  filter.frequency.value = 1250;
-  filter.Q.value = 0.7;
-  noiseGain.gain.value = 0.22;
-  noise.buffer = buffer;
-  noise.connect(filter);
-  filter.connect(noiseGain);
-  noiseGain.connect(output);
-  noise.start(start);
-  noise.stop(start + 0.82);
-
-  // Fast note-counter clicks followed by the ATM completion beep.
-  [0.08, 0.17, 0.26, 0.35, 0.44, 0.53].forEach((delay) => {
-    const click = context.createOscillator();
-    const clickGain = context.createGain();
+  [
+    { delay: 0, frequency: 1318.51 },
+    { delay: 0.2, frequency: 1760 },
+  ].forEach(({ delay, frequency }) => {
     const at = start + delay;
-    click.type = "square";
-    click.frequency.setValueAtTime(210, at);
-    clickGain.gain.setValueAtTime(0.32, at);
-    clickGain.gain.exponentialRampToValueAtTime(0.0001, at + 0.035);
-    click.connect(clickGain);
-    clickGain.connect(output);
-    click.start(at);
-    click.stop(at + 0.04);
-  });
 
-  const beep = context.createOscillator();
-  const beepGain = context.createGain();
-  beep.type = "sine";
-  beep.frequency.value = 1046.5;
-  beepGain.gain.setValueAtTime(0.0001, start + 0.64);
-  beepGain.gain.exponentialRampToValueAtTime(0.45, start + 0.65);
-  beepGain.gain.exponentialRampToValueAtTime(0.0001, start + 0.79);
-  beep.connect(beepGain);
-  beepGain.connect(output);
-  beep.start(start + 0.64);
-  beep.stop(start + 0.8);
+    // Main bell tone.
+    const bell = context.createOscillator();
+    const envelope = context.createGain();
+    bell.type = "sine";
+    bell.frequency.setValueAtTime(frequency, at);
+    bell.frequency.exponentialRampToValueAtTime(frequency * 1.025, at + 0.25);
+    envelope.gain.setValueAtTime(0.0001, at);
+    envelope.gain.exponentialRampToValueAtTime(0.95, at + 0.008);
+    envelope.gain.exponentialRampToValueAtTime(0.0001, at + 0.42);
+    bell.connect(envelope);
+    envelope.connect(master);
+    bell.start(at);
+    bell.stop(at + 0.44);
+
+    // Quiet upper harmonic makes each “ting” crisp like a coin or register bell.
+    const harmonic = context.createOscillator();
+    const harmonicGain = context.createGain();
+    harmonic.type = "sine";
+    harmonic.frequency.setValueAtTime(frequency * 2.01, at);
+    harmonicGain.gain.setValueAtTime(0.22, at);
+    harmonicGain.gain.exponentialRampToValueAtTime(0.0001, at + 0.18);
+    harmonic.connect(harmonicGain);
+    harmonicGain.connect(master);
+    harmonic.start(at);
+    harmonic.stop(at + 0.2);
+  });
 }
 
 /** Starts audio from a user gesture, including in iOS standalone web apps. */
