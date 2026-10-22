@@ -1,18 +1,349 @@
 # Ledgerly — Portfolio Manager
 
-Next.js 16 (App Router) + PostgreSQL (Drizzle ORM) app for tracking cash,
-stock and crypto holdings with manual price entry.
+A **self-hosted** portfolio tracker for cash, stocks and crypto. Ledgerly is a
+Next.js 16 (App Router) app backed by PostgreSQL through Drizzle ORM: you run it
+on your own machine, VPS, or home server, point it at your own database, and the
+data stays there.
+
+Prices are entered by hand, with optional one-click crypto quotes from public
+exchange APIs. There is no hosted account, no analytics, and no proprietary
+backend. Ledgerly has **no authentication or per-user data isolation** — protect
+the deployment before storing real portfolio data (see the
+[self-hosting security checklist](#self-hosting-security-checklist)).
+
+## Highlights
+
+- Cash accounts (with a Cambodian bank picker), stocks, crypto, and other assets.
+- Buys, sells, deposits, withdrawals, and income, with average cost and realized
+  / unrealized P/L replayed from the full transaction history.
+- Manual prices plus live crypto prices from Bybit, OKX, Binance, Coinbase,
+  Kraken, or DexScreener — no API keys required.
+- Crypto asset search that falls back automatically between public data
+  providers when one is rate-limited or down.
+- Daily per-asset price snapshots and portfolio snapshots, allocation donut and
+  history charts, per-asset pages, and an activity feed.
+- Portable JSON export/import, so you can move providers without `pg_dump`.
+- Optional guided database setup in the web UI.
+- **One reporting currency: USD.** See below.
+
+**Contents:** [Supported currencies](#supported-currencies) ·
+[Run locally](#run-locally) · [Self-host on your own server](#self-host-on-your-own-server) ·
+[Connect a database from the web UI](#connect-a-database-from-the-web-ui) ·
+[Export & import](#export-and-import-the-database) ·
+[Deploy on Vercel](#deploy-on-vercel-optional) · [Scripts](#scripts) ·
+[Runtime notes](#runtime-notes)
+
+## Supported currencies
+
+Ledgerly keeps a **single USD ledger**. USD is hard-coded as the reporting
+currency (`CURRENCY` in [`src/lib/format.ts`](src/lib/format.ts)), and every
+amount is rendered with
+`Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })`. Totals,
+cost basis, P/L, charts, snapshots, and the activity feed are therefore always
+US dollars, shown with `$`.
+
+| Where | What you enter | Currency behaviour |
+| --- | --- | --- |
+| Dashboard totals, charts, snapshots, P/L | — | Always USD |
+| Cash accounts | balance + free-text currency/tag | Tag is a label only; the balance is added to USD totals **1:1** |
+| Stocks / ETFs / other | quantity + price per unit | Price is USD |
+| Crypto | quantity + price per unit | USD, or USDT when fetched from an exchange; USDT is treated as 1:1 with USD |
+| Backup JSON | plain numbers | No currency metadata — the file is a USD ledger |
+
+### What the cash “currency / tag” actually does
+
+The field is stored in the asset’s `symbol` column and uppercased. It is used
+for display (account/bank label), **not** for conversion:
+
+- Cash is always valued at `1.00` per unit — `avgCost` and `currentPrice` are
+  forced to `1` when a cash asset is created or replayed — so a cash holding’s
+  value is simply its balance. No FX rate is looked up anywhere.
+- Choosing a Cambodian bank pre-fills the tag as `USD`. You can overwrite it
+  with `KHR`, `THB`, `VND`, `EUR`, etc., but the number beside it still lands in
+  the USD total unchanged.
+- Cash deposits, withdrawals, income, and the “pay from cash” option on a
+  purchase all move that same raw number.
+
+### Tracking KHR, THB, VND, or EUR balances
+
+Because there is no conversion, enter the **USD value** of any non-USD balance
+and keep the original amount in the notes so you can audit it later:
+
+1. Add a cash account, pick the bank, and leave the tag as `USD`.
+2. Convert the balance at the rate you want to record — for example
+   `4,000,000 KHR ÷ 4,000 KHR/USD = 1,000.00`.
+3. Put `KHR 4,000,000 @ 4,000` in **Notes**.
+4. Re-value the account yourself when the rate moves by recording a deposit or
+   withdrawal for the difference (cash balances change through transactions).
+
+Do **not** add `4,000,000` and tag it `KHR`: Ledgerly would count it as
+$4,000,000. If you keep one account per currency, treat them as USD accounts
+whose tags record the original currency.
+
+### Not supported
+
+- FX rates, currency conversion, historical FX, or rate lookups.
+- Per-currency subtotals, allocation by currency, or a currency selector.
+- Per-asset currencies — stock and crypto prices are assumed to be USD (USDT is
+  treated as equivalent).
+- Changing the reporting currency. That needs a code change to `CURRENCY` plus
+  reconciling every stored number; the schema deliberately has no currency
+  column, which is also why backups move cleanly between instances.
+
+> A true multi-currency ledger (KHR cash next to USD stocks) would need a
+> currency on each account plus a dated FX-rate table, and every total/snapshot
+> would have to convert at capture time. That is a feature, not a setting.
 
 ## Run locally
 
 ```bash
-npm install
-cp .env.example .env.local   # point DATABASE_URL at your Postgres
-npm run db:push              # create the tables
+npm ci
+cp .env.example .env.local   # edit DATABASE_URL to point at your Postgres
 npm run dev                  # http://localhost:3000
 ```
 
+The tables are created automatically the first time you open the dashboard
+(`ensureSchema()` in `src/lib/portfolio.ts` is a safety net for fresh databases).
+You can also create them ahead of time:
+
+```bash
+# drizzle-kit reads the shell environment and `.env`, not `.env.local`
+DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/app_db" npm run db:push
+```
+
 Check the database connection at `GET /api/health` → `{ "ok": true }`.
+
+Requirements: Node.js 20.9 or newer (`.nvmrc` pins 22) and PostgreSQL 13+.
+
+## Self-host on your own server
+
+The app is a normal long-running Next.js server with one PostgreSQL database.
+Nothing about it requires Vercel.
+
+### Requirements
+
+- Node.js 20.9+ and npm (or pnpm/yarn if you adjust the commands).
+- PostgreSQL 13+ — on the same host, on your LAN, or managed.
+- A domain and HTTPS if the instance is reachable by anyone else — the guided
+  setup submits database credentials, and export/import moves portfolio data.
+
+### 1. Get the code
+
+```bash
+git clone <your-fork-url> /srv/ledgerly
+cd /srv/ledgerly
+npm ci
+```
+
+### 2. Configure environment variables
+
+```bash
+cp .env.example .env.local
+chmod 600 .env.local
+```
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | Yes at runtime | PostgreSQL connection string. `POSTGRES_URL` is accepted as a fallback. |
+| `POSTGRES_URL` | No | Alternative name, used when `DATABASE_URL` is unset. |
+| `DATABASE_SETUP_TOKEN` | No | Enables the web setup wizard and protects `/api/database`, export, and import. Must be at least 32 characters. |
+| `ALLOW_DATABASE_SETUP_WRITE` | No | Set to `true` on a persistent self-hosted server to let the wizard write `.env.local`. Always disabled on Vercel. |
+| `CRON_SECRET` | Recommended | Shared secret for `/api/cron/daily-snapshot`, sent as `Authorization: Bearer …`. Without it the endpoint is unauthenticated (throttled per instance). |
+
+Generate secrets with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+Notes:
+
+- Next.js loads `.env.local` for the running app. `drizzle-kit` (used by
+  `db:push` / `db:migrate`) loads `.env` via `dotenv`, so pass `DATABASE_URL`
+  inline or export it for those commands.
+- Never commit `.env.local`; it is git-ignored. Restrict it to the service user.
+- Remote PostgreSQL connections verify TLS certificates. For a self-signed or
+  private-CA server, point `NODE_EXTRA_CA_CERTS` at the CA bundle instead of
+  disabling verification. Certificate-file URL parameters are rejected.
+
+### 3. Create the tables
+
+Either let the app create them on first dashboard load, or run:
+
+```bash
+DATABASE_URL="postgresql://user:password@host:5432/ledgerly" npm run db:push
+```
+
+For versioned schema changes, generate and apply SQL migrations instead:
+
+```bash
+DATABASE_URL="…" npm run db:generate   # writes ./drizzle/*.sql — commit these
+DATABASE_URL="…" npm run db:migrate
+```
+
+Use a dedicated database and database user for Ledgerly. The user needs
+`USAGE` and `CREATE` on the public schema.
+
+### 4. Build and start
+
+```bash
+npm run build
+npm run start -- -H 127.0.0.1 -p 3000
+```
+
+`npm run start` runs the production build. Binding to `127.0.0.1` keeps the app
+off the network; put a reverse proxy in front of it. Next.js also honors the
+`PORT` environment variable when `-p` is omitted.
+
+### 5. Put it behind HTTPS
+
+The web setup endpoint rejects cross-origin requests by comparing the
+`Origin` host with `Host` / `X-Forwarded-Host`, so preserve the original host and
+forward `X-Forwarded-Proto`. Do not rewrite `Host` to `localhost`.
+
+Caddy (automatic TLS):
+
+```caddyfile
+ledger.example.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:3000
+}
+```
+
+Nginx:
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name ledger.example.com;
+    # ssl_certificate / ssl_certificate_key …
+
+    client_max_body_size 12m;   # backup import limit is 10 MB
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+```
+
+### 6. Keep it running
+
+A minimal systemd unit (`/etc/systemd/system/ledgerly.service`):
+
+```ini
+[Unit]
+Description=Ledgerly portfolio manager
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=ledgerly
+WorkingDirectory=/srv/ledgerly
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run start -- -H 127.0.0.1 -p 3000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now ledgerly
+```
+
+Adjust `User`, paths, and the npm path for your host. Journald keeps the logs:
+`journalctl -u ledgerly -f`.
+
+### 7. Capture daily snapshots
+
+The dashboard captures today’s snapshot when it is opened, and a browser visit
+can refresh stale crypto prices once per day. For unattended instances, call the
+cron endpoint from the host’s scheduler. `vercel.json` crons apply to Vercel
+only.
+
+```bash
+# /usr/local/bin/ledgerly-snapshot  (chmod 700)
+#!/usr/bin/env sh
+set -eu
+. /etc/ledgerly/cron.env        # CRON_SECRET=…
+curl -fsS -H "Authorization: Bearer $CRON_SECRET" \
+  http://127.0.0.1:3000/api/cron/daily-snapshot
+```
+
+```cron
+15 0 * * * /usr/local/bin/ledgerly-snapshot
+```
+
+The endpoint returns `{ "ok": true }` with a summary. If `CRON_SECRET` is unset,
+the endpoint is open and throttled to one run per minute per app instance; set
+the secret on any instance that reaches the internet.
+
+### 8. Update
+
+```bash
+cd /srv/ledgerly
+git pull
+npm ci
+DATABASE_URL="…" npm run db:push   # only when the schema changed
+npm run build
+sudo systemctl restart ledgerly
+```
+
+Optional checks before restarting: `npm run typecheck`, `npm test`, `npm run lint`.
+
+### 9. Back up
+
+Two independent options:
+
+- **In the app:** Database → **Export database** writes a portable JSON backup
+  (all assets, transactions, and snapshots). Import accepts files up to 10 MB
+  in merge or replace mode; validation is all-or-nothing in one transaction.
+- **PostgreSQL level:**
+
+  ```bash
+  pg_dump "$DATABASE_URL" -Fc -f "ledgerly-$(date +%F).dump"
+  pg_restore --clean --if-exists -d "$DATABASE_URL" ledgerly-YYYY-MM-DD.dump
+  ```
+
+Backups contain your full portfolio; store and transfer them accordingly. Keep
+`.env.local` (or your environment configuration) in your own secret store — it
+is not part of the database.
+
+### Self-hosting security checklist
+
+- **Ledgerly has no login.** Anyone who can reach it can read and change the
+  entire portfolio. Keep it on a private network/VPN (e.g. Tailscale), or put
+  basic authentication at the reverse proxy. Do not expose it to the open
+  internet unauthenticated.
+- There is **one shared dataset** for everyone using the instance; there are no
+  user accounts or data isolation.
+- Set `DATABASE_SETUP_TOKEN` to a random secret of at least 32 characters before
+  starting if you want the web setup wizard; the same key protects export and
+  import. **The setup key is not an app login.** If you remove it after setup,
+  the wizard is disabled and export/import become unauthenticated — so keep the
+  instance private either way.
+- Enable `.env.local` writing only on a persistent server
+  (`ALLOW_DATABASE_SETUP_WRITE=true`). It is always disabled on Vercel.
+- Use a dedicated PostgreSQL database and least-privilege user; do not reuse a
+  database that belongs to another app.
+- Terminate TLS in front of the app. For remote databases, keep certificate
+  verification on and install the CA via `NODE_EXTRA_CA_CERTS` if needed.
+- Keep `.env.local` at mode `0600` and out of version control. Never prefix
+  secrets with `NEXT_PUBLIC_`.
+- File-based database setup applies to one server process. Other replicas must
+  be restarted with the same configuration; for replicated deployments, manage
+  environment variables centrally and disable web setup.
+- Per-instance throttling on the setup API is not a distributed rate limiter.
+  Use hosting-level protection if the instance is public.
 
 ## Connect a database from the web UI
 
@@ -36,10 +367,11 @@ configured, the dashboard shows this same wizard.
    connection form. **Test connection** checks connectivity and `USAGE` / `CREATE`
    permissions on the public schema without writing portfolio data. It does not
    verify compatibility of pre-existing tables. Use a dedicated database.
-6. In local development, confirm the app-wide change and click **Save & connect**.
-   This writes a mode-0600 `.env.local` file atomically, preserves unrelated
-   assignments, and updates the running connection. Existing data is not migrated
-   or deleted. Open the dashboard to create the tables.
+6. In local development, or on a self-hosted server with
+   `ALLOW_DATABASE_SETUP_WRITE=true`, confirm the app-wide change and click
+   **Save & connect**. This writes a mode-0600 `.env.local` file atomically,
+   preserves unrelated assignments, and updates the running connection. Existing
+   data is not migrated or deleted. Open the dashboard to create the tables.
 
 File saving is disabled in production unless a persistent self-hosted server
 explicitly sets `ALLOW_DATABASE_SETUP_WRITE=true`. It is **always disabled on
@@ -69,7 +401,7 @@ Environment-variable configuration without the wizard remains supported.
   with the same configuration. Prefer centrally managed environment variables
   for replicated production deployments.
 
-## Export & import the database
+## Export and import the database
 
 Open **Database** → **Export & import database** (below the setup wizard):
 
@@ -96,11 +428,14 @@ Open **Database** → **Export & import database** (below the setup wizard):
   key is required for export and import; otherwise (like the rest of this
   unauthenticated app) they are open — restrict access to your deployment
   before storing sensitive data, and treat backup files as sensitive too.
+- Backups contain no currency metadata: they are USD ledgers (see
+  [Supported currencies](#supported-currencies)).
 
-## Deploy on Vercel
+## Deploy on Vercel (optional)
 
-The repo is Vercel-ready (`vercel.json`, Node ≥ 20.9 — see `.nvmrc` /
-`package.json` engines, functions pinned to `sin1` Singapore).
+The repo is also Vercel-ready (`vercel.json`, Node ≥ 20.9 — see `.nvmrc` /
+`package.json` engines, functions pinned to `sin1` Singapore). Self-hosting does
+not need any of this; use it only if you prefer managed hosting.
 
 ### 1. Create a hosted Postgres (required)
 
@@ -181,11 +516,42 @@ vercel --prod
 | `npm run db:generate` / `db:migrate` | Generate / apply SQL migrations |
 | `npm run db:studio` | Drizzle Studio                         |
 
-## Notes for serverless
+## Runtime notes
 
 - `src/db/index.ts` creates the `pg` pool lazily (first query, not import),
-  reuses it across warm invocations via `globalThis`, caps it at 1 connection
-  per function instance on Vercel, and enables TLS automatically for remote
-  databases with certificate verification. Always use your provider's **pooler** endpoint.
+  reuses it across warm invocations / HMR via `globalThis`, caps it at 10
+  connections (1 on Vercel), and enables TLS automatically for remote databases
+  with certificate verification. Use a pooled endpoint for serverless hosting.
+- `ensureSchema()` creates missing tables on first use, so a fresh database works
+  without a manual migration step. Committed SQL migrations remain the
+  recommended way to evolve an existing production database.
 - All pages render dynamically (`force-dynamic`) since holdings change on
   every write.
+- Currency formatting lives in `src/lib/format.ts` and is USD-only by design; all
+  monetary fields in PostgreSQL are plain `double precision` amounts.
+
+### Crypto search providers
+
+`GET /api/prices/top` (used by **Add holding → Find any crypto asset**) never
+relies on a single API. `src/lib/crypto-search.ts` tries providers in order and
+uses the first one that answers:
+
+| Request | Fallback chain |
+| --- | --- |
+| `?q=<name or symbol>` | CoinGecko → CoinPaprika → DexScreener |
+| `?q=<token contract>` | DexScreener (contract lookup only) |
+| no query (top assets) | CoinGecko → CoinPaprika → Binance (USDT markets by 24h volume) |
+
+- HTTP `429` / `402` / `418` responses, timeouts, invalid JSON, and outages all
+  advance to the next provider. A provider that reports a rate limit is skipped
+  for 1–5 minutes (honouring `Retry-After`), then retried.
+- Successful responses are cached in-process for 60 seconds (searches) or
+  5 minutes (top assets), so repeated clicks do not burn free-tier quotas.
+- The JSON response includes `source` (`coingecko`, `coinpaprika`,
+  `dexscreener`, or `binance`); the dialog shows it under the results. If every
+  provider is rate-limited the route returns `429`, otherwise `502`.
+- Prices returned by every provider are USD; Binance quotes are `USDT`, treated
+  as 1:1 with USD like the rest of the app.
+- No API keys are used, so all providers are subject to their public rate
+  limits. The cache is per server process — a multi-replica deployment makes its
+  own requests per instance.
