@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { alertEvents, appSettings, assets, pushSubscriptions } from "@/db/schema";
 import { ensureSchema } from "@/lib/portfolio";
+import { getTelegramStatus, getTelegramConfig } from "@/lib/telegram-bot";
 import {
   DEFAULT_ALERT_SETTINGS,
   SETTING_KEYS,
@@ -10,7 +11,6 @@ import {
   parseAlertSettings,
   parseChannels,
   settingsToRows,
-  telegramConfigFromEnv,
   telegramRequest,
   type AlertChannel,
   type AlertSettings,
@@ -217,13 +217,14 @@ export async function removePushSubscription(endpoint: string): Promise<void> {
 // Telegram
 // ---------------------------------------------------------------------------
 
-export function telegramConfigured(): boolean {
-  return telegramConfigFromEnv() !== null;
+/** True when a bot is connected from the UI or configured in the environment. */
+export async function telegramConfigured(): Promise<boolean> {
+  return (await getTelegramStatus()).configured;
 }
 
-/** Sends a Telegram message using TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID. */
+/** Sends a Telegram message using the stored bot (or env fallback). */
 export async function sendTelegramMessage(text: string): Promise<{ ok: boolean; error?: string }> {
-  const config = telegramConfigFromEnv();
+  const config = await getTelegramConfig();
   if (!config) return { ok: false, error: "Telegram is not configured" };
 
   const { url, init } = telegramRequest(config, text);

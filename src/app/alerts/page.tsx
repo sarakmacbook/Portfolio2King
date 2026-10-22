@@ -2,6 +2,7 @@ import DatabaseSetup from "@/components/DatabaseSetup";
 import Link from "next/link";
 import AlertSettingsForm, { TestAlertButton } from "@/components/AlertSettings";
 import NotificationSetup from "@/components/NotificationSetup";
+import TelegramConnect from "@/components/TelegramConnect";
 import { isDatabaseConfigured } from "@/db";
 import {
   countPushSubscriptions,
@@ -9,8 +10,8 @@ import {
   getLastPriceRefresh,
   getRecentAlerts,
   getVapidConfig,
-  telegramConfigured,
 } from "@/lib/alerts";
+import { getTelegramStatus } from "@/lib/telegram-bot";
 export const dynamic = "force-dynamic";
 
 const CURL_SNIPPET = `curl -fsS -H "Authorization: Bearer $CRON_SECRET" \
@@ -33,7 +34,7 @@ export default async function AlertsPage() {
   const [settings, subscribers, telegram, recent, lastRefresh] = await Promise.all([
     getAlertSettings(),
     countPushSubscriptions(),
-    Promise.resolve(telegramConfigured()),
+    getTelegramStatus(),
     getRecentAlerts(12),
     getLastPriceRefresh(),
   ]);
@@ -70,29 +71,12 @@ export default async function AlertsPage() {
         </section>
 
         <section className="card p-5">
-          <h2 className="text-base font-semibold text-slate-900">Telegram</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Messages are sent through the Telegram Bot API using a bot you own. Nothing else is shared.
+          <h2 className="text-base font-semibold text-slate-900">Telegram bot</h2>
+          <p className="mt-1 mb-4 text-sm text-slate-500">
+            Messages are sent through the Telegram Bot API using a bot you own. Connect it right here — no server
+            restart needed. Nothing else is shared.
           </p>
-          <div className="mt-3 flex items-center gap-2 text-sm text-slate-600">
-            <span className={`inline-flex h-2 w-2 rounded-full ${telegram ? "bg-emerald-500" : "bg-slate-300"}`} />
-            {telegram ? "Bot token and chat id configured" : "Not configured"}
-          </div>
-          {!telegram && (
-            <ol className="mt-3 list-decimal space-y-1 pl-5 text-xs text-slate-500">
-              <li>
-                Create a bot with <strong>@BotFather</strong> in Telegram and copy the token.
-              </li>
-              <li>Send your new bot a message so it is allowed to reply to you.</li>
-              <li>
-                Find your chat id (e.g. <code>@userinfobot</code>), then set{" "}
-                <code>TELEGRAM_BOT_TOKEN</code> and <code>TELEGRAM_CHAT_ID</code> on the server and restart.
-              </li>
-            </ol>
-          )}
-          <div className="mt-4 border-t border-slate-100 pt-4">
-            <TestAlertButton channel="telegram" label="Send test message" disabled={!telegram} />
-          </div>
+          <TelegramConnect status={telegram} />
         </section>
       </div>
 
@@ -101,7 +85,7 @@ export default async function AlertsPage() {
         <p className="mt-1 mb-5 text-sm text-slate-500">
           Thresholds apply to stocks and crypto. Cash is never alerted.
         </p>
-        <AlertSettingsForm settings={settings} />
+        <AlertSettingsForm settings={settings} telegramConnected={telegram.configured} />
       </section>
 
       <section className="card p-5 sm:p-6">

@@ -100,7 +100,7 @@ export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
           {liveMessage && <span className="font-medium text-indigo-600">{liveMessage}</span>}
         </div>
       </div>
-      <div className="overflow-x-auto">
+      <div className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[640px] text-sm">
           <thead className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
@@ -162,6 +162,63 @@ export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
           </tbody>
         </table>
       </div>
+
+      {/* Phones: each asset gets a compact row with the price input full width. */}
+      <ul className="divide-y divide-slate-100 md:hidden">
+        {rows.map((r) => {
+          const v = values[r.id] ?? "";
+          const n = Number(v);
+          const changed = v.trim() !== "" && isFinite(n) && n !== r.currentPrice;
+          const chg = r.currentPrice > 0 ? (n - r.currentPrice) / r.currentPrice : 0;
+          return (
+            <li key={r.id} className={`px-4 py-3 ${changed ? "bg-indigo-50/40" : ""}`}>
+              <div className="flex items-center gap-2">
+                {r.type === "crypto" ? (
+                  <CryptoLogo symbol={r.symbol} name={r.name} className="h-7 w-7 rounded-lg" />
+                ) : (
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: TYPE_META[r.type].color }} />
+                )}
+                <Link href={`/assets/${r.id}`} className="min-w-0 font-medium text-slate-900">
+                  <span className="block truncate">{r.symbol || r.name}</span>
+                  <span className="block truncate text-xs font-normal text-slate-500">{r.name}</span>
+                </Link>
+                <span className="ml-auto shrink-0 text-right text-xs text-slate-500">
+                  {qty(r.quantity)} held
+                  <span className="block tabular-nums text-slate-700">{money(r.currentPrice)}</span>
+                </span>
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <label className="min-w-0 flex-1">
+                  <span className="sr-only">New price for {r.symbol || r.name}</span>
+                  <input
+                    name={`price_${r.id}`}
+                    inputMode="decimal"
+                    className="input w-full"
+                    placeholder={`New price · ${r.currentPrice}`}
+                    value={v}
+                    onChange={(e) => setValues((s) => ({ ...s, [r.id]: e.target.value }))}
+                  />
+                </label>
+                <span className={`w-20 shrink-0 text-right text-xs tabular-nums ${changed ? pnlColor(chg) : "text-slate-300"}`}>
+                  {changed ? (
+                    <>
+                      <span className="block font-medium">{pct(chg)}</span>
+                      <span className="block">{money((n - r.currentPrice) * r.quantity, { sign: true })}</span>
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">
+                updated {r.updated}
+                {r.snapshotsCount ? ` · ${r.snapshotsCount} daily snapshot${r.snapshotsCount === 1 ? "" : "s"}` : ""}
+              </p>
+            </li>
+          );
+        })}
+      </ul>
+
       <div className="flex flex-col gap-3 border-t border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="text-sm text-slate-500">
           {changes.length ? (

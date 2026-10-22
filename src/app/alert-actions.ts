@@ -12,8 +12,25 @@ import {
   parseThresholdPct,
 } from "@/lib/alert-rules";
 import { refreshPricesWithAlerts } from "@/lib/price-refresh";
+import {
+  clearTelegramConfig,
+  discoverChatId,
+  getTelegramConfig,
+  getTelegramStatus,
+  isValidBotToken,
+  normaliseChatId,
+  saveTelegramConfig,
+  verifyBotToken,
+} from "@/lib/telegram-bot";
 
-export type AlertActionState = { error?: string; message?: string; ok?: boolean; ts?: number };
+export type AlertActionState = {
+  error?: string;
+  message?: string;
+  ok?: boolean;
+  ts?: number;
+  /** Non-fatal note, e.g. saved but Telegram could not be reached. */
+  warning?: string;
+};
 
 const TEST_COOLDOWN_MS = 15_000;
 let lastTestAt = 0;
@@ -105,4 +122,95 @@ export async function backgroundRefreshPrices(): Promise<{ refreshed: number; sk
   } catch {
     return { refreshed: 0, skipped: "error" };
   }
+}
+
+/**
+ * Connects (or updates) a Telegram bot from the Alerts page.
+ *
+ * - The token is verified with `getMe`, so a typo never gets stored silently.
+ * - The chat id can be pasted, or left blank: the most recent chat that
+ *   messaged the bot is used, which removes the @userinfobot step.
+ * - If Telegram is unreachable from the server the credentials are still stored
+ *   (with a warning) so a temporary network problem does not block setup.
+ */
+export async function connectTelegramAction(
+  _prev: AlertActionState,
+  formData: FormData,
+): Promise<AlertActionState> {
+  let message: string;
+  let warning: string | undefined;
+
+  try {
+    if (formData.get("kind") !== "telegram-bot") throw new Error("Unknown form");
+
+    const submittedToken = String(formData.get("token") ?? "").trim();
+    const submittedChat = String(formData.get("chatId") ?? "").trim();
+    const current = await getTelegramConfig();
+    const token = submittedToken || current?.token || "";
+
+    if (!token) throw new Error("Paste the bot token from @BotFather.");
+    if (!isValidBotToken(token)) {
+      throw new Error("That does not look like a bot token. It should look like 123456789:AA… — copy it from @BotFather.");
+    }
+
+    let chatId = submittedChat ? normaliseChatId(submittedChat) : null;
+    if (submittedChat && !chatId) {
+      throw new Error("Chat id must be a number such as 123456789, a group id like -1001234567890, or @channelname.");
+    }
+
+    const check = await verifyBotToken(token);
+    if (!check.ok && check.rejected) throw new Error(check.error);
+
+    let chatTitle = "";
+    if (!check.ok) {
+      // Network/API hiccup: keep the credentials, let the test message confirm later.
+      if (!chatId) {
+        throw new Error(`${check.error} Paste the chat id instead, or try again once the server can reach Telegram.`);
+      }
+      warning = `${check.error} Saved anyway — send a test message to confirm.`;
+    } else if (!chatId) {
+      const found = await discoverChatId(token);
+      if ("error" in found) throw new Error(found.error);
+      chatId = found.chatId;
+      chatTitle = found.title;
+    }
+
+    if (!chatId) throw new Error("Could not work out which chat to post to. Paste the chat id.");
+    await saveTelegramConfig({
+      token,
+      chatId,
+      botUsername: check.ok ? check.username : undefined,
+    });
+
+    message = check.ok
+      ? `Connected to ${check.username ? `@${check.username}` : "your bot"} · chat ${chatId}${chatTitle ? ` (${chatTitle})` : ""}. Send a test message to confirm.`
+      : `Bot saved for chat ${chatId}.`;
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Could not connect the Telegram bot" };
+  }
+
+  // Runs only after the write succeeded, so a rendering hiccup cannot turn a
+  // saved bot into an error message.
+  revalidatePath("/alerts");
+  return { ok: true, ts: Date.now(), warning, message };
+}
+
+/** Removes the stored bot (environment credentials, if any, become active again). */
+export async function disconnectTelegramAction(
+  _prev: AlertActionState,
+  formData: FormData,
+): Promise<AlertActionState> {
+  let message: string;
+  try {
+    if (formData.get("kind") !== "telegram-bot") throw new Error("Unknown form");
+    await clearTelegramConfig();
+    const remaining = await getTelegramStatus();
+    message = remaining.configured
+      ? "Bot removed. Alerts now use the environment variables (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)."
+      : "Telegram bot disconnected.";
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Could not disconnect the bot" };
+  }
+  revalidatePath("/alerts");
+  return { ok: true, ts: Date.now(), message };
 }

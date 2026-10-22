@@ -235,7 +235,7 @@ function EditAssetForm({
   return (
     <form action={action} className="space-y-4">
       <input type="hidden" name="id" value={asset.id} />
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
           <label className="label">Name</label>
           <input name="name" className="input" defaultValue={asset.name} />

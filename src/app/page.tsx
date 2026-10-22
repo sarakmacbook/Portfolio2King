@@ -119,7 +119,7 @@ export default async function Dashboard() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-sm font-medium text-slate-500">Total portfolio value</p>
-          <h1 className="mt-1 text-4xl font-semibold tracking-tight text-slate-900 tabular-nums">
+          <h1 className="mt-1 break-words text-3xl font-semibold tracking-tight text-slate-900 tabular-nums sm:text-4xl">
             {money(totals.totalValue)}
           </h1>
           {prev && (
@@ -229,7 +229,7 @@ function Stat({
   return (
     <div className="card p-4">
       <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
-      <p className={`mt-2 text-xl font-semibold tabular-nums ${valueClass}`}>{value}</p>
+      <p className={`mt-2 truncate text-lg font-semibold tabular-nums sm:text-xl ${valueClass}`}>{value}</p>
       {hint && <p className={`mt-0.5 text-xs ${hintClass}`}>{hint}</p>}
     </div>
   );
