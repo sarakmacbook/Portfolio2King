@@ -10,6 +10,7 @@ import {
   type Transaction,
 } from "@/db/schema";
 import { fetchMarketPrice, PRICE_PROVIDERS } from "@/lib/market-prices";
+import { fetchStockQuote } from "@/lib/stock-prices";
 import { asc, desc, eq, inArray, sql } from "drizzle-orm";
 
 let schemaReady: Promise<void> | null = null;
@@ -353,50 +354,97 @@ export type DailySnapshotRunResult = {
   totalCrypto: number;
   attemptedCrypto: number;
   refreshedCrypto: number;
+  /** Stock holdings with a symbol (priced through Yahoo Finance). */
+  totalStocks: number;
+  attemptedStocks: number;
+  refreshedStocks: number;
   snapshottedAssets: number;
 };
 
 /**
- * Fetches fresh exchange prices for crypto holdings and records daily price & portfolio snapshots.
- * Shared by manual one-click refresh, background daily check, and the scheduled daily cron job.
+ * Fetches fresh live prices for crypto (exchange APIs) and stocks (Yahoo
+ * Finance) and records daily price & portfolio snapshots.
+ * Shared by manual one-click refresh, background daily check, and the scheduled
+ * daily cron job.
+ *
+ * `onlyStale` limits the run to holdings not yet priced today (crypto and
+ * stocks alike); `staleAfterMs` uses a rolling age instead.
  */
 export async function runDailyPriceSnapshot(
-  options: { onlyStaleCrypto?: boolean; staleAfterMs?: number } = {},
+  options: { onlyStale?: boolean; staleAfterMs?: number } = {},
 ): Promise<DailySnapshotRunResult> {
   await ensureSchema();
   const list = await db.select().from(assets);
   const d = today();
   const allCrypto = list.filter((asset) => asset.type === "crypto" && asset.symbol.trim() !== "");
+  const allStocks = list.filter((asset) => asset.type === "stock" && asset.symbol.trim() !== "");
   const staleBefore = options.staleAfterMs ? Date.now() - options.staleAfterMs : null;
-  const targets = staleBefore !== null
-    ? allCrypto.filter((asset) => asset.priceUpdatedAt.getTime() <= staleBefore)
-    : options.onlyStaleCrypto
-      ? allCrypto.filter((asset) => localDateString(asset.priceUpdatedAt) < d)
-      : allCrypto;
+
+  const pickTargets = <T extends { priceUpdatedAt: Date }>(candidates: T[]): T[] =>
+    staleBefore !== null
+      ? candidates.filter((asset) => asset.priceUpdatedAt.getTime() <= staleBefore)
+      : options.onlyStale
+        ? candidates.filter((asset) => localDateString(asset.priceUpdatedAt) < d)
+        : candidates;
+
+  const targets = pickTargets(allCrypto);
+  const stockTargets = pickTargets(allStocks);
 
   let refreshedCrypto = 0;
-  if (targets.length > 0) {
-    const results = await Promise.all(
-      targets.map(async (asset) => {
-        try {
-          const price = await Promise.any(
-            PRICE_PROVIDERS.map((provider) => fetchMarketPrice(provider, asset.symbol, "USDT")),
-          );
-          return { asset, price };
-        } catch {
-          return { asset, price: null };
-        }
-      }),
-    );
+  let refreshedStocks = 0;
 
-    const found = results.filter(
-      (result): result is { asset: (typeof targets)[number]; price: number } => result.price !== null,
-    );
+  // Stocks and crypto share the same write-back step, so a symbol that fails on
+  // one side never blocks the other.
+  const found: Array<{ id: number; price: number }> = [];
+
+  await Promise.all([
+    (async () => {
+      if (targets.length === 0) return;
+      const results = await Promise.all(
+        targets.map(async (asset) => {
+          try {
+            const price = await Promise.any(
+              PRICE_PROVIDERS.map((provider) => fetchMarketPrice(provider, asset.symbol, "USDT")),
+            );
+            return { id: asset.id, price };
+          } catch {
+            return { id: asset.id, price: null };
+          }
+        }),
+      );
+      for (const result of results) {
+        if (result.price !== null) {
+          refreshedCrypto += 1;
+          found.push({ id: result.id, price: result.price });
+        }
+      }
+    })(),
+    (async () => {
+      if (stockTargets.length === 0) return;
+      const results = await Promise.all(
+        stockTargets.map(async (asset) => {
+          try {
+            const quote = await fetchStockQuote(asset.symbol);
+            return { id: asset.id, price: quote.price };
+          } catch {
+            return { id: asset.id, price: null };
+          }
+        }),
+      );
+      for (const result of results) {
+        if (result.price !== null) {
+          refreshedStocks += 1;
+          found.push({ id: result.id, price: result.price });
+        }
+      }
+    })(),
+  ]);
+
+  if (found.length > 0) {
     const updatedAt = new Date();
-    for (const { asset, price } of found) {
-      await db.update(assets).set({ currentPrice: price, priceUpdatedAt: updatedAt }).where(eq(assets.id, asset.id));
+    for (const { id, price } of found) {
+      await db.update(assets).set({ currentPrice: price, priceUpdatedAt: updatedAt }).where(eq(assets.id, id));
     }
-    refreshedCrypto = found.length;
   }
 
   if (list.length > 0) {
@@ -412,6 +460,9 @@ export async function runDailyPriceSnapshot(
     totalCrypto: allCrypto.length,
     attemptedCrypto: targets.length,
     refreshedCrypto,
+    totalStocks: allStocks.length,
+    attemptedStocks: stockTargets.length,
+    refreshedStocks,
     snapshottedAssets,
   };
 }

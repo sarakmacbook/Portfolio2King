@@ -374,14 +374,14 @@ export async function getLastPortfolioUpdate(): Promise<Date | null> {
   return row?.at ?? null;
 }
 
-/** Most recent live-price update across crypto holdings. */
+/** Most recent live-price update across crypto and stock holdings. */
 export async function getLastPriceRefresh(): Promise<Date | null> {
   if (!hasDatabase()) return null;
   await ensureSchema();
   const [row] = await db
     .select({ at: sql<Date | null>`max(${assets.priceUpdatedAt})` })
     .from(assets)
-    .where(and(eq(assets.type, "crypto"), sql`${assets.symbol} <> ''`));
+    .where(and(inArray(assets.type, ["crypto", "stock"]), sql`${assets.symbol} <> ''`));
   if (!row?.at) return null;
   const value = row.at instanceof Date ? row.at : new Date(row.at);
   return Number.isNaN(value.getTime()) ? null : value;

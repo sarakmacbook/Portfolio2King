@@ -544,7 +544,7 @@ export function formatPriceMove(move: PriceMove): { title: string; body: string 
 export function formatRefreshFailure(date: string, attempted: number): { title: string; body: string } {
   return {
     title: "Price refresh failed",
-    body: `No live crypto price could be fetched for ${attempted} asset${attempted === 1 ? "" : "s"} on ${date}. Prices were left unchanged and will be retried on the next refresh.`,
+    body: `No live price could be fetched for ${attempted} asset${attempted === 1 ? "" : "s"} on ${date}. Prices were left unchanged and will be retried on the next refresh.`,
   };
 }
 

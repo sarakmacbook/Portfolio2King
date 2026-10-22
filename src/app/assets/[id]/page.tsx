@@ -41,8 +41,11 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     getAssetPriceSnapshots(id),
   ]);
   const t = today();
-  const staleCrypto = all.some(
-    (a) => a.type === "crypto" && a.symbol.trim() !== "" && localDateString(a.priceUpdatedAt) < t,
+  const stalePrices = all.some(
+    (a) =>
+      (a.type === "crypto" || a.type === "stock") &&
+      a.symbol.trim() !== "" &&
+      localDateString(a.priceUpdatedAt) < t,
   );
   const cashAccounts = all
     .filter((a) => a.type === "cash" && a.id !== id)
@@ -59,7 +62,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
 
   return (
     <div className="space-y-6">
-      <AutoDailySnapshot stale={staleCrypto} currentDate={t} />
+      <AutoDailySnapshot stale={stalePrices} currentDate={t} />
       <Link href="/" className="text-sm font-medium text-slate-500 hover:text-slate-800">
         ← Back to dashboard
       </Link>

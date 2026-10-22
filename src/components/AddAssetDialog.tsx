@@ -270,6 +270,11 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
         <div>
           <label className="label">{isCash ? "Currency / tag" : "Symbol / ticker"}</label>
           <input name="symbol" className="input uppercase" placeholder={placeholders[type].symbol} value={symbol} onChange={(event) => setSymbol(event.target.value.toUpperCase())} />
+          {type === "stock" && (
+            <p className="mt-1 text-xs text-slate-400">
+              Use the Yahoo Finance symbol — e.g. AAPL, VOO, BRK-B, 7203.T. Quotes are converted to USD automatically.
+            </p>
+          )}
         </div>
       </div>
 

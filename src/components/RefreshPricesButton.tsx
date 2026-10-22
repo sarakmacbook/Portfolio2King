@@ -2,7 +2,7 @@
 
 import { useActionState, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { autoRefreshCryptoPrices, type ActionState } from "@/app/actions";
+import { autoRefreshPrices, type ActionState } from "@/app/actions";
 
 function RefreshSubmit() {
   const { pending } = useFormStatus();
@@ -31,7 +31,7 @@ export default function RefreshPricesButton() {
   const [state, action] = useActionState<ActionState, FormData>(async (previous) => {
     setShowMessage(false);
     if (hideTimer.current) clearTimeout(hideTimer.current);
-    const result = await autoRefreshCryptoPrices(previous);
+    const result = await autoRefreshPrices(previous);
     setShowMessage(true);
     hideTimer.current = setTimeout(() => setShowMessage(false), 3500);
     return result;

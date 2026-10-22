@@ -35,8 +35,11 @@ export default async function Dashboard() {
   ]);
   const totals = computeTotals(list);
   const t = today();
-  const staleCrypto = list.some(
-    (a) => a.type === "crypto" && a.symbol.trim() !== "" && localDateString(a.priceUpdatedAt) < t,
+  const stalePrices = list.some(
+    (a) =>
+      (a.type === "crypto" || a.type === "stock") &&
+      a.symbol.trim() !== "" &&
+      localDateString(a.priceUpdatedAt) < t,
   );
 
   const byAsset = new Map<number, PricePoint[]>();
@@ -115,7 +118,7 @@ export default async function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <AutoDailySnapshot stale={staleCrypto} currentDate={t} />
+      <AutoDailySnapshot stale={stalePrices} currentDate={t} />
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-sm font-medium text-slate-500">Total portfolio value</p>

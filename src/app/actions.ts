@@ -212,18 +212,24 @@ export async function bulkUpdatePrices(_prev: ActionState, fd: FormData): Promis
   return { ok: true, ts: Date.now() };
 }
 
-export async function autoRefreshCryptoPrices(_prev: ActionState): Promise<ActionState> {
+export async function autoRefreshPrices(_prev: ActionState): Promise<ActionState> {
   try {
-    const summary = await runDailyPriceSnapshot({ onlyStaleCrypto: false });
-    if (!summary.totalCrypto) throw new Error("Add a crypto holding with a symbol first.");
-    if (!summary.refreshedCrypto) {
-      throw new Error("No exchange returned a price. Check your asset symbols and try again.");
+    const summary = await runDailyPriceSnapshot({ onlyStale: false });
+    const total = summary.totalCrypto + summary.totalStocks;
+    const refreshed = summary.refreshedCrypto + summary.refreshedStocks;
+    if (!total) throw new Error("Add a stock or crypto holding with a symbol first.");
+    if (!refreshed) {
+      throw new Error("No price source returned a quote. Check your asset symbols and try again.");
     }
     refresh();
-    const missing = summary.totalCrypto - summary.refreshedCrypto;
+    const missing = total - refreshed;
+    const parts = [
+      summary.refreshedCrypto ? `${summary.refreshedCrypto} crypto` : "",
+      summary.refreshedStocks ? `${summary.refreshedStocks} stock${summary.refreshedStocks === 1 ? "" : "s"}` : "",
+    ].filter(Boolean);
     return {
       ok: true,
-      message: `Refreshed ${summary.refreshedCrypto} crypto price${summary.refreshedCrypto === 1 ? "" : "s"} · daily snapshot saved${missing ? ` · ${missing} unavailable` : ""}`,
+      message: `Refreshed ${parts.join(" + ")} · daily snapshot saved${missing ? ` · ${missing} unavailable` : ""}`,
       ts: Date.now(),
     };
   } catch (e) {
@@ -239,9 +245,9 @@ export async function ensureDailyLiveSnapshot(): Promise<{ refreshed: number; da
   try {
     // Goes through the alerting path so the first refresh of a new day can also
     // send threshold notifications instead of silently updating prices.
-    const summary = await refreshPricesWithAlerts({ onlyStaleCrypto: true });
-    if (summary.refreshedCrypto > 0) refresh();
-    return { refreshed: summary.refreshedCrypto, date: summary.date };
+    const summary = await refreshPricesWithAlerts({ onlyStale: true });
+    if (summary.refreshedCrypto + summary.refreshedStocks > 0) refresh();
+    return { refreshed: summary.refreshedCrypto + summary.refreshedStocks, date: summary.date };
   } catch {
     return { refreshed: 0, date: today() };
   }

@@ -5,7 +5,7 @@ import { ensureDailyLiveSnapshot } from "@/app/actions";
 
 /**
  * Silently triggers at most one background live price + daily snapshot refresh
- * per browser session per calendar day when previous-day crypto prices are stale.
+ * per browser session per calendar day when previous-day prices (crypto or stock) are stale.
  */
 export default function AutoDailySnapshot({
   stale,
