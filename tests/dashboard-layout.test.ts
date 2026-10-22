@@ -69,3 +69,28 @@ test("moveBlockTo drops a card before or after another", () => {
   ]);
   assert.deepEqual(moveBlockTo(start, "history", "history", true), start);
 });
+
+test("navigation tabs map to the right sections", async () => {
+  const { NAV_LINKS, isActivePath } = await import("../src/lib/nav-links");
+
+  assert.equal(NAV_LINKS.length, 5);
+  assert.deepEqual(
+    NAV_LINKS.map((link) => link.tab),
+    ["Home", "Prices", "Activity", "Alerts", "Database"],
+  );
+  // Short tab labels stay short enough for a phone-width strip.
+  for (const link of NAV_LINKS) assert.ok(link.tab.length <= 9, link.tab);
+  assert.deepEqual(
+    NAV_LINKS.map((link) => link.href),
+    ["/", "/prices", "/activity", "/alerts", "/database"],
+  );
+
+  assert.equal(isActivePath("/", "/"), true);
+  assert.equal(isActivePath("/assets/12", "/"), true);
+  assert.equal(isActivePath("/prices", "/prices"), true);
+  assert.equal(isActivePath("/prices/", "/prices"), true);
+  assert.equal(isActivePath("/alerts", "/prices"), false);
+  // A prefix that is not a section boundary must not light up.
+  assert.equal(isActivePath("/prices-archive", "/prices"), false);
+  assert.equal(isActivePath("/alerts", "/"), false);
+});

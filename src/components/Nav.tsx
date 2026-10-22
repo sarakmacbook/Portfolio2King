@@ -3,21 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-
-const links = [
-  { href: "/", label: "Dashboard" },
-  { href: "/prices", label: "Refresh prices" },
-  { href: "/activity", label: "Activity" },
-  { href: "/alerts", label: "Alerts" },
-  { href: "/database", label: "Database" },
-];
+import { NAV_LINKS as links, isActivePath } from "@/lib/nav-links";
 
 export default function Nav() {
   const path = usePathname();
   const [open, setOpen] = useState(false);
 
   const linkClass = (href: string, mobile = false) => {
-    const active = href === "/" ? path === "/" || path.startsWith("/assets") : path.startsWith(href);
+    const active = isActivePath(path, href);
     if (mobile) return `rounded-xl px-4 py-3 text-sm font-semibold ${active ? "bg-indigo-50 text-indigo-700" : "text-slate-700 hover:bg-slate-50"}`;
     return `whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition ${
       active ? "bg-white/15 text-white" : "text-indigo-100 hover:bg-white/10 hover:text-white"
