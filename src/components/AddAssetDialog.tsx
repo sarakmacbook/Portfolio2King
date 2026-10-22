@@ -5,6 +5,7 @@ import { createAsset, type ActionState } from "@/app/actions";
 import { ASSET_TYPES, type AssetType } from "@/lib/constants";
 import type { CryptoCategory } from "@/db/schema";
 import { TYPE_META, money } from "@/lib/format";
+import { playMoneyChimeFromGesture } from "@/lib/sounds";
 import { CAMBODIAN_BANKS, type CambodianBank } from "@/lib/cambodian-banks";
 import { ErrorNote, Modal, SubmitButton } from "./ui";
 import CryptoLogo from "./CryptoLogo";
@@ -105,8 +106,13 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
     other: { name: "e.g. Gold bar", symbol: "XAU" },
   };
 
+  function playSoundForFundedAsset(event: React.FormEvent<HTMLFormElement>) {
+    const quantity = Number(new FormData(event.currentTarget).get("quantity")) || 0;
+    if (quantity > 0) playMoneyChimeFromGesture();
+  }
+
   return (
-    <form action={action} className="space-y-5">
+    <form action={action} onSubmit={playSoundForFundedAsset} className="space-y-5">
       <input type="hidden" name="type" value={type} />
       <input type="hidden" name="cryptoCategory" value={cryptoCategory} />
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
