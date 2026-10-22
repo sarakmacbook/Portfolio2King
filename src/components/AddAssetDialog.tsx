@@ -12,6 +12,14 @@ import CryptoLogo from "./CryptoLogo";
 
 export type CashAccount = { id: number; name: string; quantity: number };
 
+/** Data source names shown under search results (the API falls back automatically). */
+const SEARCH_SOURCE_LABELS: Record<string, string> = {
+  coingecko: "CoinGecko",
+  coinpaprika: "CoinPaprika",
+  dexscreener: "DexScreener",
+  binance: "Binance",
+};
+
 function BankLogo({ bank, small = false }: { bank: CambodianBank; small?: boolean }) {
   return (
     <span
@@ -70,6 +78,7 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
   }>>([]);
   const [discovering, setDiscovering] = useState(false);
   const [discoveryError, setDiscoveryError] = useState("");
+  const [topSource, setTopSource] = useState("");
   const isCash = type === "cash";
   const total = (Number(q) || 0) * (Number(cost) || 0) + (Number(fee) || 0);
   const selectedBank = CAMBODIAN_BANKS.find((bank) => bank.name === name);
@@ -79,9 +88,10 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
     setDiscoveryError("");
     try {
       const response = await fetch(`/api/prices/top${query.trim() ? `?q=${encodeURIComponent(query.trim())}` : ""}`);
-      const data = (await response.json()) as { error?: string; assets?: typeof topAssets };
+      const data = (await response.json()) as { error?: string; assets?: typeof topAssets; source?: string };
       if (!response.ok) throw new Error(data.error || "Could not search crypto assets");
       setTopAssets(data.assets || []);
+      setTopSource(data.source || "");
       if (query.trim() && !data.assets?.length) setDiscoveryError("No matching crypto asset found. Check the name, symbol, or contract address.");
     } catch (error) {
       setDiscoveryError(error instanceof Error ? error.message : "Could not search crypto assets");
@@ -184,6 +194,11 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
             </button>
           </div>
           {discoveryError && <p className="mt-2 text-xs text-rose-600">{discoveryError}</p>}
+          {topSource && !discoveryError && (
+            <p className="mt-2 text-xs text-slate-400">
+              Prices via {SEARCH_SOURCE_LABELS[topSource] ?? topSource} · switches provider automatically when one is rate-limited
+            </p>
+          )}
           {topAssets.length > 0 && (
             <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
               {topAssets.map((asset) => (

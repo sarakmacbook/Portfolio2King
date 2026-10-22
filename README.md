@@ -18,6 +18,8 @@ the deployment before storing real portfolio data (see the
   / unrealized P/L replayed from the full transaction history.
 - Manual prices plus live crypto prices from Bybit, OKX, Binance, Coinbase,
   Kraken, or DexScreener — no API keys required.
+- Crypto asset search that falls back automatically between public data
+  providers when one is rate-limited or down.
 - Daily per-asset price snapshots and portfolio snapshots, allocation donut and
   history charts, per-asset pages, and an activity feed.
 - Portable JSON export/import, so you can move providers without `pg_dump`.
@@ -527,3 +529,29 @@ vercel --prod
   every write.
 - Currency formatting lives in `src/lib/format.ts` and is USD-only by design; all
   monetary fields in PostgreSQL are plain `double precision` amounts.
+
+### Crypto search providers
+
+`GET /api/prices/top` (used by **Add holding → Find any crypto asset**) never
+relies on a single API. `src/lib/crypto-search.ts` tries providers in order and
+uses the first one that answers:
+
+| Request | Fallback chain |
+| --- | --- |
+| `?q=<name or symbol>` | CoinGecko → CoinPaprika → DexScreener |
+| `?q=<token contract>` | DexScreener (contract lookup only) |
+| no query (top assets) | CoinGecko → CoinPaprika → Binance (USDT markets by 24h volume) |
+
+- HTTP `429` / `402` / `418` responses, timeouts, invalid JSON, and outages all
+  advance to the next provider. A provider that reports a rate limit is skipped
+  for 1–5 minutes (honouring `Retry-After`), then retried.
+- Successful responses are cached in-process for 60 seconds (searches) or
+  5 minutes (top assets), so repeated clicks do not burn free-tier quotas.
+- The JSON response includes `source` (`coingecko`, `coinpaprika`,
+  `dexscreener`, or `binance`); the dialog shows it under the results. If every
+  provider is rate-limited the route returns `429`, otherwise `502`.
+- Prices returned by every provider are USD; Binance quotes are `USDT`, treated
+  as 1:1 with USD like the rest of the app.
+- No API keys are used, so all providers are subject to their public rate
+  limits. The cache is per server process — a multi-replica deployment makes its
+  own requests per instance.
