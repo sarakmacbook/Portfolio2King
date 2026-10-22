@@ -28,17 +28,13 @@ test("toggling always flips", () => {
  * Executes the real inline script against a stub document, the way the browser
  * runs it in <head> before React hydrates.
  */
-function runBoot(env: { saved?: string | null; prefersDark?: boolean; standalone?: boolean; storageThrows?: boolean }) {
+function runBoot(env: { saved?: string | null; prefersDark?: boolean; storageThrows?: boolean }) {
   const classes = new Set<string>();
-  const attributes: Record<string, string> = {};
 
   const documentElement = {
     classList: {
       add: (value: string) => classes.add(value),
       contains: (value: string) => classes.has(value),
-    },
-    setAttribute: (name: string, value: string) => {
-      attributes[name] = value;
     },
   };
 
@@ -52,22 +48,17 @@ function runBoot(env: { saved?: string | null; prefersDark?: boolean; standalone
   };
 
   const matchMedia = (query: string) => ({
-    matches: query.includes("prefers-color-scheme")
-      ? Boolean(env.prefersDark)
-      : query.includes("display-mode: standalone") || query.includes("display-mode: fullscreen")
-        ? Boolean(env.standalone)
-        : false,
+    matches: query.includes("prefers-color-scheme") ? Boolean(env.prefersDark) : false,
     media: query,
   });
 
-  new Function("document", "localStorage", "matchMedia", "navigator", bootScript())(
+  new Function("document", "localStorage", "matchMedia", bootScript())(
     { documentElement },
     localStorage,
     matchMedia,
-    { standalone: Boolean(env.standalone) },
   );
 
-  return { dark: classes.has("dark"), webclip: attributes["data-webclip"] === "true" };
+  return { dark: classes.has("dark") };
 }
 
 test("the pre-paint script applies the stored or system theme", () => {
@@ -77,26 +68,16 @@ test("the pre-paint script applies the stored or system theme", () => {
   assert.equal(runBoot({ prefersDark: false }).dark, false);
 });
 
-test("the pre-paint script marks an installed web clip", () => {
-  assert.equal(runBoot({ standalone: true }).webclip, true);
-  assert.equal(runBoot({ standalone: false }).webclip, false);
-  // Both can be true at once: a dark web clip.
-  assert.deepEqual(runBoot({ standalone: true, prefersDark: true }), { dark: true, webclip: true });
-});
-
-test("blocked storage does not stop the web clip flag", () => {
-  // Private browsing where localStorage throws: the theme falls back, but the
-  // strip must still be marked so the installed app has navigation.
-  const result = runBoot({ standalone: true, storageThrows: true });
-  assert.equal(result.webclip, true);
-  assert.equal(result.dark, false);
+test("blocked storage falls back to the light theme", () => {
+  // Private browsing where localStorage throws must not break the page.
+  assert.deepEqual(runBoot({ storageThrows: true }), { dark: false });
+  assert.deepEqual(runBoot({ storageThrows: true, prefersDark: true }), { dark: false });
 });
 
 test("the script is self-contained and points at the stored key", () => {
   const script = bootScript();
   assert.ok(script.includes(THEME_STORAGE_KEY));
   assert.ok(script.includes("prefers-color-scheme: dark"));
-  assert.ok(script.includes("data-webclip"));
-  // Two independent try blocks: a storage failure cannot skip the web clip flag.
-  assert.equal(script.match(/try\{/g)?.length, 2);
+  // Wrapped so a locked-down browser cannot throw before the page renders.
+  assert.equal(script.match(/try\{/g)?.length, 1);
 });

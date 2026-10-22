@@ -44,21 +44,13 @@ export function toggleTheme(): Theme {
 }
 
 /**
- * Inline script for `<head>`, run before the first paint:
- *
- * 1. Marks the document as a web clip so the tab strip can show without a
- *    flash of the browser header.
- * 2. Applies the saved (or system) theme.
- *
- * The two steps are separate `try` blocks on purpose: storage can throw in
- * private browsing, and that must not stop the web clip flag from being set.
+ * Inline script for `<head>`, run before the first paint so a saved dark theme
+ * never flashes white. Storage can throw in private browsing; the app then
+ * simply starts in the light theme.
  */
 export function bootScript(): string {
   return (
     `(function(){` +
-    `try{var d=document.documentElement;` +
-    `var s=(matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: fullscreen)').matches||navigator.standalone===true);` +
-    `if(s)d.setAttribute('data-webclip','true')}catch(e){}` +
     `try{var t=localStorage.getItem('${THEME_STORAGE_KEY}');` +
     `if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark')}catch(e){}` +
     `})()`

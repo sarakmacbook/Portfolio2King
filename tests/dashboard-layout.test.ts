@@ -70,16 +70,14 @@ test("moveBlockTo drops a card before or after another", () => {
   assert.deepEqual(moveBlockTo(start, "history", "history", true), start);
 });
 
-test("navigation tabs map to the right sections", async () => {
+test("navigation links map to the right sections", async () => {
   const { NAV_LINKS, isActivePath } = await import("../src/lib/nav-links");
 
   assert.equal(NAV_LINKS.length, 5);
   assert.deepEqual(
-    NAV_LINKS.map((link) => link.tab),
-    ["Home", "Prices", "Activity", "Alerts", "Database"],
+    NAV_LINKS.map((link) => link.label),
+    ["Dashboard", "Refresh prices", "Activity", "Alerts", "Database"],
   );
-  // Short tab labels stay short enough for a phone-width strip.
-  for (const link of NAV_LINKS) assert.ok(link.tab.length <= 9, link.tab);
   assert.deepEqual(
     NAV_LINKS.map((link) => link.href),
     ["/", "/prices", "/activity", "/alerts", "/database"],
