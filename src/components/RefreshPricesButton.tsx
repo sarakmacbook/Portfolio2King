@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { autoRefreshCryptoPrices, type ActionState } from "@/app/actions";
 
@@ -26,11 +26,20 @@ function RefreshSubmit() {
 }
 
 export default function RefreshPricesButton() {
-  const [state, action] = useActionState<ActionState, FormData>(async (previous) => autoRefreshCryptoPrices(previous), {});
+  const [showMessage, setShowMessage] = useState(false);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [state, action] = useActionState<ActionState, FormData>(async (previous) => {
+    setShowMessage(false);
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    const result = await autoRefreshCryptoPrices(previous);
+    setShowMessage(true);
+    hideTimer.current = setTimeout(() => setShowMessage(false), 3500);
+    return result;
+  }, {});
   return (
     <form action={action} className="relative">
       <RefreshSubmit />
-      {(state.message || state.error) && (
+      {showMessage && (state.message || state.error) && (
         <p
           role="status"
           className={`absolute right-0 top-full z-20 mt-2 w-64 rounded-xl px-3 py-2 text-xs shadow-lg ring-1 ${
