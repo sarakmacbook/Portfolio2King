@@ -3,7 +3,6 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import BackgroundRefresh from "@/components/BackgroundRefresh";
 import Nav from "@/components/Nav";
-import WebClipTabs from "@/components/WebClipTabs";
 import ThemeToggle from "@/components/ThemeToggle";
 import { bootScript } from "@/lib/theme";
 import "./globals.css";
@@ -13,9 +12,7 @@ export const metadata: Metadata = {
   description: "Track cash, stocks and crypto holdings with manual input.",
   applicationName: "Ledgerly",
   manifest: "/manifest.webmanifest",
-  // "default" keeps the status bar dark-on-light, matching the white tab strip
-  // the web clip shows instead of the gradient header.
-  appleWebApp: { capable: true, title: "Ledgerly", statusBarStyle: "default" },
+  appleWebApp: { capable: true, title: "Ledgerly", statusBarStyle: "black-translucent" },
   icons: { icon: "/icon.png", apple: "/apple-icon.png" },
 };
 
@@ -37,16 +34,15 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <head><script dangerouslySetInnerHTML={{ __html: themeScript }} /></head>
       <body className="min-h-screen bg-slate-50 text-slate-900 antialiased">
         <header className="site-header bg-gradient-to-br from-indigo-700 via-indigo-600 to-violet-600">
-          <div className="site-header-bar relative mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
-            <Link href="/" className="site-brand flex shrink-0 items-center gap-2 text-white" aria-label="Ledgerly dashboard">
+          <div className="relative mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
+            <Link href="/" className="flex shrink-0 items-center gap-2 text-white" aria-label="Ledgerly dashboard">
               <span className="grid h-9 w-9 place-items-center rounded-xl bg-white/15 text-lg ring-1 ring-white/25">◆</span>
               <span className="hidden text-lg font-semibold tracking-tight min-[390px]:inline">Ledgerly</span>
             </Link>
-            <div className="site-tools flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 items-center gap-2">
               <Nav />
               <ThemeToggle />
             </div>
-            <WebClipTabs />
           </div>
         </header>
         <BackgroundRefresh />
