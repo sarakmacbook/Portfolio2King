@@ -2,27 +2,42 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import {
   DEFAULT_ALERT_SETTINGS,
+  DEFAULT_PORTFOLIO_ALERT_SETTINGS,
   SETTING_KEYS,
   baselineCutoffDate,
   daysBetweenIso,
   describeBaseline,
+  describePortfolioMove,
   detectPriceMoves,
   formatAlertText,
   formatMovePercent,
+  formatPortfolioMove,
   formatPriceMove,
   formatRefreshFailure,
+  isPortfolioAlertDue,
+  isValidTimeZone,
+  nextPortfolioAlertAt,
+  normaliseAlertTime,
   parseAlertSettings,
+  parseAlertTimeMinutes,
   parseAlertWindow,
   parseChannels,
+  parseOptionalThresholdPct,
+  parsePortfolioAlertSettings,
   parsePushSubscription,
   parseRefreshMinutes,
   parseThresholdPct,
+  portfolioAlertKey,
+  portfolioMovePassesThreshold,
   priceAlertKey,
   refreshFailureKey,
+  resolveTimeZone,
   settingsToRows,
   shiftIsoDate,
   telegramConfigFromEnv,
   telegramRequest,
+  zonedClock,
+  zonedTimeToUtc,
 } from "../src/lib/alert-rules";
 import { sendTelegramMessage } from "../src/lib/alerts";
 
@@ -50,6 +65,7 @@ test("parseAlertSettings falls back to defaults and honours stored values", () =
     window: "month",
     channels: ["telegram"],
     backgroundRefreshMinutes: 30,
+    portfolio: DEFAULT_PORTFOLIO_ALERT_SETTINGS,
   });
 
   // An explicitly empty channel list means "record alerts, deliver nothing".
@@ -113,6 +129,13 @@ test("settings rows round-trip through the parser", () => {
     window: "month" as const,
     channels: ["push"] as const,
     backgroundRefreshMinutes: 60,
+    portfolio: {
+      enabled: true,
+      time: "18:30",
+      timezone: "Asia/Phnom_Penh",
+      window: "month" as const,
+      thresholdPct: null,
+    },
   };
   const rows = settingsToRows({ ...settings, channels: [...settings.channels] });
   const map = Object.fromEntries(rows.map((row) => [row.key, row.value]));
@@ -122,6 +145,13 @@ test("settings rows round-trip through the parser", () => {
     window: "month",
     channels: ["push"],
     backgroundRefreshMinutes: 60,
+    portfolio: {
+      enabled: true,
+      time: "18:30",
+      timezone: "Asia/Phnom_Penh",
+      window: "month",
+      thresholdPct: null,
+    },
   });
 });
 
@@ -320,4 +350,126 @@ test("sendTelegramMessage reports missing configuration without calling out", as
   assert.equal(result.ok, false);
   assert.equal(result.error, "Telegram is not configured");
   assert.equal(called, false);
+});
+
+test("portfolio update settings: time is what matters, threshold is optional", () => {
+  assert.equal(normaliseAlertTime("7:05"), "07:05");
+  assert.equal(normaliseAlertTime("18:00"), "18:00");
+  assert.equal(normaliseAlertTime(""), "");
+  assert.equal(normaliseAlertTime(null), "");
+  assert.equal(normaliseAlertTime("25:00"), null);
+  assert.equal(normaliseAlertTime("18:60"), null);
+  assert.equal(parseAlertTimeMinutes("18:30"), 1110);
+  assert.equal(parseAlertTimeMinutes(""), null);
+
+  // Blank means "no threshold": the update is sent every day at the chosen time.
+  assert.deepEqual(parseOptionalThresholdPct(""), { value: null });
+  assert.deepEqual(parseOptionalThresholdPct("  "), { value: null });
+  assert.deepEqual(parseOptionalThresholdPct("3.5"), { value: 3.5 });
+  assert.equal(parseOptionalThresholdPct("abc"), null);
+  assert.equal(parseOptionalThresholdPct("80"), null);
+
+  const parsed = parsePortfolioAlertSettings({
+    [SETTING_KEYS.portfolioEnabled]: "yes",
+    [SETTING_KEYS.portfolioTime]: "7:05",
+    [SETTING_KEYS.portfolioTimezone]: "Asia/Phnom_Penh",
+    [SETTING_KEYS.portfolioWindow]: "month",
+    [SETTING_KEYS.portfolioThresholdPct]: "2.5",
+  });
+  assert.deepEqual(parsed, {
+    enabled: true,
+    time: "07:05",
+    timezone: "Asia/Phnom_Penh",
+    window: "month",
+    thresholdPct: 2.5,
+  });
+
+  // No stored rows → defaults; an explicitly blank time switches the schedule off.
+  assert.deepEqual(parsePortfolioAlertSettings({}), DEFAULT_PORTFOLIO_ALERT_SETTINGS);
+  assert.deepEqual(parsePortfolioAlertSettings({ [SETTING_KEYS.portfolioTime]: "" }), {
+    ...DEFAULT_PORTFOLIO_ALERT_SETTINGS,
+    time: "",
+  });
+  // Unreadable values fall back instead of breaking the page.
+  assert.equal(parsePortfolioAlertSettings({ [SETTING_KEYS.portfolioTime]: "25:99" }).time, "18:00");
+  assert.equal(parsePortfolioAlertSettings({ [SETTING_KEYS.portfolioThresholdPct]: "abc" }).thresholdPct, null);
+});
+
+test("time zones decide when the portfolio update is due", () => {
+  // Phnom Penh is UTC+7 all year.
+  assert.deepEqual(zonedClock(new Date("2026-10-22T11:30:00Z"), "Asia/Phnom_Penh"), {
+    date: "2026-10-22",
+    minutes: 18 * 60 + 30,
+  });
+  assert.equal(zonedTimeToUtc("2026-10-22", 18 * 60, "Asia/Phnom_Penh").toISOString(), "2026-10-22T11:00:00.000Z");
+  assert.equal(zonedTimeToUtc("2026-10-22", 18 * 60, "UTC").toISOString(), "2026-10-22T18:00:00.000Z");
+  // Daylight saving is handled by the two-pass offset lookup.
+  assert.equal(zonedTimeToUtc("2026-07-01", 9 * 60, "America/New_York").toISOString(), "2026-07-01T13:00:00.000Z");
+  assert.equal(zonedTimeToUtc("2026-01-15", 9 * 60, "America/New_York").toISOString(), "2026-01-15T14:00:00.000Z");
+
+  assert.equal(isPortfolioAlertDue(new Date("2026-10-22T10:59:00Z"), "18:00", "Asia/Phnom_Penh"), false);
+  assert.equal(isPortfolioAlertDue(new Date("2026-10-22T11:00:00Z"), "18:00", "Asia/Phnom_Penh"), true);
+  // Later the same local day still counts; the per-day key prevents repeats.
+  assert.equal(isPortfolioAlertDue(new Date("2026-10-22T15:00:00Z"), "18:00", "Asia/Phnom_Penh"), true);
+  assert.equal(isPortfolioAlertDue(new Date("2026-10-22T15:00:00Z"), "", "Asia/Phnom_Penh"), false);
+
+  assert.equal(
+    nextPortfolioAlertAt(new Date("2026-10-22T09:00:00Z"), "18:00", "Asia/Phnom_Penh")?.toISOString(),
+    "2026-10-22T11:00:00.000Z",
+  );
+  assert.equal(
+    nextPortfolioAlertAt(new Date("2026-10-22T11:30:00Z"), "18:00", "Asia/Phnom_Penh")?.toISOString(),
+    "2026-10-23T11:00:00.000Z",
+  );
+  assert.equal(nextPortfolioAlertAt(new Date(), "", "UTC"), null);
+
+  // Unknown zones fall back to a usable zone instead of throwing.
+  assert.equal(isValidTimeZone("Not/AZone"), false);
+  assert.ok(resolveTimeZone("Not/AZone").length > 0);
+});
+
+test("portfolio moves report money and percent, with an optional threshold", () => {
+  const up = describePortfolioMove(50_000, 51_000, "yesterday's close");
+  assert.ok(up);
+  assert.deepEqual(up, {
+    from: 50_000,
+    to: 51_000,
+    changeMoney: 1_000,
+    changePct: 0.02,
+    direction: "up",
+    baseline: "yesterday's close",
+  });
+  assert.equal(formatPortfolioMove(up).title, "Portfolio ▲ +2.00% (+$1,000.00)");
+  assert.equal(
+    formatPortfolioMove(up).body,
+    "Your portfolio moved from $50,000.00 to $51,000.00 since yesterday's close: +$1,000.00 (+2.00%).",
+  );
+
+  const down = describePortfolioMove(50_000, 48_500, "the price 30 days ago");
+  assert.ok(down);
+  assert.equal(down.direction, "down");
+  assert.equal(formatPortfolioMove(down).title, "Portfolio ▼ -3.00% (-$1,500.00)");
+
+  const flat = describePortfolioMove(50_000, 50_000, "yesterday's close");
+  assert.ok(flat);
+  assert.equal(flat.direction, "flat");
+  assert.equal(formatPortfolioMove(flat).title, "Portfolio ▬ 0.00% ($0.00)");
+  assert.equal(formatPortfolioMove(flat).body, "Your portfolio is worth $50,000.00, unchanged since yesterday's close.");
+
+  // No baseline or nonsense totals never produce an alert.
+  assert.equal(describePortfolioMove(0, 51_000, "x"), null);
+  assert.equal(describePortfolioMove(Number.NaN, 51_000, "x"), null);
+  assert.equal(describePortfolioMove(50_000, -1, "x"), null);
+
+  // Blank threshold = always send, even when nothing moved.
+  assert.equal(portfolioMovePassesThreshold(flat, null), true);
+  assert.equal(portfolioMovePassesThreshold(up, null), true);
+  assert.equal(portfolioMovePassesThreshold(up, 2), true);
+  assert.equal(portfolioMovePassesThreshold(up, 2.5), false);
+  assert.equal(portfolioMovePassesThreshold(down, 3), true);
+  assert.equal(portfolioMovePassesThreshold(flat, 0.5), false);
+
+  assert.equal(portfolioAlertKey("2026-10-22"), "portfolio:2026-10-22:day");
+  assert.equal(portfolioAlertKey("2026-10-22", "month"), "portfolio:2026-10-22:month");
+  assert.notEqual(portfolioAlertKey("2026-10-22"), portfolioAlertKey("2026-10-23"));
 });

@@ -25,7 +25,8 @@ the deployment before storing real portfolio data (see the
 - Portable JSON export/import, so you can move providers without `pg_dump`.
 - Optional guided database setup in the web UI.
 - Background price refresh with threshold alerts over Web Push (browser or
-  installed web clip) and Telegram.
+  installed web clip) and Telegram, plus an optional daily whole-portfolio
+  update (money and percent) at a time you choose.
 - **One reporting currency: USD.** See below.
 
 **Contents:** [Supported currencies](#supported-currencies) ·
@@ -140,9 +141,10 @@ Every screen is built to work on a phone as well as a desktop:
 
 ## Background refresh and alerts
 
-Ledgerly can keep crypto prices fresh on its own and notify you when a holding
-moves beyond a threshold. Alerts are delivered over **Web Push** (to a browser or
-an installed web clip) and/or **Telegram**.
+Ledgerly can keep crypto prices fresh on its own, notify you when a holding
+moves beyond a threshold, and send a scheduled summary of your **whole
+portfolio** in money and percent. Alerts are delivered over **Web Push** (to a
+browser or an installed web clip) and/or **Telegram**.
 
 ### What refreshes, and when
 
@@ -169,6 +171,35 @@ an installed web clip) and/or **Telegram**.
   day instead of silently keeping stale prices.
 - The server decides whether a refresh is due (`refresh.intervalMinutes`), so
   many open tabs cannot multiply API calls or alerts.
+
+### Portfolio update at a set time
+
+Separate from per-holding thresholds, one message reports the whole portfolio’s
+change in money **and** percent:
+
+```text
+Portfolio ▲ +2.35% (+$1,222.00)
+Your portfolio moved from $52,000.00 to $53,222.00 since yesterday’s close: +$1,222.00 (+2.35%).
+```
+
+- Pick a **time of day** and a **time zone** on `/alerts`. Your device’s zone is
+  selected by default; the first refresh at or after that local time sends the
+  update. The per-day key (`portfolio:2026-10-22:day`) means exactly one message
+  per day, whether the refresh comes from the cron job or an open tab.
+- **The threshold is optional — the time is the point.** Leave *Only if it moves
+  (%)* blank and the update arrives every day at that time, even when nothing
+  moved (`Portfolio ▬ 0.00% ($0.00)`). Enter e.g. `2` to skip days with a
+  smaller move.
+- **Compare over** day (yesterday’s total) or month (the total ~30 days ago).
+  The baseline is the newest daily snapshot before the cutoff. Until one exists,
+  the previous refresh total is used and labelled “the last refresh”; with no
+  history at all, no message is invented.
+- The portfolio switch is **independent of Automatic price alerts** — you can
+  keep the timed update while per-holding threshold alerts are off.
+- Deposits, withdrawals and new buys move the total, so they count as part of the
+  change. The message tells you how much the total moved, not why.
+- **Send portfolio update now** on `/alerts` previews today’s message without
+  waiting for the clock. Manual previews ignore the optional threshold.
 
 ### Set up Web Push (browser / web clip)
 
@@ -229,10 +260,15 @@ Configure on `/alerts`; values live in the `app_settings` table.
 
 | Setting | Default | Range |
 | --- | --- | --- |
-| Automatic alerts | on | on/off (manual tests still work when off) |
-| Threshold | 5 % | 0.5 – 50 % |
-| Comparison window | day | day (vs yesterday’s close) or month (vs 30 days ago) |
-| Channels | push + telegram | any combination |
+| Automatic price alerts (holdings) | on | on/off (manual tests still work when off) |
+| Holding threshold | 5 % | 0.5 – 50 % |
+| Holding comparison window | day | day (vs yesterday’s close) or month (vs 30 days ago) |
+| Portfolio update | off | on/off — sends one message per day at the chosen time |
+| Portfolio time | 18:00 | any time of day, read in the chosen time zone |
+| Portfolio time zone | device zone | any IANA zone (e.g. `Asia/Phnom_Penh`) |
+| Portfolio threshold | blank (always send) | blank, or 0.5 – 50 % |
+| Portfolio comparison window | day | day (vs yesterday’s total) or month (vs 30 days ago) |
+| Channels | push + telegram | any combination (used by both alert types) |
 | Background refresh | 15 min | off, or 5 – 720 min |
 
 Turning on a channel without configuring it is harmless: push with no
@@ -256,7 +292,10 @@ branch.
 ```
 
 Hobby plans allow daily crons only; the bundled `/api/cron/daily-snapshot` entry
-already sends alerts once a day. Minute-level schedules need Pro.
+already sends alerts once a day. Note that a once-a-day cron can only deliver the
+portfolio update at (or after) the hour it runs — schedule the route more often
+(GitHub Actions or a Pro plan) for a precise local time. Minute-level schedules
+need Pro.
 
 **While someone is browsing** — no scheduler is needed as long as a tab is open;
 the page triggers a throttled refresh on the interval above.
@@ -469,9 +508,9 @@ curl -fsS -H "Authorization: Bearer $CRON_SECRET" \
 ```
 
 Every run refreshes live crypto prices, records the daily snapshot, and sends
-Web Push / Telegram alerts for moves beyond the threshold. The daily
-`/api/cron/daily-snapshot` endpoint remains for existing schedules and does the
-same thing.
+Web Push / Telegram alerts for moves beyond the threshold — and, at the time you
+picked, the portfolio update. The daily `/api/cron/daily-snapshot` endpoint
+remains for existing schedules and does the same thing.
 
 The response is a summary such as
 `{ "ok": true, "refreshedCrypto": 3, "priceMoves": 1, "alertsSent": 1 }`.
