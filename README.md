@@ -20,6 +20,7 @@ the deployment before storing real portfolio data (see the
   Kraken, or DexScreener — no API keys required.
 - Crypto asset search that falls back automatically between public data
   providers when one is rate-limited or down.
+- Drag-and-drop ordering of the holdings table, saved explicitly per instance.
 - Daily per-asset price snapshots and portfolio snapshots, allocation donut and
   history charts, per-asset pages, and an activity feed.
 - Portable JSON export/import, so you can move providers without `pg_dump`.
@@ -29,6 +30,7 @@ the deployment before storing real portfolio data (see the
 - **One reporting currency: USD.** See below.
 
 **Contents:** [Supported currencies](#supported-currencies) ·
+[Arrange holdings](#arrange-holdings) ·
 [Background refresh and alerts](#background-refresh-and-alerts) ·
 [Run locally](#run-locally) · [Self-host on your own server](#self-host-on-your-own-server) ·
 [Connect a database from the web UI](#connect-a-database-from-the-web-ui) ·
@@ -96,6 +98,31 @@ whose tags record the original currency.
 > A true multi-currency ledger (KHR cash next to USD stocks) would need a
 > currency on each account plus a dated FX-rate table, and every total/snapshot
 > would have to convert at capture time. That is a feature, not a setting.
+
+## Arrange holdings
+
+The dashboard table follows a saved order. To change it:
+
+1. Click **⇅ Arrange** above the table.
+2. Drag rows (a line shows where the row will land), or use the **▲ / ▼** buttons —
+   they are the touch-friendly and keyboard-accessible path.
+3. Click **Save order**. Nothing is written until you save; **Cancel** discards
+   changes and **Reset to default** clears the saved order.
+
+Details:
+
+- The order is stored as `assets.sort_order`. Rows without a position keep the
+  original type/name ordering, so an untouched instance looks exactly as before.
+- New holdings are appended to the end of an existing custom order.
+- Saving re-validates ids against the database: if another tab added or deleted a
+  holding meanwhile, unknowns are ignored and missing ones are appended rather
+  than dropped.
+- Clicking a column heading sorts temporarily; **↺ Custom order** restores the
+  saved order.
+- The order is included in JSON exports/imports (`sortOrder`), and older backups
+  without it still import (their rows fall back to the default ordering).
+- Arranging changes only the display order — balances, totals, and snapshots are
+  not recalculated.
 
 ## Background refresh and alerts
 

@@ -23,6 +23,7 @@ import {
   today,
 } from "@/lib/portfolio";
 import { refreshPricesWithAlerts } from "@/lib/price-refresh";
+import { clearAssetOrder, nextPositionForNewAsset, persistAssetOrder } from "@/lib/asset-order-db";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -110,9 +111,12 @@ export async function createAsset(_prev: ActionState, fd: FormData): Promise<Act
       throw new Error("Enter a buy price or current price");
     }
 
+    // Place new holdings at the end of an existing custom order.
+    const sortOrder = await nextPositionForNewAsset();
+
     const [row] = await db
       .insert(assets)
-      .values({ type, name: name || symbol, symbol, cryptoCategory, currentPrice, notes })
+      .values({ type, name: name || symbol, symbol, cryptoCategory, currentPrice, notes, sortOrder })
       .returning({ id: assets.id });
     newId = row.id;
 
@@ -169,6 +173,50 @@ export async function updateAsset(_prev: ActionState, fd: FormData): Promise<Act
   }
   refresh();
   return { ok: true, ts: Date.now() };
+}
+
+function parseOrder(raw: string): number[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("Could not read the new order. Reload the page and try again.");
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("The new order is empty.");
+  if (parsed.length > 10_000) throw new Error("Too many holdings to reorder at once.");
+  const ids = parsed.map((value) => Number(value));
+  if (ids.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
+    throw new Error("The new order contains an invalid holding id.");
+  }
+  if (new Set(ids).size !== ids.length) throw new Error("The new order contains duplicates.");
+  return ids;
+}
+
+/** Persists the drag-and-drop order from the dashboard "Arrange" mode. */
+export async function saveAssetOrder(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  try {
+    await ensureSchema();
+    const submitted = parseOrder(str(fd, "order"));
+    // Re-validated against the database, so a stale tab cannot reorder a holding
+    // that was deleted or omit one that was added elsewhere.
+    const ordered = await persistAssetOrder(submitted);
+    if (ordered.length === 0) throw new Error("There are no holdings to order.");
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not save the order" };
+  }
+  refresh();
+  return { ok: true, message: "Order saved.", ts: Date.now() };
+}
+
+/** Clears every explicit position, returning to the default type/name order. */
+export async function resetAssetOrder(_prev: ActionState, _fd: FormData): Promise<ActionState> {
+  try {
+    await clearAssetOrder();
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not reset the order" };
+  }
+  refresh();
+  return { ok: true, message: "Order reset to the default.", ts: Date.now() };
 }
 
 export async function updatePrice(_prev: ActionState, fd: FormData): Promise<ActionState> {

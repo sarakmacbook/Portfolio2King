@@ -45,10 +45,12 @@ export function ensureSchema() {
           current_price double precision NOT NULL DEFAULT 0,
           realized_pnl double precision NOT NULL DEFAULT 0,
           notes text NOT NULL DEFAULT '',
+          sort_order integer,
           price_updated_at timestamptz NOT NULL DEFAULT now(),
           created_at timestamptz NOT NULL DEFAULT now()
         )`);
       await db.execute(sql`ALTER TABLE assets ADD COLUMN IF NOT EXISTS crypto_category text NOT NULL DEFAULT 'volatile'`);
+      await db.execute(sql`ALTER TABLE assets ADD COLUMN IF NOT EXISTS sort_order integer`);
       await db.execute(sql`
         CREATE TABLE IF NOT EXISTS transactions (
           id serial PRIMARY KEY,
@@ -328,7 +330,12 @@ export async function recordSnapshot(snapshotDate = today()) {
  */
 export async function ensureDailySnapshot(snapshotDate = today()) {
   await ensureSchema();
-  const list = await db.select().from(assets).orderBy(asc(assets.type), asc(assets.name));
+  // NULLS LAST is the Postgres default for ASC, so rows without an explicit
+  // position fall back to the original type/name ordering.
+  const list = await db
+    .select()
+    .from(assets)
+    .orderBy(asc(assets.sortOrder), asc(assets.type), asc(assets.name));
   if (list.length > 0) {
     const t = computeTotals(list);
     await db

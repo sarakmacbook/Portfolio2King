@@ -12,8 +12,8 @@ import type { Asset, PriceSnapshot, Snapshot, Transaction } from "../src/db/sche
 const now = new Date("2026-01-02T03:04:05.000Z");
 
 const assets: Asset[] = [
-  { id: 1, type: "cash", name: "Main cash", symbol: "", cryptoCategory: "volatile", quantity: 900, avgCost: 1, currentPrice: 1, realizedPnl: 0, notes: "", priceUpdatedAt: now, createdAt: now },
-  { id: 2, type: "stock", name: "Apple", symbol: "AAPL", cryptoCategory: "volatile", quantity: 10, avgCost: 100, currentPrice: 150, realizedPnl: 0, notes: "core", priceUpdatedAt: now, createdAt: now },
+  { id: 1, type: "cash", name: "Main cash", symbol: "", cryptoCategory: "volatile", quantity: 900, avgCost: 1, currentPrice: 1, realizedPnl: 0, notes: "", sortOrder: null, priceUpdatedAt: now, createdAt: now },
+  { id: 2, type: "stock", name: "Apple", symbol: "AAPL", cryptoCategory: "volatile", quantity: 10, avgCost: 100, currentPrice: 150, realizedPnl: 0, notes: "core", sortOrder: 0, priceUpdatedAt: now, createdAt: now },
 ];
 const transactions: Transaction[] = [
   { id: 1, assetId: 1, kind: "deposit", quantity: 900, price: 1, fee: 0, date: "2026-01-01", note: "", createdAt: now },
@@ -43,6 +43,24 @@ test("createBackup emits a versioned document with daily price snapshots that pa
   assert.equal(parsed.tables.assets[1].avgCost, 100);
   assert.equal(parsed.tables.transactions[0].date, "2026-01-01");
   assert.deepEqual(parsed.tables.priceSnapshots, priceSnapshots);
+  // Dashboard order survives export/import.
+  assert.equal(parsed.tables.assets[0].sortOrder, null);
+  assert.equal(parsed.tables.assets[1].sortOrder, 0);
+});
+
+test("backups without a sortOrder column (older exports) still import", () => {
+  const legacy = JSON.parse(JSON.stringify(validBackup()));
+  for (const asset of legacy.tables.assets) delete asset.sortOrder;
+  const parsed = parseBackup(legacy);
+  assert.deepEqual(parsed.tables.assets.map((asset) => asset.sortOrder), [null, null]);
+});
+
+test("invalid sortOrder values are rejected", () => {
+  for (const bad of ["first", -1, 1.5, 2_000_000]) {
+    const backup = JSON.parse(JSON.stringify(validBackup()));
+    backup.tables.assets[0].sortOrder = bad;
+    assert.throws(() => parseBackup(backup), /sortOrder/);
+  }
 });
 
 test("parseBackup accepts legacy v1 backups without a priceSnapshots table", () => {
