@@ -14,7 +14,6 @@ import {
   formatPortfolioMove,
   formatPriceMove,
   formatRefreshFailure,
-  isPortfolioAlertDue,
   isValidTimeZone,
   nextPortfolioAlertAt,
   normaliseAlertTime,
@@ -29,6 +28,7 @@ import {
   parseThresholdPct,
   portfolioAlertKey,
   portfolioMovePassesThreshold,
+  portfolioScheduleFor,
   priceAlertKey,
   refreshFailureKey,
   resolveTimeZone,
@@ -407,11 +407,43 @@ test("time zones decide when the portfolio update is due", () => {
   assert.equal(zonedTimeToUtc("2026-07-01", 9 * 60, "America/New_York").toISOString(), "2026-07-01T13:00:00.000Z");
   assert.equal(zonedTimeToUtc("2026-01-15", 9 * 60, "America/New_York").toISOString(), "2026-01-15T14:00:00.000Z");
 
-  assert.equal(isPortfolioAlertDue(new Date("2026-10-22T10:59:00Z"), "18:00", "Asia/Phnom_Penh"), false);
-  assert.equal(isPortfolioAlertDue(new Date("2026-10-22T11:00:00Z"), "18:00", "Asia/Phnom_Penh"), true);
-  // Later the same local day still counts; the per-day key prevents repeats.
-  assert.equal(isPortfolioAlertDue(new Date("2026-10-22T15:00:00Z"), "18:00", "Asia/Phnom_Penh"), true);
-  assert.equal(isPortfolioAlertDue(new Date("2026-10-22T15:00:00Z"), "", "Asia/Phnom_Penh"), false);
+  // Punctual: 18:00 in Phnom Penh is 11:00 UTC.
+  const punctual = portfolioScheduleFor(new Date("2026-10-22T11:00:00Z"), "18:00", "Asia/Phnom_Penh");
+  assert.equal(punctual?.date, "2026-10-22");
+  assert.equal(punctual?.at.toISOString(), "2026-10-22T11:00:00.000Z");
+  assert.equal(punctual?.lateMinutes, 0);
+
+  // An hour before today's time, yesterday's run is still the open one.
+  const early = portfolioScheduleFor(new Date("2026-10-22T10:59:00Z"), "18:00", "Asia/Phnom_Penh");
+  assert.equal(early?.date, "2026-10-21");
+  assert.equal(early?.lateMinutes, 24 * 60 - 1);
+
+  // Later the same local day the run is still today's, just late; the key is
+  // what stops repeats, not the clock.
+  const later = portfolioScheduleFor(new Date("2026-10-22T15:00:00Z"), "18:00", "Asia/Phnom_Penh");
+  assert.equal(later?.date, "2026-10-22");
+  assert.equal(later?.lateMinutes, 4 * 60);
+
+  // A once-a-day scheduler (Vercel Hobby runs 00:00 UTC = 07:00 here) catches up
+  // the previous evening's run instead of never sending at all.
+  const dailyCron = portfolioScheduleFor(new Date("2026-10-22T00:00:00Z"), "18:00", "Asia/Phnom_Penh");
+  assert.equal(dailyCron?.date, "2026-10-21");
+  assert.equal(dailyCron?.lateMinutes, 13 * 60);
+  // The next morning's run uses the next key, so exactly one message per day.
+  const nextMorning = portfolioScheduleFor(new Date("2026-10-23T00:00:00Z"), "18:00", "Asia/Phnom_Penh");
+  assert.equal(nextMorning?.date, "2026-10-22");
+  assert.notEqual(
+    portfolioAlertKey(dailyCron!.date),
+    portfolioAlertKey(nextMorning!.date),
+  );
+
+  assert.equal(portfolioScheduleFor(new Date("2026-10-22T15:00:00Z"), "", "Asia/Phnom_Penh"), null);
+  assert.equal(portfolioScheduleFor(new Date("2026-10-22T15:00:00Z"), "25:00", "Asia/Phnom_Penh"), null);
+
+  // A frequent scheduler stays punctual: same key all evening, new key tomorrow.
+  const evening = portfolioScheduleFor(new Date("2026-10-22T11:05:00Z"), "18:00", "Asia/Phnom_Penh");
+  const night = portfolioScheduleFor(new Date("2026-10-22T16:00:00Z"), "18:00", "Asia/Phnom_Penh");
+  assert.equal(portfolioAlertKey(evening!.date), portfolioAlertKey(night!.date));
 
   assert.equal(
     nextPortfolioAlertAt(new Date("2026-10-22T09:00:00Z"), "18:00", "Asia/Phnom_Penh")?.toISOString(),

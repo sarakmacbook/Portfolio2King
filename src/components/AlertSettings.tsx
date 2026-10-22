@@ -270,7 +270,10 @@ export default function AlertSettingsForm({
                 defaultValue={settings.portfolio.time}
                 className="input"
               />
-              <p className="mt-1 text-xs text-slate-400">The first refresh after this time sends it.</p>
+              <p className="mt-1 text-xs text-slate-400">
+                The first refresh after this time sends it. If your scheduler runs less often, the next run
+                sends it late instead of skipping the day.
+              </p>
             </div>
             <div>
               <label className="label" htmlFor="portfolioTimezone">
@@ -325,7 +328,7 @@ export default function AlertSettingsForm({
             <PortfolioTestButton disabled={!portfolioEnabled} />
             {portfolioEnabled && nextPortfolioLabel && (
               <p className="text-xs text-slate-500">
-                Next update: <span className="font-medium text-slate-700">{nextPortfolioLabel}</span>
+                Next scheduled send: <span className="font-medium text-slate-700">{nextPortfolioLabel}</span>
               </p>
             )}
           </div>

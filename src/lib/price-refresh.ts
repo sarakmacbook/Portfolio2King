@@ -16,13 +16,11 @@ import {
   formatPortfolioMove,
   formatPriceMove,
   formatRefreshFailure,
-  isPortfolioAlertDue,
   portfolioAlertKey,
+  portfolioScheduleFor,
   portfolioMovePassesThreshold,
   priceAlertKey,
   refreshFailureKey,
-  resolveTimeZone,
-  zonedClock,
   type AlertSettings,
   type AlertWindow,
   type PortfolioMove,
@@ -43,7 +41,6 @@ export type PortfolioUpdateStatus =
   | "no-channel"
   | "below-threshold"
   | "no-baseline"
-  | "not-due"
   | "disabled";
 
 export type PortfolioUpdateSummary = {
@@ -360,7 +357,12 @@ async function dispatchPortfolioUpdate(input: {
   const now = input.now ?? new Date();
 
   if (!portfolio.enabled || !portfolio.time) return { status: "disabled" };
-  if (!isPortfolioAlertDue(now, portfolio.time, portfolio.timezone)) return { status: "not-due" };
+
+  // The run that is currently open: punctual right after the chosen time, or the
+  // previous day's run when the scheduler only wakes up once a day. The scheduled
+  // date is the dedupe key, so each run sends exactly once.
+  const schedule = portfolioScheduleFor(now, portfolio.time, portfolio.timezone);
+  if (!schedule) return { status: "disabled" };
 
   const baseline = await loadPortfolioBaseline(portfolio.window, beforeTotal);
   const move = baseline ? describePortfolioMove(baseline.value, afterTotal, baseline.label) : null;
@@ -371,10 +373,9 @@ async function dispatchPortfolioUpdate(input: {
     return { status: "below-threshold", ...change };
   }
 
-  const localDate = zonedClock(now, resolveTimeZone(portfolio.timezone)).date;
   const alert = formatPortfolioMove(move);
   const result = await dispatchAlert({
-    dedupeKey: portfolioAlertKey(localDate, portfolio.window),
+    dedupeKey: portfolioAlertKey(schedule.date, portfolio.window),
     kind: "portfolio_move",
     title: alert.title,
     body: alert.body,
