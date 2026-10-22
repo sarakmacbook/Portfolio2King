@@ -20,7 +20,6 @@ the deployment before storing real portfolio data (see the
   Kraken, or DexScreener — no API keys required.
 - Crypto asset search that falls back automatically between public data
   providers when one is rate-limited or down.
-- Drag-and-drop ordering of the holdings table, saved explicitly per instance.
 - Daily per-asset price snapshots and portfolio snapshots, allocation donut and
   history charts, per-asset pages, and an activity feed.
 - Portable JSON export/import, so you can move providers without `pg_dump`.
@@ -30,7 +29,6 @@ the deployment before storing real portfolio data (see the
 - **One reporting currency: USD.** See below.
 
 **Contents:** [Supported currencies](#supported-currencies) ·
-[Arrange holdings](#arrange-holdings) · [Arrange the dashboard](#arrange-the-dashboard) ·
 [Background refresh and alerts](#background-refresh-and-alerts) ·
 [Run locally](#run-locally) · [Self-host on your own server](#self-host-on-your-own-server) ·
 [Connect a database from the web UI](#connect-a-database-from-the-web-ui) ·
@@ -98,75 +96,6 @@ whose tags record the original currency.
 > A true multi-currency ledger (KHR cash next to USD stocks) would need a
 > currency on each account plus a dated FX-rate table, and every total/snapshot
 > would have to convert at capture time. That is a feature, not a setting.
-
-## Arrange holdings
-
-The dashboard table is grouped into sections — **Cash**, **Stocks**,
-**Crypto · Stablecoin**, **Crypto · Volatile**, and **Other** — and both the
-sections and the rows inside them follow a saved order.
-
-To change the order:
-
-1. Click **⇅ Arrange** above the table. Every section expands to its full list.
-2. Move a **whole category**: drag its grey section header (a line shows where the
-   section will land), or use the **▲ / ▼** buttons on the header.
-3. Move a **single holding**: drag the row, or use the **▲ / ▼** buttons in the
-   **Order** column. A row can only move inside its own category — dropping it on
-   another category is ignored, because changing an asset's type or crypto
-   category is an edit to the holding, not a reorder.
-4. Click **Save order**. Nothing is written until you save; **Cancel** discards
-   changes and **Reset to default** clears the saved order.
-
-Details:
-
-- Holding order is stored as `assets.sort_order`. Rows without a position keep
-  the original type/name ordering, so an untouched instance looks exactly as
-  before.
-- Category order is stored in `app_settings` under `holdings.groupOrder` as a
-  comma-separated list of group keys. Unknown keys are dropped, duplicates
-  removed, and missing groups appended in their default spot, so a stale tab
-  cannot corrupt it.
-- Empty sections are hidden, and each header shows the row count plus its
-  subtotal.
-- New holdings are appended to the end of an existing custom order.
-- Saving re-validates ids against the database: if another tab added or deleted a
-  holding meanwhile, unknowns are ignored and missing ones are appended rather
-  than dropped.
-- Clicking a column heading sorts temporarily (sections then flatten); **↺ Custom
-  order** restores the saved order and its sections.
-- Holding order is included in JSON exports/imports (`sortOrder`), and older
-  backups without it still import (their rows fall back to the default ordering).
-- Arranging changes only the display order — balances, totals, and snapshots are
-  not recalculated.
-- The **Allocation** donut and its legend use the same category order, so moving a
-  category also moves its slice (see [Arrange the dashboard](#arrange-the-dashboard)).
-
-## Arrange the dashboard
-
-The dashboard cards — **Holdings**, **Value history**, **Allocation** and
-**Recent activity** — can be moved up and down as whole blocks:
-
-1. Click **⇅ Arrange layout** above the cards.
-2. Drag a card's dashed header (the one with the grip dots), or use its **▲ / ▼**
-   buttons — the touch-friendly and keyboard-accessible path.
-3. Click **Save layout**. Nothing is written until you save; **Cancel** discards
-   pending moves and **Reset to default** restores Holdings → Value history →
-   Allocation → Recent activity.
-
-Details:
-
-- The layout is stored in `app_settings` under `dashboard.order` as a
-  comma-separated list of card keys. Unknown keys are dropped, duplicates removed,
-  and missing cards appended in their default spot, so a stale tab or a
-  hand-edited setting cannot break the page.
-- The two charts stay side by side (Value history 3/5, Allocation 2/5) whenever
-  they are next to each other, and full-width cards start a new row. On phones the
-  cards stack in the saved order.
-- The **Allocation** chart follows the saved category order from
-  [Arrange holdings](#arrange-holdings), so reordering categories also reorders
-  the donut slices and legend rows.
-- Saving the layout does not touch the holding order or the category order, and
-  **Reset to default** here only resets the cards.
 
 ## Background refresh and alerts
 

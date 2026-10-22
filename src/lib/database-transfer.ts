@@ -39,21 +39,20 @@ async function insertAsset(client: PoolClient, asset: PortfolioBackup["tables"][
     asset.currentPrice,
     asset.realizedPnl,
     asset.notes,
-    asset.sortOrder,
     asset.priceUpdatedAt,
     asset.createdAt,
   ];
   if (id === undefined) {
     const result = await client.query<{ id: number }>(
-      `INSERT INTO assets (type, name, symbol, crypto_category, quantity, avg_cost, current_price, realized_pnl, notes, sort_order, price_updated_at, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+      `INSERT INTO assets (type, name, symbol, crypto_category, quantity, avg_cost, current_price, realized_pnl, notes, price_updated_at, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
       values,
     );
     return result.rows[0].id;
   }
   await client.query(
-    `INSERT INTO assets (id, type, name, symbol, crypto_category, quantity, avg_cost, current_price, realized_pnl, notes, sort_order, price_updated_at, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+    `INSERT INTO assets (id, type, name, symbol, crypto_category, quantity, avg_cost, current_price, realized_pnl, notes, price_updated_at, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
     [id, ...values],
   );
   return id;
