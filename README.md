@@ -159,7 +159,12 @@ black and underlined for the current section.
   bar switches to `default` (dark text on light) to match. Dark mode gets a dark
   strip.
 - The brand lockup, hamburger menu and theme switch are hidden in this mode to
-  keep the strip clean; the theme follows the value saved in a browser session.
+  keep the strip clean, so a small **☾ / ☀** button at the right of the strip
+  flips between light and dark. It remembers the choice in
+  `localStorage["ledgerly-theme"]`, the same key the header switch and the
+  pre-paint script use, and it steps aside below 350 px where all five labels
+  need the room. The theme is applied before first paint, so a reload never
+  flashes white.
 - Tab labels are the short ones from `src/lib/nav-links.ts`; the desktop menu
   uses the long labels from the same list.
 

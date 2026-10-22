@@ -5,6 +5,7 @@ import BackgroundRefresh from "@/components/BackgroundRefresh";
 import Nav from "@/components/Nav";
 import WebClipTabs from "@/components/WebClipTabs";
 import ThemeToggle from "@/components/ThemeToggle";
+import { bootScript } from "@/lib/theme";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -28,7 +29,7 @@ export const viewport: Viewport = {
   ],
 };
 
-const themeScript = `(function(){try{var t=localStorage.getItem('ledgerly-theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark');var s=(matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: fullscreen)').matches||navigator.standalone===true);if(s)document.documentElement.setAttribute('data-webclip','true')}catch(e){}})()`;
+const themeScript = bootScript();
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
