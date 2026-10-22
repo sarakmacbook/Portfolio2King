@@ -41,7 +41,9 @@ export type PortfolioUpdateStatus =
   | "no-channel"
   | "below-threshold"
   | "no-baseline"
-  | "disabled";
+  | "not-due"
+  | "disabled"
+  | "error";
 
 export type PortfolioUpdateSummary = {
   status: PortfolioUpdateStatus;
@@ -330,12 +332,19 @@ export async function refreshPricesWithAlerts(options: RefreshOptions = {}): Pro
   // 3. The scheduled whole-portfolio update, in money and percent. The
   //    threshold is optional: without one it goes out at the chosen time every
   //    day, which is the point of the feature.
-  summary.portfolio = await dispatchPortfolioUpdate({
-    settings,
-    beforeTotal: computeTotals(before).totalValue,
-    afterTotal: computeTotals(after).totalValue,
-    errors,
-  });
+  try {
+    summary.portfolio = await dispatchPortfolioUpdate({
+      settings,
+      beforeTotal: computeTotals(before).totalValue,
+      afterTotal: computeTotals(after).totalValue,
+      errors,
+    });
+  } catch {
+    // A portfolio-update problem must not fail the price refresh (and the cron
+    // response) that already succeeded.
+    summary.portfolio = { status: "error" };
+    errors.add("Portfolio update could not be sent");
+  }
   if (summary.portfolio.status === "sent") summary.alertsSent += 1;
 
   // 4. Housekeeping: keep the alert log bounded.
@@ -358,11 +367,10 @@ async function dispatchPortfolioUpdate(input: {
 
   if (!portfolio.enabled || !portfolio.time) return { status: "disabled" };
 
-  // The run that is currently open: punctual right after the chosen time, or the
-  // previous day's run when the scheduler only wakes up once a day. The scheduled
-  // date is the dedupe key, so each run sends exactly once.
+  // Today's run only: nothing before the chosen local time, and the day's own
+  // date is the dedupe key, so each day sends exactly once.
   const schedule = portfolioScheduleFor(now, portfolio.time, portfolio.timezone);
-  if (!schedule) return { status: "disabled" };
+  if (!schedule) return { status: "not-due" };
 
   const baseline = await loadPortfolioBaseline(portfolio.window, beforeTotal);
   const move = baseline ? describePortfolioMove(baseline.value, afterTotal, baseline.label) : null;

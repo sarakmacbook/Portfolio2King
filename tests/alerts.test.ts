@@ -413,37 +413,44 @@ test("time zones decide when the portfolio update is due", () => {
   assert.equal(punctual?.at.toISOString(), "2026-10-22T11:00:00.000Z");
   assert.equal(punctual?.lateMinutes, 0);
 
-  // An hour before today's time, yesterday's run is still the open one.
-  const early = portfolioScheduleFor(new Date("2026-10-22T10:59:00Z"), "18:00", "Asia/Phnom_Penh");
-  assert.equal(early?.date, "2026-10-21");
-  assert.equal(early?.lateMinutes, 24 * 60 - 1);
+  // Nothing is due before the chosen time — including yesterday's run, which
+  // must never be delivered the next morning. This is the regression that made
+  // an 18:00 update arrive just after midnight.
+  assert.equal(portfolioScheduleFor(new Date("2026-10-22T10:59:00Z"), "18:00", "Asia/Phnom_Penh"), null);
+  assert.equal(portfolioScheduleFor(new Date("2026-10-21T17:00:00Z"), "18:00", "Asia/Phnom_Penh"), null);
+  assert.equal(portfolioScheduleFor(new Date("2026-10-22T00:00:00Z"), "18:00", "Asia/Phnom_Penh"), null);
+  assert.equal(portfolioScheduleFor(new Date("2026-10-22T06:00:00Z"), "18:00", "Asia/Phnom_Penh"), null);
 
   // Later the same local day the run is still today's, just late; the key is
   // what stops repeats, not the clock.
   const later = portfolioScheduleFor(new Date("2026-10-22T15:00:00Z"), "18:00", "Asia/Phnom_Penh");
   assert.equal(later?.date, "2026-10-22");
   assert.equal(later?.lateMinutes, 4 * 60);
+  assert.equal(portfolioScheduleFor(new Date("2026-10-22T16:59:00Z"), "18:00", "Asia/Phnom_Penh")?.date, "2026-10-22");
 
-  // A once-a-day scheduler (Vercel Hobby runs 00:00 UTC = 07:00 here) catches up
-  // the previous evening's run instead of never sending at all.
-  const dailyCron = portfolioScheduleFor(new Date("2026-10-22T00:00:00Z"), "18:00", "Asia/Phnom_Penh");
-  assert.equal(dailyCron?.date, "2026-10-21");
-  assert.equal(dailyCron?.lateMinutes, 13 * 60);
-  // The next morning's run uses the next key, so exactly one message per day.
-  const nextMorning = portfolioScheduleFor(new Date("2026-10-23T00:00:00Z"), "18:00", "Asia/Phnom_Penh");
-  assert.equal(nextMorning?.date, "2026-10-22");
-  assert.notEqual(
-    portfolioAlertKey(dailyCron!.date),
-    portfolioAlertKey(nextMorning!.date),
+  // The next local day starts clean: same key for the whole evening, a new key
+  // (and no stale send) once the date rolls over.
+  const evening = portfolioScheduleFor(new Date("2026-10-22T11:05:00Z"), "18:00", "Asia/Phnom_Penh");
+  const night = portfolioScheduleFor(new Date("2026-10-22T16:00:00Z"), "18:00", "Asia/Phnom_Penh");
+  assert.equal(portfolioAlertKey(evening!.date), portfolioAlertKey(night!.date));
+  assert.equal(portfolioScheduleFor(new Date("2026-10-22T17:30:00Z"), "18:00", "Asia/Phnom_Penh"), null);
+  assert.equal(
+    portfolioScheduleFor(new Date("2026-10-23T11:00:00Z"), "18:00", "Asia/Phnom_Penh")?.date,
+    "2026-10-23",
   );
+
+  // A scheduler that only runs late in the evening still delivers that day's update.
+  const lateScheduler = portfolioScheduleFor(new Date("2026-10-22T15:00:00Z"), "18:00", "Asia/Phnom_Penh");
+  assert.equal(lateScheduler?.date, "2026-10-22");
 
   assert.equal(portfolioScheduleFor(new Date("2026-10-22T15:00:00Z"), "", "Asia/Phnom_Penh"), null);
   assert.equal(portfolioScheduleFor(new Date("2026-10-22T15:00:00Z"), "25:00", "Asia/Phnom_Penh"), null);
 
-  // A frequent scheduler stays punctual: same key all evening, new key tomorrow.
-  const evening = portfolioScheduleFor(new Date("2026-10-22T11:05:00Z"), "18:00", "Asia/Phnom_Penh");
-  const night = portfolioScheduleFor(new Date("2026-10-22T16:00:00Z"), "18:00", "Asia/Phnom_Penh");
-  assert.equal(portfolioAlertKey(evening!.date), portfolioAlertKey(night!.date));
+  // The time zone decides the boundary: 11:30 UTC is already 18:30 in Phnom Penh
+  // but only 07:30 in New York, so the same instant is due in one zone and not
+  // the other.
+  assert.equal(portfolioScheduleFor(new Date("2026-10-22T11:30:00Z"), "18:00", "Asia/Phnom_Penh")?.date, "2026-10-22");
+  assert.equal(portfolioScheduleFor(new Date("2026-10-22T11:30:00Z"), "18:00", "America/New_York"), null);
 
   assert.equal(
     nextPortfolioAlertAt(new Date("2026-10-22T09:00:00Z"), "18:00", "Asia/Phnom_Penh")?.toISOString(),
