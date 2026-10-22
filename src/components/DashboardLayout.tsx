@@ -1,0 +1,248 @@
+"use client";
+
+import { useRef, useState, useTransition, type ReactNode } from "react";
+import { resetDashboardLayout, saveDashboardLayout, type ActionState } from "@/app/actions";
+import {
+  DASHBOARD_BLOCKS,
+  DEFAULT_DASHBOARD_ORDER,
+  moveBlockBy,
+  moveBlockTo,
+  type DashboardBlockKey,
+} from "@/lib/dashboard-layout";
+
+/** Column spans so the two charts stay side by side when they are adjacent. */
+const SPAN: Record<DashboardBlockKey, string> = {
+  holdings: "lg:col-span-5",
+  history: "lg:col-span-3",
+  allocation: "lg:col-span-2",
+  activity: "lg:col-span-5",
+};
+
+function GripIcon() {
+  return (
+    <svg viewBox="0 0 10 16" className="h-3.5 w-2.5 fill-current" aria-hidden="true">
+      <circle cx="2" cy="3" r="1.3" />
+      <circle cx="8" cy="3" r="1.3" />
+      <circle cx="2" cy="8" r="1.3" />
+      <circle cx="8" cy="8" r="1.3" />
+      <circle cx="2" cy="13" r="1.3" />
+      <circle cx="8" cy="13" r="1.3" />
+    </svg>
+  );
+}
+
+/**
+ * Wraps the dashboard cards so they can be moved up/down as whole blocks.
+ * The order is saved server-side (`app_settings.dashboard.order`) only when the
+ * user clicks **Save layout**.
+ */
+export default function DashboardLayout({
+  blocks,
+  initialOrder = DEFAULT_DASHBOARD_ORDER,
+}: {
+  blocks: Record<DashboardBlockKey, ReactNode>;
+  initialOrder?: DashboardBlockKey[];
+}) {
+  const [order, setOrder] = useState<DashboardBlockKey[]>(initialOrder);
+  const [arranging, setArranging] = useState(false);
+  const [dragging, setDragging] = useState<DashboardBlockKey | null>(null);
+  const [drop, setDrop] = useState<{ key: DashboardBlockKey; after: boolean } | null>(null);
+  const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const [saving, startSaving] = useTransition();
+  const savedOrder = useRef<DashboardBlockKey[]>(initialOrder);
+
+  function clearDrag() {
+    setDragging(null);
+    setDrop(null);
+  }
+
+  function startArranging() {
+    savedOrder.current = order;
+    setNotice(null);
+    setArranging(true);
+  }
+
+  function cancelArranging() {
+    setOrder(savedOrder.current);
+    clearDrag();
+    setArranging(false);
+  }
+
+  function move(key: DashboardBlockKey, delta: number) {
+    const from = order.indexOf(key);
+    const to = Math.max(0, Math.min(order.length - 1, from + delta));
+    if (from < 0 || to === from) return;
+    setOrder(moveBlockBy(order, key, delta));
+    setAnnouncement(`${DASHBOARD_BLOCKS[key].label} moved to position ${to + 1} of ${order.length}.`);
+  }
+
+  function handleDrop() {
+    if (!dragging || !drop || dragging === drop.key) {
+      clearDrag();
+      return;
+    }
+    const next = moveBlockTo(order, dragging, drop.key, drop.after);
+    setOrder(next);
+    setAnnouncement(`${DASHBOARD_BLOCKS[dragging].label} moved to position ${next.indexOf(dragging) + 1} of ${next.length}.`);
+    clearDrag();
+  }
+
+  function save() {
+    const payload = JSON.stringify(order);
+    startSaving(async () => {
+      const fd = new FormData();
+      fd.set("order", payload);
+      const result: ActionState = await saveDashboardLayout({}, fd);
+      if (result.error) {
+        setNotice({ kind: "error", text: result.error });
+        return;
+      }
+      savedOrder.current = order;
+      setArranging(false);
+      setNotice({ kind: "ok", text: result.message ?? "Dashboard layout saved." });
+    });
+  }
+
+  function reset() {
+    startSaving(async () => {
+      const result = await resetDashboardLayout({}, new FormData());
+      if (result.error) {
+        setNotice({ kind: "error", text: result.error });
+        return;
+      }
+      setOrder(DEFAULT_DASHBOARD_ORDER);
+      savedOrder.current = DEFAULT_DASHBOARD_ORDER;
+      clearDrag();
+      setArranging(false);
+      setNotice({ kind: "ok", text: result.message ?? "Dashboard layout reset to the default." });
+    });
+  }
+
+  return (
+    <div className="space-y-4">
+      <p aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
+
+      {notice && (
+        <div
+          role="status"
+          className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-xs ${
+            notice.kind === "ok"
+              ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+              : "border-rose-100 bg-rose-50 text-rose-700"
+          }`}
+        >
+          <span>{notice.text}</span>
+          <button type="button" onClick={() => setNotice(null)} className="font-medium hover:underline">
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {arranging ? (
+          <>
+            <p className="mr-auto text-xs font-medium text-indigo-700">
+              Drag a card header to move it, or use ▲ / ▼. Nothing changes until you save.
+            </p>
+            <button type="button" className="btn-ghost" onClick={cancelArranging} disabled={saving}>
+              Cancel
+            </button>
+            <button type="button" className="btn-ghost" onClick={reset} disabled={saving}>
+              Reset to default
+            </button>
+            <button type="button" className="btn-primary" onClick={save} disabled={saving}>
+              {saving ? "Saving…" : "Save layout"}
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={startArranging}
+              title="Move the dashboard cards up or down"
+            >
+              ⇅ Arrange layout
+            </button>
+          </>
+        )}
+      </div>
+
+      <div className="grid gap-6 lg:grid-flow-row-dense lg:grid-cols-5">
+        {order.map((key) => {
+          const meta = DASHBOARD_BLOCKS[key];
+          const isDragging = dragging === key;
+          const isDropTarget = drop?.key === key && !isDragging;
+          const position = order.indexOf(key);
+          return (
+            <div
+              key={key}
+              onDragOver={(event) => {
+                if (!arranging || !dragging || dragging === key) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                const rect = event.currentTarget.getBoundingClientRect();
+                const after = event.clientY - rect.top > rect.height / 2;
+                setDrop((current) =>
+                  current?.key === key && current.after === after ? current : { key, after },
+                );
+              }}
+              onDrop={(event) => {
+                if (!arranging) return;
+                event.preventDefault();
+                handleDrop();
+              }}
+              className={`min-w-0 ${SPAN[key]} ${isDragging ? "opacity-50" : ""} ${
+                isDropTarget ? "rounded-2xl ring-2 ring-indigo-400 ring-offset-4 ring-offset-slate-50" : ""
+              }`}
+            >
+              {arranging && (
+                <div className="mb-2 flex items-center gap-2 rounded-xl border border-dashed border-indigo-300 bg-indigo-50/80 px-3 py-2">
+                  <span
+                    draggable
+                    onDragStart={(event) => {
+                      setDragging(key);
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", key);
+                    }}
+                    onDragEnd={clearDrag}
+                    className="flex cursor-grab items-center gap-2 text-xs font-semibold uppercase tracking-wide text-indigo-900 active:cursor-grabbing"
+                    title="Drag to move this card"
+                  >
+                    <GripIcon />
+                    {meta.label}
+                  </span>
+                  <span className="hidden text-[11px] text-indigo-700/70 sm:inline">{meta.hint}</span>
+                  <span className="ml-auto flex flex-col">
+                    <button
+                      type="button"
+                      className="grid h-4 w-6 place-items-center rounded text-[10px] text-indigo-700 hover:bg-white disabled:opacity-30"
+                      onClick={() => move(key, -1)}
+                      disabled={position === 0}
+                      aria-label={`Move ${meta.label} up`}
+                    >
+                      ▲
+                    </button>
+                    <button
+                      type="button"
+                      className="grid h-4 w-6 place-items-center rounded text-[10px] text-indigo-700 hover:bg-white disabled:opacity-30"
+                      onClick={() => move(key, 1)}
+                      disabled={position === order.length - 1}
+                      aria-label={`Move ${meta.label} down`}
+                    >
+                      ▼
+                    </button>
+                  </span>
+                </div>
+              )}
+              <div className={arranging ? "rounded-2xl ring-2 ring-indigo-200/80" : ""}>{blocks[key]}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

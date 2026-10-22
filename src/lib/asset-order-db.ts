@@ -2,17 +2,46 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { appSettings, assets } from "@/db/schema";
 import { mergeOrder } from "@/lib/asset-order";
+import {
+  normaliseDashboardOrder,
+  type DashboardBlockKey,
+} from "@/lib/dashboard-layout";
 import { normaliseGroupOrder, type HoldingGroupKey } from "@/lib/holdings-groups";
 import { ensureSchema } from "@/lib/portfolio";
 
 /**
- * Persists dashboard ordering — both the per-holding position (`sort_order`) and
- * the category/section order (stored in `app_settings`). Kept separate from the
- * server actions so it can be exercised against a real database directly.
+ * Persists dashboard ordering — the per-holding position (`sort_order`), the
+ * category/section order, and the dashboard card layout (the last two in
+ * `app_settings`). Kept separate from the server actions so it can be exercised
+ * against a real database directly.
  */
 
 /** app_settings key holding the section order, e.g. "cash,stock,crypto-volatile". */
 export const GROUP_ORDER_SETTING = "holdings.groupOrder";
+
+/** app_settings key holding the dashboard card order. */
+export const DASHBOARD_ORDER_SETTING = "dashboard.order";
+
+async function readSetting(key: string): Promise<string | null> {
+  const [row] = await db
+    .select({ value: appSettings.value })
+    .from(appSettings)
+    .where(eq(appSettings.key, key))
+    .limit(1);
+  return row?.value ?? null;
+}
+
+async function writeSetting(key: string, value: string): Promise<void> {
+  const updatedAt = new Date();
+  await db
+    .insert(appSettings)
+    .values({ key, value, updatedAt })
+    .onConflictDoUpdate({ target: appSettings.key, set: { value, updatedAt } });
+}
+
+async function deleteSetting(key: string): Promise<void> {
+  await db.delete(appSettings).where(eq(appSettings.key, key));
+}
 
 /** Current asset ids in the order the app displays them. */
 export async function loadAssetIdsInDisplayOrder(): Promise<number[]> {
@@ -66,29 +95,39 @@ export async function nextPositionForNewAsset(): Promise<number> {
 /** Category/section order, falling back to the default when unset. */
 export async function loadGroupOrder(): Promise<HoldingGroupKey[]> {
   await ensureSchema();
-  const [row] = await db
-    .select({ value: appSettings.value })
-    .from(appSettings)
-    .where(eq(appSettings.key, GROUP_ORDER_SETTING))
-    .limit(1);
-  return normaliseGroupOrder(row?.value);
+  return normaliseGroupOrder(await readSetting(GROUP_ORDER_SETTING));
 }
 
 /** Stores the section order; missing groups are appended in their default spot. */
 export async function saveGroupOrder(order: readonly unknown[]): Promise<HoldingGroupKey[]> {
   await ensureSchema();
   const normalised = normaliseGroupOrder(order);
-  const value = normalised.join(",");
-  const updatedAt = new Date();
-  await db
-    .insert(appSettings)
-    .values({ key: GROUP_ORDER_SETTING, value, updatedAt })
-    .onConflictDoUpdate({ target: appSettings.key, set: { value, updatedAt } });
+  await writeSetting(GROUP_ORDER_SETTING, normalised.join(","));
   return normalised;
 }
 
 /** Removes the stored section order (Reset to default). */
 export async function clearGroupOrder(): Promise<void> {
   await ensureSchema();
-  await db.delete(appSettings).where(eq(appSettings.key, GROUP_ORDER_SETTING));
+  await deleteSetting(GROUP_ORDER_SETTING);
+}
+
+/** Dashboard card order, falling back to the default when unset. */
+export async function loadDashboardOrder(): Promise<DashboardBlockKey[]> {
+  await ensureSchema();
+  return normaliseDashboardOrder(await readSetting(DASHBOARD_ORDER_SETTING));
+}
+
+/** Stores the dashboard card order; missing cards are appended in their default spot. */
+export async function saveDashboardOrder(order: readonly unknown[]): Promise<DashboardBlockKey[]> {
+  await ensureSchema();
+  const normalised = normaliseDashboardOrder(order);
+  await writeSetting(DASHBOARD_ORDER_SETTING, normalised.join(","));
+  return normalised;
+}
+
+/** Removes the stored dashboard card order (Reset to default). */
+export async function clearDashboardOrder(): Promise<void> {
+  await ensureSchema();
+  await deleteSetting(DASHBOARD_ORDER_SETTING);
 }

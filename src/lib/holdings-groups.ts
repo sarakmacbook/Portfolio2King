@@ -1,5 +1,6 @@
 import { TYPE_META } from "@/lib/format";
 import type { AssetType } from "@/lib/constants";
+import { insertAt, isKeyOf, moveKeyBy, moveKeyTo, normaliseKeyOrder } from "@/lib/order-list";
 
 /**
  * Category groups for the dashboard holdings table.
@@ -35,7 +36,7 @@ export const HOLDING_GROUPS: Record<HoldingGroupKey, GroupMeta> = {
 export const DEFAULT_GROUP_ORDER: HoldingGroupKey[] = [...HOLDING_GROUP_KEYS];
 
 export function isHoldingGroupKey(value: unknown): value is HoldingGroupKey {
-  return typeof value === "string" && (HOLDING_GROUP_KEYS as readonly string[]).includes(value);
+  return isKeyOf(value, HOLDING_GROUP_KEYS);
 }
 
 export type GroupableHolding = { type: AssetType; cryptoCategory: "stablecoin" | "volatile" };
@@ -55,45 +56,7 @@ export function groupKeyFor(row: GroupableHolding): HoldingGroupKey {
  * is appended in its default position.
  */
 export function normaliseGroupOrder(value: unknown): HoldingGroupKey[] {
-  let parts: unknown[] = [];
-  if (Array.isArray(value)) {
-    parts = value;
-  } else if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (trimmed.startsWith("[")) {
-      try {
-        const parsed: unknown = JSON.parse(trimmed);
-        parts = Array.isArray(parsed) ? parsed : [];
-      } catch {
-        parts = [];
-      }
-    } else {
-      parts = trimmed.split(",");
-    }
-  }
-
-  const seen = new Set<HoldingGroupKey>();
-  const order: HoldingGroupKey[] = [];
-  for (const part of parts) {
-    const key = typeof part === "string" ? part.trim() : "";
-    if (!isHoldingGroupKey(key) || seen.has(key)) continue;
-    seen.add(key);
-    order.push(key);
-  }
-  for (const key of DEFAULT_GROUP_ORDER) {
-    if (!seen.has(key)) order.push(key);
-  }
-  return order;
-}
-
-function insertAt<T>(items: readonly T[], from: number, to: number): T[] {
-  if (from < 0 || from >= items.length) return [...items];
-  const target = Math.max(0, Math.min(items.length - 1, to));
-  if (from === target) return [...items];
-  const next = [...items];
-  const [moved] = next.splice(from, 1);
-  next.splice(target, 0, moved);
-  return next;
+  return normaliseKeyOrder(value, HOLDING_GROUP_KEYS);
 }
 
 /** Moves one group up (-1) or down (+1); clamped at the ends. */
@@ -102,9 +65,7 @@ export function moveGroupBy(
   key: HoldingGroupKey,
   delta: number,
 ): HoldingGroupKey[] {
-  const from = order.indexOf(key);
-  if (from < 0) return [...order];
-  return insertAt(order, from, from + delta);
+  return moveKeyBy(order, key, delta);
 }
 
 /** Moves `key` so it lands before or after `overKey` (drag-and-drop). */
@@ -114,12 +75,7 @@ export function moveGroupTo(
   overKey: HoldingGroupKey,
   after: boolean,
 ): HoldingGroupKey[] {
-  const from = order.indexOf(key);
-  const overIndex = order.indexOf(overKey);
-  if (from < 0 || overIndex < 0 || from === overIndex) return [...order];
-  let target = overIndex + (after ? 1 : 0);
-  if (target > from) target -= 1;
-  return insertAt(order, from, target);
+  return moveKeyTo(order, key, overKey, after);
 }
 
 export type HoldingSection<T> = { key: HoldingGroupKey; meta: GroupMeta; rows: T[] };
