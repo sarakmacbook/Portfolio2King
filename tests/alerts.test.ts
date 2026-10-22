@@ -7,7 +7,11 @@ import {
   baselineCutoffDate,
   daysBetweenIso,
   describeBaseline,
+  describeChannelNotes,
   describePortfolioMove,
+  describePreviewBaseline,
+  describePreviewDelivery,
+  describeTestDelivery,
   detectPriceMoves,
   formatAlertText,
   formatMovePercent,
@@ -511,4 +515,45 @@ test("portfolio moves report money and percent, with an optional threshold", () 
   assert.equal(portfolioAlertKey("2026-10-22"), "portfolio:2026-10-22:day");
   assert.equal(portfolioAlertKey("2026-10-22", "month"), "portfolio:2026-10-22:month");
   assert.notEqual(portfolioAlertKey("2026-10-22"), portfolioAlertKey("2026-10-23"));
+});
+
+test("test and preview results only mention the channels that were used", () => {
+  // Telegram only: no "no browser subscribed" noise.
+  assert.equal(describeChannelNotes({ pushSent: 0, telegramSent: true }, ["telegram"]), "Telegram sent");
+  assert.equal(describeChannelNotes({ pushSent: 2, telegramSent: false }, ["push"]), "2 browsers notified");
+  assert.equal(describeChannelNotes({ pushSent: 1, telegramSent: true }, ["push"]), "1 browser notified");
+  assert.equal(
+    describeChannelNotes({ pushSent: 0, telegramSent: false }, ["push", "telegram"]),
+    "no browser subscribed, Telegram not sent",
+  );
+
+  const sent = describeTestDelivery({ pushSent: 0, telegramSent: true }, ["telegram"]);
+  assert.deepEqual(sent, { ok: true, message: "Test alert: Telegram sent." });
+
+  const failed = describeTestDelivery(
+    { pushSent: 0, telegramSent: false, telegramError: "Telegram rejected the bot token" },
+    ["telegram"],
+  );
+  assert.equal(failed.ok, false);
+  assert.equal(failed.error, "Nothing was delivered — Telegram not sent. Telegram rejected the bot token");
+
+  // The preview echoes the message that was sent, so a lock-screen notification
+  // and the page agree.
+  const preview = describePreviewDelivery({ pushSent: 1, telegramSent: true }, ["push", "telegram"], "Portfolio ▲ +2.35% (+$1,222.00)");
+  assert.equal(preview.ok, true);
+  assert.equal(preview.message, "Preview sent — “Portfolio ▲ +2.35% (+$1,222.00)” · 1 browser notified, Telegram sent.");
+
+  const previewFailed = describePreviewDelivery({ pushSent: 0, telegramSent: false }, ["push"], "Portfolio ▬ 0.00% ($0.00)");
+  assert.equal(previewFailed.ok, false);
+  assert.equal(previewFailed.error, "Nothing was delivered — no browser subscribed.");
+});
+
+test("a preview without earlier history still names the snapshot it used", () => {
+  // Today's snapshot is what a brand-new ledger has before its first full day.
+  assert.equal(describePreviewBaseline("2026-10-22", "2026-10-22", "day"), "today's snapshot");
+  // Older snapshots keep the same wording the scheduled message would use.
+  assert.equal(describePreviewBaseline("2026-10-21", "2026-10-22", "day"), "yesterday's close");
+  assert.equal(describePreviewBaseline("2026-10-19", "2026-10-22", "day"), "the close 3 days ago");
+  // No snapshot at all falls back to the "last refresh" label.
+  assert.equal(describePreviewBaseline(null, "2026-10-22", "day"), "the last refresh");
 });

@@ -1,12 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { dispatchAlert, getAlertSettings, saveAlertSettings, sendTestAlert, type DispatchResult } from "@/lib/alerts";
+import { dispatchAlert, getAlertSettings, saveAlertSettings, sendTestAlert } from "@/lib/alerts";
 import {
   MAX_REFRESH_MINUTES,
   MAX_THRESHOLD_PCT,
   MIN_REFRESH_MINUTES,
   MIN_THRESHOLD_PCT,
+  describePreviewDelivery,
+  describeTestDelivery,
   isValidTimeZone,
   normaliseAlertTime,
   parseAlertWindow,
@@ -15,6 +17,8 @@ import {
   parseRefreshMinutes,
   parseThresholdPct,
   resolveTimeZone,
+  type AlertChannel,
+  type AlertSettings,
   type AlertWindow,
 } from "@/lib/alert-rules";
 import { buildPortfolioUpdate, refreshPricesWithAlerts } from "@/lib/price-refresh";
@@ -44,6 +48,17 @@ function describeWindow(window: AlertWindow): string {
 
 const TEST_COOLDOWN_MS = 15_000;
 let lastTestAt = 0;
+
+/**
+ * Test sends are throttled so a stuck finger cannot spam a phone. The message
+ * says how long is left, which is more useful than "wait a few seconds" when
+ * the push test and the portfolio preview share the same cooldown.
+ */
+function cooldownError(): string | null {
+  const remaining = TEST_COOLDOWN_MS - (Date.now() - lastTestAt);
+  if (remaining <= 0) return null;
+  return `Wait ${Math.ceil(remaining / 1000)} s before sending another test message.`;
+}
 
 export async function saveAlertSettingsAction(
   _prev: AlertActionState,
@@ -128,36 +143,22 @@ export async function saveAlertSettingsAction(
   }
 }
 
-function describeTest(result: DispatchResult, channel: string): { ok: boolean; message?: string; error?: string } {
-  const notes: string[] = [];
-  if (channel === "push" || channel === "all") {
-    notes.push(result.pushSent > 0 ? `${result.pushSent} browser${result.pushSent === 1 ? "" : "s"} notified` : "no browser subscribed");
-  }
-  if (channel === "telegram" || channel === "all") {
-    notes.push(result.telegramSent ? "Telegram sent" : "Telegram not sent");
-  }
-  const details = [result.telegramError, result.pushError].filter(Boolean).join(" · ");
-  if (result.pushSent === 0 && !result.telegramSent) {
-    return { ok: false, error: `Nothing was delivered — ${notes.join(", ")}.${details ? ` ${details}` : ""}` };
-  }
-  return { ok: true, message: `Test alert: ${notes.join(", ")}.${details ? ` ${details}` : ""}` };
-}
-
 export async function sendTestAlertAction(
   _prev: AlertActionState,
   formData: FormData,
 ): Promise<AlertActionState> {
   const requested = String(formData.get("channel") ?? "all");
   if (!["push", "telegram", "all"].includes(requested)) return { error: "Unknown alert channel" };
-  if (Date.now() - lastTestAt < TEST_COOLDOWN_MS) {
-    return { error: "Wait a few seconds before sending another test." };
-  }
+  const cooling = cooldownError();
+  if (cooling) return { error: cooling };
   lastTestAt = Date.now();
 
   try {
     const result = await sendTestAlert(requested as "push" | "telegram" | "all");
     revalidatePath("/alerts");
-    const described = describeTest(result, requested);
+    const channels: AlertChannel[] =
+      requested === "all" ? ["push", "telegram"] : [requested as AlertChannel];
+    const described = describeTestDelivery(result, channels);
     return { ...described, ts: Date.now() };
   } catch {
     return { error: "Could not send the test alert. Check the server logs." };
@@ -166,31 +167,50 @@ export async function sendTestAlertAction(
 
 /**
  * Sends today's portfolio update immediately, whatever the clock says, so the
- * scheduled message can be previewed. The optional threshold is ignored here —
- * a preview should always arrive.
+ * scheduled message can be previewed.
+ *
+ * The preview reads the settings form on `/alerts` instead of the saved rows, so
+ * it matches what is on screen before "Save" is pressed — which is how someone
+ * tries out a time zone or a Telegram-only setup. The optional threshold is
+ * ignored (a preview should always arrive) and so is the on/off switch: testing
+ * before turning the schedule on is the point of the button.
+ *
+ * It also has to work on a fresh portfolio: when no snapshot exists for the
+ * comparison window yet, the newest snapshot is used (labelled as such) so the
+ * message format and delivery can still be checked.
  */
 export async function sendPortfolioUpdateNowAction(
   _prev: AlertActionState,
   formData: FormData,
 ): Promise<AlertActionState> {
-  // Submitted from the settings form through `formAction`, hence the flag.
-  if (formData.get("portfolioTest") !== "1") return { error: "Unknown form" };
-  if (Date.now() - lastTestAt < TEST_COOLDOWN_MS) {
-    return { error: "Wait a few seconds before sending another message." };
-  }
+  const cooling = cooldownError();
+  if (cooling) return { error: cooling };
   lastTestAt = Date.now();
 
   try {
     const settings = await getAlertSettings();
-    if (parseChannels(settings.channels).length === 0) {
-      return { error: "Turn on a delivery channel below first." };
+
+    // The button lives inside the settings form, so the submitted fields are
+    // the on-screen values. `kind` is a hidden input — unlike a submit button's
+    // name/value, which React drops when the form action is a function.
+    const fromSettingsForm = formData.get("kind") === "alert-settings";
+    const channels = fromSettingsForm
+      ? parseChannels(formData.getAll("channels"))
+      : parseChannels(settings.channels);
+    if (channels.length === 0) {
+      return { error: "Turn on Browser push or Telegram below, then send the preview again." };
     }
-    const update = await buildPortfolioUpdate(settings);
+    const window =
+      (fromSettingsForm ? parseAlertWindow(formData.get("portfolioWindow")) : null) ?? settings.portfolio.window;
+    const previewSettings: AlertSettings = {
+      ...settings,
+      channels,
+      portfolio: { ...settings.portfolio, window },
+    };
+
+    const update = await buildPortfolioUpdate(previewSettings, 0, { preview: true });
     if (!update) {
-      return {
-        error:
-          "Not enough history yet. A portfolio snapshot is saved with every refresh, so try again after the next one.",
-      };
+      return { error: "Add an asset with a value first — there is nothing to preview yet." };
     }
 
     const result = await dispatchAlert({
@@ -199,11 +219,20 @@ export async function sendPortfolioUpdateNowAction(
       title: update.title,
       body: update.body,
       url: "/",
-      settings,
+      settings: previewSettings,
       force: true,
     });
     revalidatePath("/alerts");
-    return { ...describeTest(result, "all"), ts: Date.now() };
+
+    const described = describePreviewDelivery(result, channels, update.title);
+    const historyNote = update.previewFallback
+      ? " No earlier snapshot yet, so the scheduled update starts once one is saved."
+      : "";
+    return {
+      ...described,
+      message: described.message ? `${described.message}${historyNote}` : described.message,
+      ts: Date.now(),
+    };
   } catch {
     return { error: "Could not send the portfolio update. Check the server logs." };
   }

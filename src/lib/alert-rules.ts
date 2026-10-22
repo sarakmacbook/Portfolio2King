@@ -143,6 +143,21 @@ export function describeBaseline(window: AlertWindow, gapDays: number, earliest 
   return `the price ${ago}`;
 }
 
+/**
+ * Wording for the snapshot a *preview* falls back to when nothing exists on or
+ * before the window cutoff: the newest snapshot (today's included) or, with no
+ * snapshots at all, the total from the previous refresh.
+ */
+export function describePreviewBaseline(
+  snapshotDate: string | null,
+  todayIso: string,
+  window: AlertWindow,
+): string {
+  if (!snapshotDate) return "the last refresh";
+  if (snapshotDate === todayIso) return "today's snapshot";
+  return describeBaseline(window, daysBetweenIso(snapshotDate, todayIso));
+}
+
 export function parseChannels(raw: unknown): AlertChannel[] {
   const parts = (Array.isArray(raw) ? raw : String(raw ?? "").split(","))
     .map((part) => String(part).trim().toLowerCase())
@@ -551,6 +566,73 @@ export function formatRefreshFailure(date: string, attempted: number): { title: 
 /** Plain-text message used for Telegram (no parse_mode, so nothing to escape). */
 export function formatAlertText(alert: { title: string; body: string }): string {
   return `${alert.title}\n${alert.body}`;
+}
+
+/**
+ * What a test or preview send reports back to `/alerts`. Only the channels that
+ * were asked for get a line, so a Telegram-only setup is never told "no browser
+ * subscribed".
+ */
+export type DeliveryOutcome = {
+  pushSent: number;
+  telegramSent: boolean;
+  pushError?: string;
+  telegramError?: string;
+};
+
+export type DeliveryMessage = { ok: boolean; message?: string; error?: string };
+
+export function describeChannelNotes(result: DeliveryOutcome, channels: AlertChannel[]): string {
+  const notes: string[] = [];
+  if (channels.includes("push")) {
+    notes.push(
+      result.pushSent > 0
+        ? `${result.pushSent} browser${result.pushSent === 1 ? "" : "s"} notified`
+        : "no browser subscribed",
+    );
+  }
+  if (channels.includes("telegram")) {
+    notes.push(result.telegramSent ? "Telegram sent" : "Telegram not sent");
+  }
+  return notes.join(", ");
+}
+
+function deliveryDetails(result: DeliveryOutcome): string {
+  const details = [result.telegramError, result.pushError].filter(Boolean).join(" · ");
+  return details ? ` ${details}` : "";
+}
+
+function nothingDelivered(result: DeliveryOutcome): boolean {
+  return result.pushSent === 0 && !result.telegramSent;
+}
+
+/** Result line for the two test buttons on `/alerts`. */
+export function describeTestDelivery(result: DeliveryOutcome, channels: AlertChannel[]): DeliveryMessage {
+  if (nothingDelivered(result)) {
+    return {
+      ok: false,
+      error: `Nothing was delivered — ${describeChannelNotes(result, channels)}.${deliveryDetails(result)}`,
+    };
+  }
+  return { ok: true, message: `Test alert: ${describeChannelNotes(result, channels)}.${deliveryDetails(result)}` };
+}
+
+/** Result line for “Send portfolio update now”, including the message sent. */
+export function describePreviewDelivery(
+  result: DeliveryOutcome,
+  channels: AlertChannel[],
+  title: string,
+): DeliveryMessage {
+  if (nothingDelivered(result)) {
+    return {
+      ok: false,
+      error: `Nothing was delivered — ${describeChannelNotes(result, channels)}.${deliveryDetails(result)}`,
+    };
+  }
+  return {
+    ok: true,
+    message: `Preview sent — “${title}” · ${describeChannelNotes(result, channels)}.${deliveryDetails(result)}`,
+  };
 }
 
 export type PushPayload = {
