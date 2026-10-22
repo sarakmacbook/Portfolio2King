@@ -6,6 +6,7 @@ import AutoDailySnapshot from "@/components/AutoDailySnapshot";
 import { Donut, HistoryChart, type Point } from "@/components/Charts";
 import HoldingsTable, { type HoldingRow } from "@/components/HoldingsTable";
 import RefreshPricesButton from "@/components/RefreshPricesButton";
+import { loadGroupOrder } from "@/lib/asset-order-db";
 import { KIND_META, TYPE_META, fmtDate, money, pct, pnlColor, qty } from "@/lib/format";
 import {
   assetCost,
@@ -25,10 +26,11 @@ export const dynamic = "force-dynamic";
 export default async function Dashboard() {
   if (!isDatabaseConfigured()) return <DatabaseSetup />;
   const list = await getAllAssets();
-  const [snaps, priceSnaps, activity] = await Promise.all([
+  const [snaps, priceSnaps, activity, groupOrder] = await Promise.all([
     getSnapshots(),
     getAllPriceSnapshots(),
     getRecentActivity(6),
+    loadGroupOrder(),
   ]);
   const totals = computeTotals(list);
   const t = today();
@@ -153,7 +155,7 @@ export default async function Dashboard() {
         <div className="flex items-center justify-between px-5 pt-5">
           <h2 className="font-semibold text-slate-900">Holdings</h2>
         </div>
-        <HoldingsTable rows={rows} />
+        <HoldingsTable rows={rows} initialGroupOrder={groupOrder} />
       </section>
 
       <div className="grid gap-6 lg:grid-cols-5">

@@ -101,26 +101,41 @@ whose tags record the original currency.
 
 ## Arrange holdings
 
-The dashboard table follows a saved order. To change it:
+The dashboard table is grouped into sections — **Cash**, **Stocks**,
+**Crypto · Stablecoin**, **Crypto · Volatile**, and **Other** — and both the
+sections and the rows inside them follow a saved order.
 
-1. Click **⇅ Arrange** above the table.
-2. Drag rows (a line shows where the row will land), or use the **▲ / ▼** buttons —
-   they are the touch-friendly and keyboard-accessible path.
-3. Click **Save order**. Nothing is written until you save; **Cancel** discards
+To change the order:
+
+1. Click **⇅ Arrange** above the table. Every section expands to its full list.
+2. Move a **whole category**: drag its grey section header (a line shows where the
+   section will land), or use the **▲ / ▼** buttons on the header.
+3. Move a **single holding**: drag the row, or use the **▲ / ▼** buttons in the
+   **Order** column. A row can only move inside its own category — dropping it on
+   another category is ignored, because changing an asset's type or crypto
+   category is an edit to the holding, not a reorder.
+4. Click **Save order**. Nothing is written until you save; **Cancel** discards
    changes and **Reset to default** clears the saved order.
 
 Details:
 
-- The order is stored as `assets.sort_order`. Rows without a position keep the
-  original type/name ordering, so an untouched instance looks exactly as before.
+- Holding order is stored as `assets.sort_order`. Rows without a position keep
+  the original type/name ordering, so an untouched instance looks exactly as
+  before.
+- Category order is stored in `app_settings` under `holdings.groupOrder` as a
+  comma-separated list of group keys. Unknown keys are dropped, duplicates
+  removed, and missing groups appended in their default spot, so a stale tab
+  cannot corrupt it.
+- Empty sections are hidden, and each header shows the row count plus its
+  subtotal.
 - New holdings are appended to the end of an existing custom order.
 - Saving re-validates ids against the database: if another tab added or deleted a
   holding meanwhile, unknowns are ignored and missing ones are appended rather
   than dropped.
-- Clicking a column heading sorts temporarily; **↺ Custom order** restores the
-  saved order.
-- The order is included in JSON exports/imports (`sortOrder`), and older backups
-  without it still import (their rows fall back to the default ordering).
+- Clicking a column heading sorts temporarily (sections then flatten); **↺ Custom
+  order** restores the saved order and its sections.
+- Holding order is included in JSON exports/imports (`sortOrder`), and older
+  backups without it still import (their rows fall back to the default ordering).
 - Arranging changes only the display order — balances, totals, and snapshots are
   not recalculated.
 

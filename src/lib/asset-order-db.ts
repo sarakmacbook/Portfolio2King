@@ -1,13 +1,18 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { assets } from "@/db/schema";
+import { appSettings, assets } from "@/db/schema";
 import { mergeOrder } from "@/lib/asset-order";
+import { normaliseGroupOrder, type HoldingGroupKey } from "@/lib/holdings-groups";
 import { ensureSchema } from "@/lib/portfolio";
 
 /**
- * Persists an explicit dashboard order. Kept separate from the server action so
- * it can be exercised against a real database without a Next.js request.
+ * Persists dashboard ordering — both the per-holding position (`sort_order`) and
+ * the category/section order (stored in `app_settings`). Kept separate from the
+ * server actions so it can be exercised against a real database directly.
  */
+
+/** app_settings key holding the section order, e.g. "cash,stock,crypto-volatile". */
+export const GROUP_ORDER_SETTING = "holdings.groupOrder";
 
 /** Current asset ids in the order the app displays them. */
 export async function loadAssetIdsInDisplayOrder(): Promise<number[]> {
@@ -56,4 +61,34 @@ export async function nextPositionForNewAsset(): Promise<number> {
     .select({ max: sql<number | null>`max(${assets.sortOrder})` })
     .from(assets);
   return Number(row?.max ?? -1) + 1;
+}
+
+/** Category/section order, falling back to the default when unset. */
+export async function loadGroupOrder(): Promise<HoldingGroupKey[]> {
+  await ensureSchema();
+  const [row] = await db
+    .select({ value: appSettings.value })
+    .from(appSettings)
+    .where(eq(appSettings.key, GROUP_ORDER_SETTING))
+    .limit(1);
+  return normaliseGroupOrder(row?.value);
+}
+
+/** Stores the section order; missing groups are appended in their default spot. */
+export async function saveGroupOrder(order: readonly unknown[]): Promise<HoldingGroupKey[]> {
+  await ensureSchema();
+  const normalised = normaliseGroupOrder(order);
+  const value = normalised.join(",");
+  const updatedAt = new Date();
+  await db
+    .insert(appSettings)
+    .values({ key: GROUP_ORDER_SETTING, value, updatedAt })
+    .onConflictDoUpdate({ target: appSettings.key, set: { value, updatedAt } });
+  return normalised;
+}
+
+/** Removes the stored section order (Reset to default). */
+export async function clearGroupOrder(): Promise<void> {
+  await ensureSchema();
+  await db.delete(appSettings).where(eq(appSettings.key, GROUP_ORDER_SETTING));
 }

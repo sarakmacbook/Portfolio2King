@@ -23,7 +23,14 @@ import {
   today,
 } from "@/lib/portfolio";
 import { refreshPricesWithAlerts } from "@/lib/price-refresh";
-import { clearAssetOrder, nextPositionForNewAsset, persistAssetOrder } from "@/lib/asset-order-db";
+import {
+  clearAssetOrder,
+  clearGroupOrder,
+  nextPositionForNewAsset,
+  persistAssetOrder,
+  saveGroupOrder,
+} from "@/lib/asset-order-db";
+import { isHoldingGroupKey } from "@/lib/holdings-groups";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -192,15 +199,36 @@ function parseOrder(raw: string): number[] {
   return ids;
 }
 
-/** Persists the drag-and-drop order from the dashboard "Arrange" mode. */
+function parseGroups(raw: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("Could not read the category order. Reload the page and try again.");
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("The category order is empty.");
+  if (parsed.length > 32) throw new Error("Too many categories.");
+  const keys = parsed.map((value) => (typeof value === "string" ? value.trim() : ""));
+  if (keys.some((key) => !isHoldingGroupKey(key))) {
+    throw new Error("The category order contains an unknown category.");
+  }
+  return keys;
+}
+
+/**
+ * Persists the drag-and-drop order from the dashboard "Arrange" mode — both the
+ * holding positions and the category/section order.
+ */
 export async function saveAssetOrder(_prev: ActionState, fd: FormData): Promise<ActionState> {
   try {
     await ensureSchema();
     const submitted = parseOrder(str(fd, "order"));
+    const rawGroups = str(fd, "categories");
     // Re-validated against the database, so a stale tab cannot reorder a holding
     // that was deleted or omit one that was added elsewhere.
     const ordered = await persistAssetOrder(submitted);
     if (ordered.length === 0) throw new Error("There are no holdings to order.");
+    if (rawGroups) await saveGroupOrder(parseGroups(rawGroups));
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save the order" };
   }
@@ -212,6 +240,7 @@ export async function saveAssetOrder(_prev: ActionState, fd: FormData): Promise<
 export async function resetAssetOrder(_prev: ActionState, _fd: FormData): Promise<ActionState> {
   try {
     await clearAssetOrder();
+    await clearGroupOrder();
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not reset the order" };
   }
