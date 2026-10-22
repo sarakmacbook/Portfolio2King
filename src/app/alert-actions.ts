@@ -1,19 +1,23 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getAlertSettings, saveAlertSettings, sendTestAlert, type DispatchResult } from "@/lib/alerts";
+import { dispatchAlert, getAlertSettings, saveAlertSettings, sendTestAlert, type DispatchResult } from "@/lib/alerts";
 import {
   MAX_REFRESH_MINUTES,
   MAX_THRESHOLD_PCT,
   MIN_REFRESH_MINUTES,
   MIN_THRESHOLD_PCT,
+  isValidTimeZone,
+  normaliseAlertTime,
   parseAlertWindow,
   parseChannels,
+  parseOptionalThresholdPct,
   parseRefreshMinutes,
   parseThresholdPct,
+  resolveTimeZone,
   type AlertWindow,
 } from "@/lib/alert-rules";
-import { refreshPricesWithAlerts } from "@/lib/price-refresh";
+import { buildPortfolioUpdate, refreshPricesWithAlerts } from "@/lib/price-refresh";
 import {
   clearTelegramConfig,
   discoverChatId,
@@ -63,15 +67,57 @@ export async function saveAlertSettingsAction(
     const channels = parseChannels(formData.getAll("channels"));
     const enabled = formData.get("enabled") === "on";
 
-    await saveAlertSettings({ enabled, thresholdPct, window, channels, backgroundRefreshMinutes });
+    // Portfolio update: the time is the point, the threshold is optional.
+    const portfolioEnabled = formData.get("portfolioEnabled") === "on";
+    const portfolioTime = normaliseAlertTime(formData.get("portfolioTime"));
+    if (portfolioTime === null) {
+      throw new Error("Portfolio update time must be a 24-hour time such as 18:00.");
+    }
+    if (portfolioEnabled && portfolioTime === "") {
+      throw new Error("Pick a time for the portfolio update, or turn it off.");
+    }
+    const portfolioTimezone = String(formData.get("portfolioTimezone") ?? "").trim();
+    if (portfolioTimezone && !isValidTimeZone(portfolioTimezone)) {
+      throw new Error("Pick a valid time zone for the portfolio update.");
+    }
+    const portfolioThreshold = parseOptionalThresholdPct(formData.get("portfolioThresholdPct"));
+    if (portfolioThreshold === null) {
+      throw new Error(
+        `Portfolio threshold must be blank (always send) or between ${MIN_THRESHOLD_PCT}% and ${MAX_THRESHOLD_PCT}%.`,
+      );
+    }
+    const portfolioWindow = parseAlertWindow(formData.get("portfolioWindow") ?? "day");
+    if (portfolioWindow === null) {
+      throw new Error("Portfolio comparison window must be a day or a month.");
+    }
+
+    await saveAlertSettings({
+      enabled,
+      thresholdPct,
+      window,
+      channels,
+      backgroundRefreshMinutes,
+      portfolio: {
+        enabled: portfolioEnabled,
+        time: portfolioTime,
+        timezone: portfolioTimezone,
+        window: portfolioWindow,
+        thresholdPct: portfolioThreshold.value,
+      },
+    });
     revalidatePath("/alerts");
     revalidatePath("/", "layout");
+
+    const holdingRule = enabled
+      ? `holding alerts at ±${thresholdPct}% over ${describeWindow(window)}`
+      : "holding alerts off";
+    const portfolioRule = portfolioEnabled && portfolioTime
+      ? `portfolio update at ${portfolioTime} (${resolveTimeZone(portfolioTimezone)})`
+      : "portfolio update off";
     return {
       ok: true,
       ts: Date.now(),
-      message: enabled
-        ? `Saved. Alerts fire when a holding moves ±${thresholdPct}% over ${describeWindow(window)}.`
-        : "Saved. Automatic alerts are turned off.",
+      message: `Saved. ${holdingRule.charAt(0).toUpperCase()}${holdingRule.slice(1)} · ${portfolioRule}.`,
     };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Could not save alert settings" };
@@ -111,6 +157,51 @@ export async function sendTestAlertAction(
     return { ...described, ts: Date.now() };
   } catch {
     return { error: "Could not send the test alert. Check the server logs." };
+  }
+}
+
+/**
+ * Sends today's portfolio update immediately, whatever the clock says, so the
+ * scheduled message can be previewed. The optional threshold is ignored here —
+ * a preview should always arrive.
+ */
+export async function sendPortfolioUpdateNowAction(
+  _prev: AlertActionState,
+  formData: FormData,
+): Promise<AlertActionState> {
+  // Submitted from the settings form through `formAction`, hence the flag.
+  if (formData.get("portfolioTest") !== "1") return { error: "Unknown form" };
+  if (Date.now() - lastTestAt < TEST_COOLDOWN_MS) {
+    return { error: "Wait a few seconds before sending another message." };
+  }
+  lastTestAt = Date.now();
+
+  try {
+    const settings = await getAlertSettings();
+    if (parseChannels(settings.channels).length === 0) {
+      return { error: "Turn on a delivery channel below first." };
+    }
+    const update = await buildPortfolioUpdate(settings);
+    if (!update) {
+      return {
+        error:
+          "Not enough history yet. A portfolio snapshot is saved with every refresh, so try again after the next one.",
+      };
+    }
+
+    const result = await dispatchAlert({
+      dedupeKey: `portfolio-test:${Date.now()}`,
+      kind: "portfolio_test",
+      title: update.title,
+      body: update.body,
+      url: "/",
+      settings,
+      force: true,
+    });
+    revalidatePath("/alerts");
+    return { ...describeTest(result, "all"), ts: Date.now() };
+  } catch {
+    return { error: "Could not send the portfolio update. Check the server logs." };
   }
 }
 

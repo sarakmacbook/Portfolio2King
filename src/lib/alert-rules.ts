@@ -14,6 +14,24 @@ export type AlertWindow = (typeof ALERT_WINDOWS)[number];
 /** How far back each window looks, in days. A month is a fixed 30 days. */
 export const WINDOW_DAYS: Record<AlertWindow, number> = { day: 1, month: 30 };
 
+/**
+ * The whole-portfolio update: one message at a chosen local time that reports
+ * how much the portfolio moved in money and percent. The threshold is optional
+ * — blank means "always send at this time", whatever the change.
+ */
+export type PortfolioAlertSettings = {
+  /** Own switch, independent of the per-holding threshold alerts. */
+  enabled: boolean;
+  /** Local wall-clock time, `HH:MM` (24 h). Empty string = no schedule. */
+  time: string;
+  /** IANA zone the time is read in. Empty string = the server's zone. */
+  timezone: string;
+  /** Compare against yesterday's total, or against the total ~30 days ago. */
+  window: AlertWindow;
+  /** Optional filter in percent. `null` sends every scheduled update. */
+  thresholdPct: number | null;
+};
+
 export type AlertSettings = {
   /** Master switch for automatic alerts (does not affect manual test sends). */
   enabled: boolean;
@@ -24,6 +42,8 @@ export type AlertSettings = {
   channels: AlertChannel[];
   /** While the app is open, refresh prices at most this often. 0 disables it. */
   backgroundRefreshMinutes: number;
+  /** Scheduled portfolio summary (money + %). */
+  portfolio: PortfolioAlertSettings;
 };
 
 export const MIN_THRESHOLD_PCT = 0.5;
@@ -31,12 +51,21 @@ export const MAX_THRESHOLD_PCT = 50;
 export const MIN_REFRESH_MINUTES = 5;
 export const MAX_REFRESH_MINUTES = 720;
 
+export const DEFAULT_PORTFOLIO_ALERT_SETTINGS: PortfolioAlertSettings = {
+  enabled: false,
+  time: "18:00",
+  timezone: "",
+  window: "day",
+  thresholdPct: null,
+};
+
 export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
   enabled: true,
   thresholdPct: 5,
   window: "day",
   channels: ["push", "telegram"],
   backgroundRefreshMinutes: 15,
+  portfolio: DEFAULT_PORTFOLIO_ALERT_SETTINGS,
 };
 
 /** Keys used in the `app_settings` table. */
@@ -46,6 +75,11 @@ export const SETTING_KEYS = {
   window: "alerts.window",
   channels: "alerts.channels",
   backgroundRefreshMinutes: "refresh.intervalMinutes",
+  portfolioEnabled: "alerts.portfolio.enabled",
+  portfolioTime: "alerts.portfolio.time",
+  portfolioTimezone: "alerts.portfolio.timezone",
+  portfolioWindow: "alerts.portfolio.window",
+  portfolioThresholdPct: "alerts.portfolio.thresholdPct",
 } as const;
 
 export function parseBooleanSetting(raw: string | null | undefined, fallback: boolean): boolean {
@@ -126,6 +160,145 @@ export function parseRefreshMinutes(raw: unknown): number | null {
   return Math.round(value);
 }
 
+/**
+ * Blank is a valid value ("no threshold, always send"); anything else must be a
+ * number in range. Returns `null` only for an invalid, non-blank value.
+ */
+export function parseOptionalThresholdPct(raw: unknown): { value: number | null } | null {
+  if (raw === null || raw === undefined || String(raw).trim() === "") return { value: null };
+  const value = parseThresholdPct(raw);
+  return value === null ? null : { value };
+}
+
+const TIME_PATTERN = /^([01]?\d|2[0-3]):([0-5]\d)$/;
+
+/** Normalises `18:00` / `9:05`. Blank means "no scheduled alert"; junk is `null`. */
+export function normaliseAlertTime(raw: unknown): string | null {
+  const value = String(raw ?? "").trim();
+  if (!value) return "";
+  const match = TIME_PATTERN.exec(value);
+  if (!match) return null;
+  return `${String(Number(match[1])).padStart(2, "0")}:${match[2]}`;
+}
+
+/** `18:30` → 1110 minutes after local midnight. */
+export function parseAlertTimeMinutes(time: string | null | undefined): number | null {
+  const match = TIME_PATTERN.exec(String(time ?? "").trim());
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+const timeFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function timeFormatter(timeZone: string): Intl.DateTimeFormat {
+  const cached = timeFormatters.get(timeZone);
+  if (cached) return cached;
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  timeFormatters.set(timeZone, formatter);
+  return formatter;
+}
+
+export function isValidTimeZone(timeZone: string): boolean {
+  try {
+    timeFormatter(timeZone);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Stored zone, or the server's own zone when the setting is blank/invalid. */
+export function resolveTimeZone(timeZone: string | null | undefined): string {
+  const value = String(timeZone ?? "").trim();
+  if (value && isValidTimeZone(value)) return value;
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+export type ZonedClock = { date: string; minutes: number };
+
+/** Wall clock in a zone: local `YYYY-MM-DD` plus minutes after midnight. */
+export function zonedClock(instant: Date, timeZone: string): ZonedClock {
+  const zone = resolveTimeZone(timeZone);
+  const parts = timeFormatter(zone).formatToParts(instant);
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  return {
+    date: `${value("year")}-${value("month")}-${value("day")}`,
+    minutes: Number(value("hour")) * 60 + Number(value("minute")),
+  };
+}
+
+function zoneOffsetMs(instant: number, timeZone: string): number {
+  const { date, minutes } = zonedClock(new Date(instant), timeZone);
+  const [year, month, day] = date.split("-").map(Number);
+  // Wall clock read back as if it were UTC, minus the real instant = the offset.
+  return Date.UTC(year, month - 1, day, Math.floor(minutes / 60), minutes % 60) - Math.floor(instant / 60_000) * 60_000;
+}
+
+/** The UTC instant at which a zone's wall clock reads `date` + `minutes`. */
+export function zonedTimeToUtc(date: string, minutes: number, timeZone: string): Date {
+  const zone = resolveTimeZone(timeZone);
+  const [year, month, day] = date.split("-").map(Number);
+  const guess = Date.UTC(year, month - 1, day, Math.floor(minutes / 60), minutes % 60);
+  // Two passes handle zones whose offset differs at the guess (DST edges).
+  const first = guess - zoneOffsetMs(guess, zone);
+  const second = guess - zoneOffsetMs(first, zone);
+  return new Date(second);
+}
+
+/**
+ * True once the local clock has reached the chosen time. The first scheduled
+ * refresh after that time sends the update, and the per-day dedupe key stops
+ * repeats, so a late or frequent schedule still yields exactly one message.
+ */
+export function isPortfolioAlertDue(now: Date, time: string, timeZone: string): boolean {
+  const minutes = parseAlertTimeMinutes(time);
+  if (minutes === null) return false;
+  return zonedClock(now, timeZone).minutes >= minutes;
+}
+
+/** Next instant the update is due (strictly after `now`), for the UI. */
+export function nextPortfolioAlertAt(now: Date, time: string, timeZone: string): Date | null {
+  const minutes = parseAlertTimeMinutes(time);
+  if (minutes === null) return null;
+  const zone = resolveTimeZone(timeZone);
+  const clock = zonedClock(now, zone);
+  const date = clock.minutes < minutes ? clock.date : shiftIsoDate(clock.date, 1);
+  return zonedTimeToUtc(date, minutes, zone);
+}
+
+export function parsePortfolioAlertSettings(
+  values: Record<string, string | null | undefined>,
+): PortfolioAlertSettings {
+  const rawTime = values[SETTING_KEYS.portfolioTime];
+  const parsedTime = normaliseAlertTime(rawTime);
+  const threshold = values[SETTING_KEYS.portfolioThresholdPct];
+  return {
+    enabled: parseBooleanSetting(
+      values[SETTING_KEYS.portfolioEnabled],
+      DEFAULT_PORTFOLIO_ALERT_SETTINGS.enabled,
+    ),
+    // No stored row at all → the default time; an explicitly blank row → off.
+    time: rawTime === undefined || rawTime === null
+      ? DEFAULT_PORTFOLIO_ALERT_SETTINGS.time
+      : (parsedTime ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.time),
+    timezone: String(values[SETTING_KEYS.portfolioTimezone] ?? "").trim(),
+    window: parseAlertWindow(values[SETTING_KEYS.portfolioWindow]) ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.window,
+    thresholdPct: parseOptionalThresholdPct(threshold)?.value ?? null,
+  };
+}
+
 export function parseAlertSettings(values: Record<string, string | null | undefined>): AlertSettings {
   const channels = parseChannels(values[SETTING_KEYS.channels]);
   const threshold = parseThresholdPct(values[SETTING_KEYS.thresholdPct]);
@@ -140,6 +313,7 @@ export function parseAlertSettings(values: Record<string, string | null | undefi
         ? DEFAULT_ALERT_SETTINGS.channels
         : channels,
     backgroundRefreshMinutes: minutes ?? DEFAULT_ALERT_SETTINGS.backgroundRefreshMinutes,
+    portfolio: parsePortfolioAlertSettings(values),
   };
 }
 
@@ -150,8 +324,17 @@ export function settingsToRows(settings: AlertSettings): Array<{ key: string; va
     { key: SETTING_KEYS.window, value: settings.window },
     { key: SETTING_KEYS.channels, value: settings.channels.join(",") },
     { key: SETTING_KEYS.backgroundRefreshMinutes, value: String(settings.backgroundRefreshMinutes) },
+    { key: SETTING_KEYS.portfolioEnabled, value: settings.portfolio.enabled ? "true" : "false" },
+    { key: SETTING_KEYS.portfolioTime, value: settings.portfolio.time },
+    { key: SETTING_KEYS.portfolioTimezone, value: settings.portfolio.timezone },
+    { key: SETTING_KEYS.portfolioWindow, value: settings.portfolio.window },
+    {
+      key: SETTING_KEYS.portfolioThresholdPct,
+      value: settings.portfolio.thresholdPct === null ? "" : String(settings.portfolio.thresholdPct),
+    },
   ];
 }
+
 
 export type PriceMove = {
   assetId: number;
@@ -229,6 +412,49 @@ export function refreshFailureKey(date: string): string {
   return `refresh-failure:${date}`;
 }
 
+/** One portfolio update per local day and window, regardless of how often it runs. */
+export function portfolioAlertKey(date: string, window: AlertWindow = "day"): string {
+  return `portfolio:${date}:${window}`;
+}
+
+export type PortfolioMove = {
+  from: number;
+  to: number;
+  /** Signed money change: 1234.56 = +$1,234.56. */
+  changeMoney: number;
+  /** Signed fraction: 0.0235 = +2.35 %. */
+  changePct: number;
+  direction: "up" | "down" | "flat";
+  /** Human wording for the baseline, e.g. "yesterday's close". */
+  baseline: string;
+};
+
+/** Whole-portfolio move; `null` when there is no usable baseline. */
+export function describePortfolioMove(from: number, to: number, baseline: string): PortfolioMove | null {
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from <= 0 || to < 0) return null;
+  const changeMoney = to - from;
+  const changePct = changeMoney / from;
+  const flat = Math.abs(changePct) < 1e-9;
+  return {
+    from,
+    to,
+    changeMoney,
+    changePct,
+    direction: flat ? "flat" : changePct > 0 ? "up" : "down",
+    baseline,
+  };
+}
+
+/**
+ * The threshold is optional by design: `null` means "always send at the chosen
+ * time", which is what most people want for a daily portfolio update.
+ */
+export function portfolioMovePassesThreshold(move: PortfolioMove, thresholdPct: number | null): boolean {
+  if (thresholdPct === null) return true;
+  if (!Number.isFinite(thresholdPct) || thresholdPct <= 0) return true;
+  return Math.abs(move.changePct) * 100 + 1e-9 >= thresholdPct;
+}
+
 function formatAmount(value: number): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -239,8 +465,44 @@ function formatAmount(value: number): string {
 }
 
 export function formatMovePercent(changePct: number): string {
+  if (Math.abs(changePct) < 1e-9) return "0.00%";
   const sign = changePct > 0 ? "+" : "-";
   return `${sign}${Math.abs(changePct * 100).toFixed(2)}%`;
+}
+
+/** `$1,234.56` without a sign, `+$1,234.56` / `-$1,234.56` with one. */
+export function formatSignedAmount(value: number): string {
+  const amount = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Math.abs(value));
+  if (value > 0) return `+${amount}`;
+  if (value < 0) return `-${amount}`;
+  return amount;
+}
+
+/**
+ * Money and percent, in both the title and the body, because the app is usually
+ * read on a lock screen: `Portfolio ▲ +2.35% (+$1,234.56)`.
+ */
+export function formatPortfolioMove(move: PortfolioMove): { title: string; body: string } {
+  const arrow = move.direction === "up" ? "▲" : move.direction === "down" ? "▼" : "▬";
+  const percent = formatMovePercent(move.changePct);
+  const amount = formatSignedAmount(move.changeMoney);
+  const title = `Portfolio ${arrow} ${percent} (${amount})`;
+
+  if (move.direction === "flat") {
+    return {
+      title,
+      body: `Your portfolio is worth ${formatAmount(move.to)}, unchanged since ${move.baseline}.`,
+    };
+  }
+  return {
+    title,
+    body: `Your portfolio moved from ${formatAmount(move.from)} to ${formatAmount(move.to)} since ${move.baseline}: ${amount} (${percent}).`,
+  };
 }
 
 export function formatPriceMove(move: PriceMove): { title: string; body: string } {
