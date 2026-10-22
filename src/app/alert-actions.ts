@@ -76,10 +76,14 @@ export async function saveAlertSettingsAction(
     if (portfolioEnabled && portfolioTime === "") {
       throw new Error("Pick a time for the portfolio update, or turn it off.");
     }
-    const portfolioTimezone = String(formData.get("portfolioTimezone") ?? "").trim();
-    if (portfolioTimezone && !isValidTimeZone(portfolioTimezone)) {
+    const submittedTimezone = String(formData.get("portfolioTimezone") ?? "").trim();
+    if (submittedTimezone && !isValidTimeZone(submittedTimezone)) {
       throw new Error("Pick a valid time zone for the portfolio update.");
     }
+    // Store the zone the server will actually use, so the page and the schedule
+    // can never disagree (a blank value used to mean "server zone" while the
+    // form showed the device zone).
+    const portfolioTimezone = resolveTimeZone(submittedTimezone);
     const portfolioThreshold = parseOptionalThresholdPct(formData.get("portfolioThresholdPct"));
     if (portfolioThreshold === null) {
       throw new Error(
@@ -112,7 +116,7 @@ export async function saveAlertSettingsAction(
       ? `holding alerts at ±${thresholdPct}% over ${describeWindow(window)}`
       : "holding alerts off";
     const portfolioRule = portfolioEnabled && portfolioTime
-      ? `portfolio update at ${portfolioTime} (${resolveTimeZone(portfolioTimezone)})`
+      ? `portfolio update at ${portfolioTime} (${portfolioTimezone})`
       : "portfolio update off";
     return {
       ok: true,

@@ -267,13 +267,16 @@ export type PortfolioSchedule = {
 };
 
 /**
- * The most recent scheduled run at or before `now`.
+ * Today's scheduled run, or `null` before the chosen time.
  *
- * A run stays open until the next one replaces it (24 h), so a coarse scheduler
- * — a cron that fires once a day at a fixed hour, or a laptop that was asleep —
- * still delivers the update instead of missing the window forever. The returned
- * `date` is the alert's dedupe key, so a caught-up send and a punctual send can
- * never both go out for the same scheduled run.
+ * The run belongs to the local day it fires on: once the clock passes the
+ * chosen time, the next refresh sends *that day's* update — later the same day
+ * still counts, so a scheduler that runs at 22:00 still delivers an 18:00
+ * update. It never fires early, and yesterday's run is never sent today: an
+ * "18:00" setting must not arrive at 00:05 just because a tab opened.
+ *
+ * A day with no refresh at all is skipped rather than sent stale, which is why
+ * the scheduler should run at least a few times a day (see the README).
  */
 export function portfolioScheduleFor(
   now: Date,
@@ -284,12 +287,11 @@ export function portfolioScheduleFor(
   if (minutes === null) return null;
   const zone = resolveTimeZone(timeZone);
   const clock = zonedClock(now, zone);
-  const date = clock.minutes >= minutes ? clock.date : shiftIsoDate(clock.date, -1);
-  const at = zonedTimeToUtc(date, minutes, zone);
+  if (clock.minutes < minutes) return null;
   return {
-    date,
-    at,
-    lateMinutes: Math.max(0, Math.round((now.getTime() - at.getTime()) / 60_000)),
+    date: clock.date,
+    at: zonedTimeToUtc(clock.date, minutes, zone),
+    lateMinutes: clock.minutes - minutes,
   };
 }
 

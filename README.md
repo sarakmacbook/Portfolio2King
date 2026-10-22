@@ -187,11 +187,12 @@ Your portfolio moved from $52,000.00 to $53,222.00 since yesterday’s close: +$
   update, and the key for that scheduled run (`portfolio:2026-10-22:day`) means
   exactly one message per day, whether the refresh comes from the cron job or an
   open tab.
-- **A run stays open for 24 hours.** If the scheduler wakes up less often than
-  the time you chose — a once-a-day cron, a laptop that was asleep, a deploy that
-  restarted mid-evening — the next run sends the missed update instead of
-  silently skipping the day. With a daily 07:00 run and an 18:00 setting you get
-  one message each morning, reporting the change since **yesterday’s** close.
+- **The update belongs to its own day.** It is sent on the first refresh at or
+  after the chosen time, and never before it: enabling an 18:00 update at 10:00
+  stays quiet until 18:00, and the previous day’s update is never delivered the
+  next morning. A later refresh the same day still sends it (a 22:00-only
+  scheduler delivers the 18:00 update); a day with no refresh at all is skipped
+  rather than sent stale.
 - **The threshold is optional — the time is the point.** Leave *Only if it moves
   (%)* blank and the update arrives every day at that time, even when nothing
   moved (`Portfolio ▬ 0.00% ($0.00)`). Enter e.g. `2` to skip days with a
@@ -298,11 +299,11 @@ branch.
 ```
 
 Hobby plans allow daily crons only; the bundled `/api/cron/daily-snapshot` entry
-already sends alerts once a day. A once-a-day cron still delivers the portfolio
-update — it goes out on that run (so a daily 00:00 UTC run reports at 07:00 in
-Phnom Penh) rather than being skipped. Schedule `/api/cron/refresh-prices` more
-often (GitHub Actions or a Pro plan) for a precise local time; minute-level
-schedules need Pro.
+already sends alerts once a day. Because the portfolio update only fires at or
+after the time you chose, a once-a-day cron must run at (or after) that time —
+a daily 00:00 UTC run cannot deliver an 18:00 Phnom Penh update. Schedule
+`/api/cron/refresh-prices` a few times a day (GitHub Actions or a Pro plan) for a
+precise local time; minute-level schedules need Pro.
 
 **While someone is browsing** — no scheduler is needed as long as a tab is open;
 the page triggers a throttled refresh on the interval above.

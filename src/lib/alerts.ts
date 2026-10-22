@@ -358,6 +358,22 @@ export async function getRecentAlerts(limit = 15) {
   return db.select().from(alertEvents).orderBy(desc(alertEvents.createdAt)).limit(limit);
 }
 
+/**
+ * When the scheduled portfolio update last went out. Used on /alerts so
+ * "is my 6 pm message being sent?" is answerable without opening the logs.
+ */
+export async function getLastPortfolioUpdate(): Promise<Date | null> {
+  if (!hasDatabase()) return null;
+  await ensureSchema();
+  const [row] = await db
+    .select({ at: alertEvents.createdAt })
+    .from(alertEvents)
+    .where(eq(alertEvents.kind, "portfolio_move"))
+    .orderBy(desc(alertEvents.createdAt))
+    .limit(1);
+  return row?.at ?? null;
+}
+
 /** Most recent live-price update across crypto holdings. */
 export async function getLastPriceRefresh(): Promise<Date | null> {
   if (!hasDatabase()) return null;

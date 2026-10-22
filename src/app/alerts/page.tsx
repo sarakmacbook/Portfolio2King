@@ -7,6 +7,7 @@ import { isDatabaseConfigured } from "@/db";
 import {
   countPushSubscriptions,
   getAlertSettings,
+  getLastPortfolioUpdate,
   getLastPriceRefresh,
   getRecentAlerts,
   getVapidConfig,
@@ -32,12 +33,13 @@ function timeAgo(date: Date | null): string {
 export default async function AlertsPage() {
   if (!isDatabaseConfigured()) return <DatabaseSetup />;
 
-  const [settings, subscribers, telegram, recent, lastRefresh] = await Promise.all([
+  const [settings, subscribers, telegram, recent, lastRefresh, lastPortfolio] = await Promise.all([
     getAlertSettings(),
     countPushSubscriptions(),
     getTelegramStatus(),
     getRecentAlerts(12),
     getLastPriceRefresh(),
+    getLastPortfolioUpdate(),
   ]);
 
   const portfolioZone = resolveTimeZone(settings.portfolio.timezone);
@@ -109,6 +111,7 @@ export default async function AlertsPage() {
           settings={settings}
           telegramConnected={telegram.configured}
           nextPortfolioLabel={nextPortfolioLabel}
+          lastPortfolioLabel={lastPortfolio ? timeAgo(lastPortfolio) : null}
         />
       </section>
 

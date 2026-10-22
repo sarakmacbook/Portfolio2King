@@ -133,11 +133,14 @@ export default function AlertSettingsForm({
   settings,
   telegramConnected = true,
   nextPortfolioLabel = null,
+  lastPortfolioLabel = null,
 }: {
   settings: AlertSettings;
   telegramConnected?: boolean;
   /** Pre-formatted on the server, e.g. "Fri, Oct 23, 6:00 PM GMT+7". */
   nextPortfolioLabel?: string | null;
+  /** Pre-formatted on the server, e.g. "2 h ago". */
+  lastPortfolioLabel?: string | null;
 }) {
   const [state, action] = useActionState<AlertActionState, FormData>(
     (_previous, formData) => saveAlertSettingsAction(_previous, formData),
@@ -271,8 +274,8 @@ export default function AlertSettingsForm({
                 className="input"
               />
               <p className="mt-1 text-xs text-slate-400">
-                The first refresh after this time sends it. If your scheduler runs less often, the next run
-                sends it late instead of skipping the day.
+                The first refresh after this time sends it — never earlier. A later run the same day still
+                delivers it; if nothing runs that day, that day is skipped.
               </p>
             </div>
             <div>
@@ -326,10 +329,18 @@ export default function AlertSettingsForm({
 
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <PortfolioTestButton disabled={!portfolioEnabled} />
-            {portfolioEnabled && nextPortfolioLabel && (
-              <p className="text-xs text-slate-500">
-                Next scheduled send: <span className="font-medium text-slate-700">{nextPortfolioLabel}</span>
-              </p>
+            {portfolioEnabled && (nextPortfolioLabel || lastPortfolioLabel) && (
+              <div className="text-xs text-slate-500">
+                {nextPortfolioLabel && (
+                  <p>
+                    Next scheduled send: <span className="font-medium text-slate-700">{nextPortfolioLabel}</span>
+                  </p>
+                )}
+                <p className="mt-0.5">
+                  Last portfolio update sent:{" "}
+                  <span className="font-medium text-slate-700">{lastPortfolioLabel ?? "never"}</span>
+                </p>
+              </div>
             )}
           </div>
         </div>
