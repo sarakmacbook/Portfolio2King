@@ -65,7 +65,46 @@ export const priceSnapshots = pgTable(
   (table) => [primaryKey({ columns: [table.assetId, table.date] })],
 );
 
+/** Web Push subscriptions (one row per browser/device that enabled alerts). */
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: serial("id").primaryKey(),
+  endpoint: text("endpoint").notNull().unique(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  userAgent: text("user_agent").notNull().default(""),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Delivered alerts. `dedupeKey` is unique so a scheduled refresh that runs every
+ * few minutes cannot send the same alert twice.
+ */
+export const alertEvents = pgTable("alert_events", {
+  id: serial("id").primaryKey(),
+  dedupeKey: text("dedupe_key").notNull().unique(),
+  kind: text("kind").notNull(),
+  assetId: integer("asset_id"),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  channels: text("channels").notNull().default(""),
+  pushSent: integer("push_sent").notNull().default(0),
+  pushFailed: integer("push_failed").notNull().default(0),
+  telegramSent: integer("telegram_sent").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Small key/value store for alert settings and generated VAPID keys. */
+export const appSettings = pgTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type Asset = typeof assets.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
 export type Snapshot = typeof snapshots.$inferSelect;
 export type PriceSnapshot = typeof priceSnapshots.$inferSelect;
+export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect;
+export type AlertEvent = typeof alertEvents.$inferSelect;
+export type AppSetting = typeof appSettings.$inferSelect;

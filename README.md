@@ -24,9 +24,12 @@ the deployment before storing real portfolio data (see the
   history charts, per-asset pages, and an activity feed.
 - Portable JSON export/import, so you can move providers without `pg_dump`.
 - Optional guided database setup in the web UI.
+- Background price refresh with threshold alerts over Web Push (browser or
+  installed web clip) and Telegram.
 - **One reporting currency: USD.** See below.
 
 **Contents:** [Supported currencies](#supported-currencies) ·
+[Background refresh and alerts](#background-refresh-and-alerts) ·
 [Run locally](#run-locally) · [Self-host on your own server](#self-host-on-your-own-server) ·
 [Connect a database from the web UI](#connect-a-database-from-the-web-ui) ·
 [Export & import](#export-and-import-the-database) ·
@@ -94,6 +97,126 @@ whose tags record the original currency.
 > currency on each account plus a dated FX-rate table, and every total/snapshot
 > would have to convert at capture time. That is a feature, not a setting.
 
+## Background refresh and alerts
+
+Ledgerly can keep crypto prices fresh on its own and notify you when a holding
+moves beyond a threshold. Alerts are delivered over **Web Push** (to a browser or
+an installed web clip) and/or **Telegram**.
+
+### What refreshes, and when
+
+| Trigger | When it runs | Sends alerts |
+| --- | --- | --- |
+| **Refresh prices** button (`/prices`) | You click it | No |
+| Open app tab | Every 5–120 minutes while a tab is visible (default 15) | Yes |
+| `GET /api/cron/refresh-prices` | Your scheduler | Yes |
+| `GET /api/cron/daily-snapshot` | Existing daily schedules / Vercel Cron | Yes |
+
+- Each automatic run compares every stock and crypto holding with **yesterday’s
+  close** (the latest price snapshot before today). Holdings without history are
+  compared with the price they had at the previous refresh.
+- An alert fires when the move is at least the configured threshold (default
+  **±5 %**). Cash is never alerted.
+- Alerts are deduplicated per asset, direction, day, and 5-point severity band
+  (`price:2:2026-10-22:up:2`), so a 15-minute schedule sends one message when a
+  coin jumps 6 % and a second only if it escalates past 10 %.
+- If every price provider fails, one **“Price refresh failed”** alert is sent per
+  day instead of silently keeping stale prices.
+- The server decides whether a refresh is due (`refresh.intervalMinutes`), so
+  many open tabs cannot multiply API calls or alerts.
+
+### Set up Web Push (browser / web clip)
+
+1. Open **Alerts** in the navigation (`/alerts`).
+2. Click **Enable browser alerts** and allow notifications.
+3. Click **Send test notification**.
+
+- Works in Chrome, Edge, Firefox, and Safari 16.4+.
+- **iOS/iPadOS:** Web Push is only available to web apps added to the Home
+  Screen. In Safari use Share → **Add to Home Screen**, then open Ledgerly from
+  the icon and enable alerts there. The page shows this hint automatically on
+  iPhone/iPad.
+- Android Chrome can also install the app from the menu.
+- Subscriptions are stored in `push_subscriptions`. Endpoints that return `404`
+  or `410` are deleted automatically, so reinstalling a browser self-heals.
+
+**VAPID keys:** set `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` to use your own pair,
+or leave both unset — a pair is generated once on first use and stored in
+`app_settings`. Changing or clearing the database therefore requires re-enabling
+alerts in each browser. `VAPID_SUBJECT` should be a `mailto:` or `https:` contact.
+
+### Set up Telegram
+
+1. Create a bot: message [@BotFather](https://t.me/BotFather), send `/newbot`,
+   copy the token.
+2. Send your bot any message (a bot cannot start a chat with you).
+3. Find your chat id, e.g. by messaging [@userinfobot](https://t.me/userinfobot).
+4. Set the environment variables and restart:
+
+   ```bash
+   TELEGRAM_BOT_TOKEN=123456789:AA…your-token…
+   TELEGRAM_CHAT_ID=123456789          # or -100… for a group, or @channel
+   ```
+
+5. Open `/alerts` → **Send test message**.
+
+Messages are plain text through the Telegram Bot API (no HTML/Markdown to
+escape). Failures are reported on the page — an invalid token says so, a wrong
+chat id tells you to start the chat first, and rate limits are retried on the
+next scheduled run. The token is only read from the environment and is never
+returned by an API or written to the alert log.
+
+### Settings
+
+Configure on `/alerts`; values live in the `app_settings` table.
+
+| Setting | Default | Range |
+| --- | --- | --- |
+| Automatic alerts | on | on/off (manual tests still work when off) |
+| Threshold | 5 % | 0.5 – 50 % |
+| Channels | push + telegram | any combination |
+| Background refresh | 15 min | off, or 5 – 720 min |
+
+Turning on a channel without configuring it is harmless: push with no
+subscriptions and Telegram without credentials simply deliver nothing, and the
+page shows each channel’s status.
+
+### Scheduling options
+
+**Host cron / systemd timer** — see
+[self-hosting step 7](#7-refresh-prices-in-the-background).
+
+**GitHub Actions** — `.github/workflows/refresh-prices.yml` runs every 15 minutes
+once you set the repository variable `APP_URL` (e.g. `https://ledgerly.example.com`)
+and the secret `CRON_SECRET`. Scheduled workflows only run from the default
+branch.
+
+**Vercel Cron** — add the route to `vercel.json`:
+
+```json
+{ "crons": [{ "path": "/api/cron/refresh-prices", "schedule": "*/15 * * * *" }] }
+```
+
+Hobby plans allow daily crons only; the bundled `/api/cron/daily-snapshot` entry
+already sends alerts once a day. Minute-level schedules need Pro.
+
+**While someone is browsing** — no scheduler is needed as long as a tab is open;
+the page triggers a throttled refresh on the interval above.
+
+### Security and limits
+
+- `/alerts` and its endpoints are **unauthenticated**, like the rest of Ledgerly.
+  Anyone who can reach the app can enable alerts on their own browser, change the
+  threshold, and send test messages (throttled to one test per 15 seconds).
+  Restrict access to the deployment as described in the
+  [security checklist](#self-hosting-security-checklist).
+- Subscription and unsubscribe calls must be same-origin; payloads are size- and
+  format-checked before they are stored.
+- Push payloads contain the asset name, the price move, and an app link — never
+  quantities, balances, or notes.
+- The alert log (`alert_events`) is pruned after 90 days by scheduled runs.
+- Web Push requires HTTPS in production (localhost is exempt in most browsers).
+
 ## Run locally
 
 ```bash
@@ -148,7 +271,11 @@ chmod 600 .env.local
 | `POSTGRES_URL` | No | Alternative name, used when `DATABASE_URL` is unset. |
 | `DATABASE_SETUP_TOKEN` | No | Enables the web setup wizard and protects `/api/database`, export, and import. Must be at least 32 characters. |
 | `ALLOW_DATABASE_SETUP_WRITE` | No | Set to `true` on a persistent self-hosted server to let the wizard write `.env.local`. Always disabled on Vercel. |
-| `CRON_SECRET` | Recommended | Shared secret for `/api/cron/daily-snapshot`, sent as `Authorization: Bearer …`. Without it the endpoint is unauthenticated (throttled per instance). |
+| `CRON_SECRET` | Recommended | Shared secret for `/api/cron/refresh-prices` and `/api/cron/daily-snapshot`, sent as `Authorization: Bearer …`. Without it the endpoints are unauthenticated (throttled per instance). |
+| `TELEGRAM_BOT_TOKEN` | No | Telegram bot token from [@BotFather](https://t.me/BotFather). Enables Telegram alerts. |
+| `TELEGRAM_CHAT_ID` | No | Chat, group, or `@channel` id that receives alerts. The bot must be allowed to post there. |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | No | Web Push key pair. When unset, a pair is generated once and stored in `app_settings`. |
+| `VAPID_SUBJECT` | No | Contact for push services, `mailto:` or `https:` (default `mailto:ledgerly@localhost`). |
 
 Generate secrets with:
 
@@ -263,29 +390,68 @@ sudo systemctl enable --now ledgerly
 Adjust `User`, paths, and the npm path for your host. Journald keeps the logs:
 `journalctl -u ledgerly -f`.
 
-### 7. Capture daily snapshots
+### 7. Refresh prices in the background
 
-The dashboard captures today’s snapshot when it is opened, and a browser visit
-can refresh stale crypto prices once per day. For unattended instances, call the
-cron endpoint from the host’s scheduler. `vercel.json` crons apply to Vercel
-only.
+The dashboard captures today’s snapshot when it is opened, and the app refreshes
+prices while a tab is open (see
+[background refresh and alerts](#background-refresh-and-alerts)). For unattended
+instances, call the scheduled endpoint from the host.
 
 ```bash
-# /usr/local/bin/ledgerly-snapshot  (chmod 700)
+# /usr/local/bin/ledgerly-refresh  (chmod 700)
 #!/usr/bin/env sh
 set -eu
 . /etc/ledgerly/cron.env        # CRON_SECRET=…
 curl -fsS -H "Authorization: Bearer $CRON_SECRET" \
-  http://127.0.0.1:3000/api/cron/daily-snapshot
+  http://127.0.0.1:3000/api/cron/refresh-prices
 ```
 
 ```cron
-15 0 * * * /usr/local/bin/ledgerly-snapshot
+*/15 * * * * /usr/local/bin/ledgerly-refresh
 ```
 
-The endpoint returns `{ "ok": true }` with a summary. If `CRON_SECRET` is unset,
-the endpoint is open and throttled to one run per minute per app instance; set
-the secret on any instance that reaches the internet.
+Every run refreshes live crypto prices, records the daily snapshot, and sends
+Web Push / Telegram alerts for moves beyond the threshold. The daily
+`/api/cron/daily-snapshot` endpoint remains for existing schedules and does the
+same thing.
+
+The response is a summary such as
+`{ "ok": true, "refreshedCrypto": 3, "priceMoves": 1, "alertsSent": 1 }`.
+Alerts are deduplicated per asset, direction, and day, so a 15-minute schedule
+does not repeat messages. If `CRON_SECRET` is unset, the endpoints are open and
+throttled to one run per minute per app instance; set the secret on any instance
+that reaches the internet.
+
+A systemd timer works too:
+
+```ini
+# /etc/systemd/system/ledgerly-refresh.timer
+[Unit]
+Description=Refresh Ledgerly prices every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Unit=ledgerly-refresh.service
+
+[Install]
+WantedBy=timers.target
+```
+
+```ini
+# /etc/systemd/system/ledgerly-refresh.service
+[Unit]
+Description=Ledgerly price refresh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ledgerly-refresh
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now ledgerly-refresh.timer
+```
 
 ### 8. Update
 
@@ -344,6 +510,10 @@ is not part of the database.
   environment variables centrally and disable web setup.
 - Per-instance throttling on the setup API is not a distributed rate limiter.
   Use hosting-level protection if the instance is public.
+- Alert settings and test sends are open to anyone who can reach the app. Keep
+  `TELEGRAM_BOT_TOKEN` in the environment only, restrict who can reach `/alerts`,
+  and remember that auto-generated VAPID keys live in the database (a database
+  dump lets someone impersonate your push sender, so treat backups as secrets).
 
 ## Connect a database from the web UI
 
@@ -487,7 +657,9 @@ npm run db:migrate    # applies them to DATABASE_URL
 
 Push to `main` (production) or open a PR (preview deployment — give Preview
 its own branch database / `DATABASE_URL`, e.g. a Neon branch, so previews
-don't write to production data). Verify after deploy:
+don't write to production data). `vercel.json` schedules the daily snapshot
+cron; add `/api/cron/refresh-prices` there (Pro, minute-level) or use the
+bundled GitHub Actions workflow for more frequent refreshes. Verify after deploy:
 
 ```
 https://<your-app>.vercel.app/api/health   →  { "ok": true }
@@ -511,7 +683,7 @@ vercel --prod
 | `npm run start`     | Run the production build               |
 | `npm run lint`      | ESLint                                 |
 | `npm run typecheck` | `tsc --noEmit`                         |
-| `npm test` | Database recommendations, URL validation, protected setup API tests (mocked PostgreSQL), and backup format validation tests |
+| `npm test` | Database recommendations, URL validation, protected setup API tests (mocked PostgreSQL), backup format validation, crypto-search fallback, and alert rules/Telegram formatting tests |
 | `npm run db:push`   | Push schema to `DATABASE_URL`          |
 | `npm run db:generate` / `db:migrate` | Generate / apply SQL migrations |
 | `npm run db:studio` | Drizzle Studio                         |
@@ -529,6 +701,12 @@ vercel --prod
   every write.
 - Currency formatting lives in `src/lib/format.ts` and is USD-only by design; all
   monetary fields in PostgreSQL are plain `double precision` amounts.
+- Web Push uses the `web-push` library with VAPID keys from the environment or
+  `app_settings`. `public/sw.js` is a minimal service worker that renders push
+  payloads and focuses the matching page when a notification is clicked. It is
+  registered by the alerts page, so notifications arrive even when the tab is
+  backgrounded (a fully closed browser still depends on the browser/OS push
+  service, which is outside the app’s control).
 
 ### Crypto search providers
 

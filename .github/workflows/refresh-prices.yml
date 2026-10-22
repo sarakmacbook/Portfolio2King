@@ -1,0 +1,30 @@
+name: Refresh crypto prices
+
+# Background refresh + alerts without a self-hosted scheduler.
+# Enable it by setting:
+#   Repository variable  APP_URL      e.g. https://ledgerly.example.com
+#   Repository secret    CRON_SECRET  the same value configured on the server
+# Scheduled workflows only run from the repository's default branch.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: refresh-prices
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: vars.APP_URL != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger /api/cron/refresh-prices
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -o pipefail
+          curl -fsS --max-time 90 --retry 2 --retry-delay 5 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${APP_URL%/}/api/cron/refresh-prices"
