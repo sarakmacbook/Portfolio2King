@@ -1,10 +1,27 @@
 "use server";
 
 import { db } from "@/db";
-import { ASSET_TYPES, CRYPTO_CATEGORIES, TX_KINDS, assets, transactions, type AssetType, type CryptoCategory, type TxKind } from "@/db/schema";
+import {
+  ASSET_TYPES,
+  CRYPTO_CATEGORIES,
+  TX_KINDS,
+  assets,
+  transactions,
+  type AssetType,
+  type CryptoCategory,
+  type TxKind,
+} from "@/db/schema";
 import { kindsFor } from "@/lib/format";
-import { fetchMarketPrice, PRICE_PROVIDERS } from "@/lib/market-prices";
-import { ensureSchema, getAssetTransactions, recomputeAsset, recordSnapshot, replay, today } from "@/lib/portfolio";
+import {
+  ensureSchema,
+  getAssetTransactions,
+  recomputeAsset,
+  recordAssetPriceSnapshot,
+  recordSnapshot,
+  replay,
+  runDailyPriceSnapshot,
+  today,
+} from "@/lib/portfolio";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -75,7 +92,8 @@ export async function createAsset(_prev: ActionState, fd: FormData): Promise<Act
     const name = str(fd, "name");
     const symbol = str(fd, "symbol").toUpperCase();
     const requestedCategory = str(fd, "cryptoCategory") as CryptoCategory;
-    const cryptoCategory: CryptoCategory = type === "crypto" && CRYPTO_CATEGORIES.includes(requestedCategory) ? requestedCategory : "volatile";
+    const cryptoCategory: CryptoCategory =
+      type === "crypto" && CRYPTO_CATEGORIES.includes(requestedCategory) ? requestedCategory : "volatile";
     if (!name && !symbol) throw new Error("Name or symbol is required");
     const quantity = num(fd, "quantity");
     const isCash = type === "cash";
@@ -116,6 +134,9 @@ export async function createAsset(_prev: ActionState, fd: FormData): Promise<Act
           throw e;
         }
       }
+      if (!isCash && (avgCost || currentPrice) > 0) {
+        await recordAssetPriceSnapshot(newId, date, avgCost || currentPrice, false);
+      }
     }
     await recordSnapshot();
   } catch (e) {
@@ -134,9 +155,10 @@ export async function updateAsset(_prev: ActionState, fd: FormData): Promise<Act
     const symbol = str(fd, "symbol").toUpperCase();
     if (!name && !symbol) throw new Error("Name or symbol is required");
     const requestedCategory = str(fd, "cryptoCategory") as CryptoCategory;
-    const cryptoCategory = asset.type === "crypto" && CRYPTO_CATEGORIES.includes(requestedCategory)
-      ? requestedCategory
-      : asset.cryptoCategory;
+    const cryptoCategory =
+      asset.type === "crypto" && CRYPTO_CATEGORIES.includes(requestedCategory)
+        ? requestedCategory
+        : asset.cryptoCategory;
     await db
       .update(assets)
       .set({ name: name || symbol, symbol, cryptoCategory, notes: str(fd, "notes") })
@@ -189,40 +211,34 @@ export async function bulkUpdatePrices(_prev: ActionState, fd: FormData): Promis
 
 export async function autoRefreshCryptoPrices(_prev: ActionState): Promise<ActionState> {
   try {
-    await ensureSchema();
-    const cryptoAssets = (await db.select().from(assets)).filter((asset) => asset.type === "crypto" && asset.symbol.trim());
-    if (!cryptoAssets.length) throw new Error("Add a crypto holding with a symbol first.");
-
-    const results = await Promise.all(
-      cryptoAssets.map(async (asset) => {
-        try {
-          // Ask all supported CEX/DEX feeds together; the first valid quote wins.
-          const price = await Promise.any(
-            PRICE_PROVIDERS.map((provider) => fetchMarketPrice(provider, asset.symbol, "USDT")),
-          );
-          return { asset, price };
-        } catch {
-          return { asset, price: null };
-        }
-      }),
-    );
-
-    const found = results.filter((result): result is { asset: (typeof cryptoAssets)[number]; price: number } => result.price !== null);
-    if (!found.length) throw new Error("No exchange returned a price. Check your asset symbols and try again.");
-    const updatedAt = new Date();
-    for (const { asset, price } of found) {
-      await db.update(assets).set({ currentPrice: price, priceUpdatedAt: updatedAt }).where(eq(assets.id, asset.id));
+    const summary = await runDailyPriceSnapshot({ onlyStaleCrypto: false });
+    if (!summary.totalCrypto) throw new Error("Add a crypto holding with a symbol first.");
+    if (!summary.refreshedCrypto) {
+      throw new Error("No exchange returned a price. Check your asset symbols and try again.");
     }
-    await recordSnapshot();
     refresh();
-    const missing = cryptoAssets.length - found.length;
+    const missing = summary.totalCrypto - summary.refreshedCrypto;
     return {
       ok: true,
-      message: `Refreshed ${found.length} crypto price${found.length === 1 ? "" : "s"}${missing ? ` · ${missing} unavailable` : ""}`,
+      message: `Refreshed ${summary.refreshedCrypto} crypto price${summary.refreshedCrypto === 1 ? "" : "s"} · daily snapshot saved${missing ? ` · ${missing} unavailable` : ""}`,
       ts: Date.now(),
     };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Failed to refresh live prices", ts: Date.now() };
+  }
+}
+
+/**
+ * Silent once-per-day live refresh triggered automatically when viewing the app
+ * on a new calendar day with stale previous-day prices.
+ */
+export async function ensureDailyLiveSnapshot(): Promise<{ refreshed: number; date: string }> {
+  try {
+    const summary = await runDailyPriceSnapshot({ onlyStaleCrypto: true });
+    if (summary.refreshedCrypto > 0) refresh();
+    return { refreshed: summary.refreshedCrypto, date: summary.date };
+  } catch {
+    return { refreshed: 0, date: today() };
   }
 }
 
@@ -256,6 +272,9 @@ export async function addTransaction(_prev: ActionState, fd: FormData): Promise<
     await recomputeAsset(assetId);
     if (kind === "buy" && asset.currentPrice === 0) {
       await db.update(assets).set({ currentPrice: price }).where(eq(assets.id, assetId));
+    }
+    if (!isCashLike && price > 0) {
+      await recordAssetPriceSnapshot(assetId, date, price, false);
     }
     await recordSnapshot();
   } catch (e) {

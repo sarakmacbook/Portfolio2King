@@ -6,11 +6,23 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { assets } from "@/db/schema";
 import { deleteAsset, deleteTransaction } from "@/app/actions";
+import AutoDailySnapshot from "@/components/AutoDailySnapshot";
 import { EditAssetButton, PriceForm, TransactionForm } from "@/components/AssetForms";
-import { ConfirmSubmit } from "@/components/ui";
 import CryptoLogo from "@/components/CryptoLogo";
+import PriceHistorySection from "@/components/PriceHistorySection";
+import { ConfirmSubmit } from "@/components/ui";
 import { KIND_META, TYPE_META, fmtDate, money, pct, pnlColor, qty } from "@/lib/format";
-import { assetCost, assetValue, ensureSchema, getAllAssets, getAssetTransactions } from "@/lib/portfolio";
+import {
+  assetCost,
+  assetValue,
+  ensureSchema,
+  getAllAssets,
+  getAssetPriceSnapshots,
+  getAssetTransactions,
+  localDateString,
+  today,
+} from "@/lib/portfolio";
+import { buildAssetPriceSeries, latestDailyPriceChange } from "@/lib/price-history";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +35,15 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   const [asset] = await db.select().from(assets).where(eq(assets.id, id));
   if (!asset) notFound();
 
-  const [txs, all] = await Promise.all([getAssetTransactions(id), getAllAssets()]);
+  const all = await getAllAssets();
+  const [txs, priceSnaps] = await Promise.all([
+    getAssetTransactions(id),
+    getAssetPriceSnapshots(id),
+  ]);
+  const t = today();
+  const staleCrypto = all.some(
+    (a) => a.type === "crypto" && a.symbol.trim() !== "" && localDateString(a.priceUpdatedAt) < t,
+  );
   const cashAccounts = all
     .filter((a) => a.type === "cash" && a.id !== id)
     .map((a) => ({ id: a.id, name: a.name, quantity: a.quantity }));
@@ -34,9 +54,12 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   const cost = assetCost(asset);
   const pnl = value - cost;
   const meta = TYPE_META[asset.type];
+  const priceSeries = isCash ? [] : buildAssetPriceSeries(priceSnaps, asset.currentPrice, t);
+  const dailyChange = latestDailyPriceChange(priceSeries);
 
   return (
     <div className="space-y-6">
+      <AutoDailySnapshot stale={staleCrypto} currentDate={t} />
       <Link href="/" className="text-sm font-medium text-slate-500 hover:text-slate-800">
         ← Back to dashboard
       </Link>
@@ -67,7 +90,16 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           </div>
         </div>
         <div className="flex gap-2">
-          <EditAssetButton asset={{ id: asset.id, name: asset.name, symbol: asset.symbol, notes: asset.notes, type: asset.type, cryptoCategory: asset.cryptoCategory }} />
+          <EditAssetButton
+            asset={{
+              id: asset.id,
+              name: asset.name,
+              symbol: asset.symbol,
+              notes: asset.notes,
+              type: asset.type,
+              cryptoCategory: asset.cryptoCategory,
+            }}
+          />
           <form action={deleteAsset}>
             <input type="hidden" name="id" value={asset.id} />
             <ConfirmSubmit message={`Delete "${asset.name}" and all of its transactions? This cannot be undone.`}>
@@ -114,8 +146,16 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                   updated {asset.priceUpdatedAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                 </span>
               </div>
-              <p className="mb-3 text-2xl font-semibold tabular-nums">{money(asset.currentPrice)}</p>
-              <PriceForm assetId={asset.id} currentPrice={asset.currentPrice} />
+              <p className="text-2xl font-semibold tabular-nums">{money(asset.currentPrice)}</p>
+              {dailyChange && (
+                <p className={`mt-1 text-xs font-medium tabular-nums ${pnlColor(dailyChange.change)}`}>
+                  {money(dailyChange.change, { sign: true })} ({pct(dailyChange.changePct)}) since{" "}
+                  {fmtDate(dailyChange.prevDate)}
+                </p>
+              )}
+              <div className="mt-3">
+                <PriceForm assetId={asset.id} currentPrice={asset.currentPrice} />
+              </div>
             </section>
           )}
           <section className="card p-5">
@@ -136,69 +176,81 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           )}
         </div>
 
-        <section className="card overflow-hidden lg:col-span-2">
-          <h2 className="px-5 pt-5 font-semibold">Transaction history</h2>
-          <div className="overflow-x-auto">
-            <table className="mt-3 w-full min-w-[560px] text-sm">
-              <thead className="border-y border-slate-100 bg-slate-50/60 text-left text-xs uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-5 py-2.5 font-medium">Date</th>
-                  <th className="px-3 py-2.5 font-medium">Type</th>
-                  <th className="px-3 py-2.5 text-right font-medium">{isCash ? "Amount" : "Qty"}</th>
-                  {!isCash && <th className="px-3 py-2.5 text-right font-medium">Price</th>}
-                  <th className="px-3 py-2.5 text-right font-medium">Total</th>
-                  <th className="px-5 py-2.5" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {[...txs].reverse().map((t) => {
-                  const income = t.kind === "dividend";
-                  return (
-                    <tr key={t.id} className="group">
-                      <td className="whitespace-nowrap px-5 py-3 text-slate-600">
-                        {fmtDate(t.date)}
-                        {t.note && <div className="max-w-[180px] truncate text-xs text-slate-400">{t.note}</div>}
-                      </td>
-                      <td className="px-3 py-3">
-                        <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${KIND_META[t.kind].badge}`}>
-                          {KIND_META[t.kind].label}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums">
-                        {isCash || income ? money(t.quantity) : qty(t.quantity)}
-                      </td>
-                      {!isCash && (
-                        <td className="px-3 py-3 text-right tabular-nums text-slate-600">{income ? "—" : money(t.price)}</td>
-                      )}
-                      <td className="px-3 py-3 text-right font-medium tabular-nums">
-                        {money(t.quantity * t.price)}
-                        {t.fee > 0 && <div className="text-xs font-normal text-slate-400">fee {money(t.fee)}</div>}
-                      </td>
-                      <td className="px-5 py-3 text-right">
-                        <form action={deleteTransaction}>
-                          <input type="hidden" name="id" value={t.id} />
-                          <ConfirmSubmit
-                            message="Delete this transaction? Holdings will be recalculated. (Linked cash entries are not removed automatically.)"
-                            className="rounded-lg px-2 py-1 text-xs text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100"
-                          >
-                            Delete
-                          </ConfirmSubmit>
-                        </form>
+        <div className="space-y-6 lg:col-span-2">
+          {!isCash && (
+            <section className="card p-5">
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="font-semibold">Price history</h2>
+                <span className="text-xs text-slate-400">Daily snapshot prices</span>
+              </div>
+              <PriceHistorySection points={priceSeries} avgCost={asset.avgCost} />
+            </section>
+          )}
+
+          <section className="card overflow-hidden">
+            <h2 className="px-5 pt-5 font-semibold">Transaction history</h2>
+            <div className="overflow-x-auto">
+              <table className="mt-3 w-full min-w-[560px] text-sm">
+                <thead className="border-y border-slate-100 bg-slate-50/60 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-5 py-2.5 font-medium">Date</th>
+                    <th className="px-3 py-2.5 font-medium">Type</th>
+                    <th className="px-3 py-2.5 text-right font-medium">{isCash ? "Amount" : "Qty"}</th>
+                    {!isCash && <th className="px-3 py-2.5 text-right font-medium">Price</th>}
+                    <th className="px-3 py-2.5 text-right font-medium">Total</th>
+                    <th className="px-5 py-2.5" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {[...txs].reverse().map((t) => {
+                    const income = t.kind === "dividend";
+                    return (
+                      <tr key={t.id} className="group">
+                        <td className="whitespace-nowrap px-5 py-3 text-slate-600">
+                          {fmtDate(t.date)}
+                          {t.note && <div className="max-w-[180px] truncate text-xs text-slate-400">{t.note}</div>}
+                        </td>
+                        <td className="px-3 py-3">
+                          <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${KIND_META[t.kind].badge}`}>
+                            {KIND_META[t.kind].label}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-right tabular-nums">
+                          {isCash || income ? money(t.quantity) : qty(t.quantity)}
+                        </td>
+                        {!isCash && (
+                          <td className="px-3 py-3 text-right tabular-nums text-slate-600">{income ? "—" : money(t.price)}</td>
+                        )}
+                        <td className="px-3 py-3 text-right font-medium tabular-nums">
+                          {money(t.quantity * t.price)}
+                          {t.fee > 0 && <div className="text-xs font-normal text-slate-400">fee {money(t.fee)}</div>}
+                        </td>
+                        <td className="px-5 py-3 text-right">
+                          <form action={deleteTransaction}>
+                            <input type="hidden" name="id" value={t.id} />
+                            <ConfirmSubmit
+                              message="Delete this transaction? Holdings will be recalculated. (Linked cash entries are not removed automatically.)"
+                              className="rounded-lg px-2 py-1 text-xs text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100"
+                            >
+                              Delete
+                            </ConfirmSubmit>
+                          </form>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {txs.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-5 py-12 text-center text-slate-400">
+                        No transactions yet. Record your first one on the left.
                       </td>
                     </tr>
-                  );
-                })}
-                {txs.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="px-5 py-12 text-center text-slate-400">
-                      No transactions yet. Record your first one on the left.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
       </div>
     </div>
   );

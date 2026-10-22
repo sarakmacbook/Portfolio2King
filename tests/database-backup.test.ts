@@ -7,7 +7,7 @@ import {
   createBackup,
   parseBackup,
 } from "../src/lib/database-backup";
-import type { Asset, Snapshot, Transaction } from "../src/db/schema";
+import type { Asset, PriceSnapshot, Snapshot, Transaction } from "../src/db/schema";
 
 const now = new Date("2026-01-02T03:04:05.000Z");
 
@@ -20,24 +20,36 @@ const transactions: Transaction[] = [
   { id: 2, assetId: 2, kind: "buy", quantity: 10, price: 100, fee: 0, date: "2026-01-01", note: "Opening balance", createdAt: now },
 ];
 const snapshots: Snapshot[] = [{ date: "2026-01-01", totalValue: 2400, costBasis: 1900, cashValue: 900 }];
+const priceSnapshots: PriceSnapshot[] = [
+  { assetId: 2, date: "2026-01-01", price: 100 },
+  { assetId: 2, date: "2026-01-02", price: 150 },
+];
 
 function validBackup() {
-  return createBackup(assets, transactions, snapshots, now);
+  return createBackup(assets, transactions, snapshots, now, priceSnapshots);
 }
 
-test("createBackup emits a versioned document that parseBackup accepts", () => {
+test("createBackup emits a versioned document with daily price snapshots that parseBackup accepts", () => {
   const backup = validBackup();
   assert.equal(backup.app, "ledgerly");
   assert.equal(backup.kind, "portfolio-database-backup");
   assert.equal(backup.version, 1);
   assert.equal(backup.exportedAt, now.toISOString());
-  assert.deepEqual(backupCounts(backup), { assets: 2, transactions: 2, snapshots: 1 });
+  assert.deepEqual(backupCounts(backup), { assets: 2, transactions: 2, snapshots: 1, priceSnapshots: 2 });
   assert.match(backupFileName(now), /^ledgerly-backup-2026-01-02\.json$/);
 
   const parsed = parseBackup(JSON.parse(JSON.stringify(backup)));
   assert.equal(parsed.tables.assets[1].quantity, 10);
   assert.equal(parsed.tables.assets[1].avgCost, 100);
   assert.equal(parsed.tables.transactions[0].date, "2026-01-01");
+  assert.deepEqual(parsed.tables.priceSnapshots, priceSnapshots);
+});
+
+test("parseBackup accepts legacy v1 backups without a priceSnapshots table", () => {
+  const legacy = JSON.parse(JSON.stringify(validBackup()));
+  delete legacy.tables.priceSnapshots;
+  const parsed = parseBackup(legacy);
+  assert.deepEqual(parsed.tables.priceSnapshots, []);
 });
 
 test("parseBackup recomputes derived balances and normalises cash price", () => {
@@ -70,6 +82,14 @@ test("parseBackup rejects foreign, future, corrupt, and inconsistent files", () 
   const dangling = validBackup();
   dangling.tables.transactions[0].assetId = 777;
   assert.throws(() => parseBackup(dangling), /not in the backup/);
+
+  const danglingPrice = validBackup();
+  danglingPrice.tables.priceSnapshots.push({ assetId: 999, date: "2026-01-02", price: 150 });
+  assert.throws(() => parseBackup(danglingPrice), /not in the backup/);
+
+  const duplicatePrice = validBackup();
+  duplicatePrice.tables.priceSnapshots.push({ assetId: 2, date: "2026-01-02", price: 155 });
+  assert.throws(() => parseBackup(duplicatePrice), /more than once/);
 
   const badKind = validBackup();
   (badKind.tables.transactions[0] as { kind: string }).kind = "short";

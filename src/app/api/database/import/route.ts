@@ -66,8 +66,8 @@ export async function POST(request: Request) {
       ...summary,
       message:
         mode === "replace"
-          ? `Database restored: ${summary.assets} assets, ${summary.transactions} transactions, ${summary.snapshots} snapshots. Previous data was replaced.`
-          : `Import merged: ${summary.assets} assets, ${summary.transactions} transactions, ${summary.snapshots} snapshots added.`,
+          ? `Database restored: ${summary.assets} assets, ${summary.transactions} transactions, ${summary.snapshots} portfolio snapshots, ${summary.priceSnapshots} daily price snapshots. Previous data was replaced.`
+          : `Import merged: ${summary.assets} assets, ${summary.transactions} transactions, ${summary.snapshots} portfolio snapshots, ${summary.priceSnapshots} daily price snapshots added.`,
     });
   } catch {
     // The import runs in one transaction, so the database is unchanged.

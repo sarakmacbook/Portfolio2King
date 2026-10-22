@@ -1,11 +1,30 @@
 import { db } from "@/db";
-import { assets, snapshots, transactions, type Asset, type AssetType, type Transaction } from "@/db/schema";
-import { asc, desc, eq, sql } from "drizzle-orm";
+import {
+  assets,
+  priceSnapshots,
+  snapshots,
+  transactions,
+  type Asset,
+  type AssetType,
+  type PriceSnapshot,
+  type Transaction,
+} from "@/db/schema";
+import { fetchMarketPrice, PRICE_PROVIDERS } from "@/lib/market-prices";
+import { asc, desc, eq, inArray, sql } from "drizzle-orm";
 
 let schemaReady: Promise<void> | null = null;
 let schemaDatabaseUrl: string | undefined;
 
-/** Safety net so the app works even on a fresh database without drizzle-kit push. */
+export function localDateString(d: Date) {
+  const tz = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - tz).toISOString().slice(0, 10);
+}
+
+export function today() {
+  return localDateString(new Date());
+}
+
+/** Safety net so the app works even on a fresh or existing database without manual drizzle-kit push. */
 export function ensureSchema() {
   const url = process.env.DATABASE_URL || process.env.POSTGRES_URL;
   if (url !== schemaDatabaseUrl) {
@@ -49,6 +68,50 @@ export function ensureSchema() {
           cost_basis double precision NOT NULL,
           cash_value double precision NOT NULL
         )`);
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS price_snapshots (
+          asset_id integer NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+          date date NOT NULL,
+          price double precision NOT NULL,
+          PRIMARY KEY (asset_id, date)
+        )`);
+
+      // One-time backfill for pre-existing non-cash assets that predate price_snapshots.
+      const unseeded = await db.execute<{ id: number }>(sql`
+        SELECT a.id
+        FROM assets a
+        WHERE a.type <> 'cash'
+          AND a.current_price > 0
+          AND NOT EXISTS (SELECT 1 FROM price_snapshots ps WHERE ps.asset_id = a.id)
+      `);
+      const unseededIds = unseeded.rows.map((r) => Number(r.id)).filter((id) => Number.isInteger(id) && id > 0);
+      if (unseededIds.length > 0) {
+        const d = today();
+        await db.execute(sql`
+          INSERT INTO price_snapshots (asset_id, date, price)
+          SELECT id, (price_updated_at AT TIME ZONE 'UTC')::date, current_price
+          FROM assets
+          WHERE ${inArray(assets.id, unseededIds)} AND current_price > 0
+          ON CONFLICT (asset_id, date) DO UPDATE SET price = EXCLUDED.price
+        `);
+        await db.execute(sql`
+          INSERT INTO price_snapshots (asset_id, date, price)
+          SELECT id, ${d}::date, current_price
+          FROM assets
+          WHERE ${inArray(assets.id, unseededIds)} AND current_price > 0
+          ON CONFLICT (asset_id, date) DO UPDATE SET price = EXCLUDED.price
+        `);
+        await db.execute(sql`
+          INSERT INTO price_snapshots (asset_id, date, price)
+          SELECT DISTINCT ON (asset_id, date) asset_id, date, price
+          FROM transactions
+          WHERE ${inArray(transactions.assetId, unseededIds)}
+            AND kind IN ('buy', 'sell')
+            AND price > 0
+          ORDER BY asset_id, date, id DESC
+          ON CONFLICT (asset_id, date) DO NOTHING
+        `);
+      }
     })().catch((err) => {
       schemaReady = null;
       throw err;
@@ -185,33 +248,161 @@ export function computeTotals(list: Asset[]): Totals {
   };
 }
 
-export function today() {
-  const d = new Date();
-  const tz = d.getTimezoneOffset() * 60000;
-  return new Date(d.getTime() - tz).toISOString().slice(0, 10);
+export async function recordAssetPriceSnapshot(assetId: number, snapshotDate: string, price: number, overwrite = true) {
+  if (!Number.isFinite(price) || price <= 0) return;
+  if (overwrite) {
+    await db
+      .insert(priceSnapshots)
+      .values({ assetId, date: snapshotDate, price })
+      .onConflictDoUpdate({
+        target: [priceSnapshots.assetId, priceSnapshots.date],
+        set: { price },
+      });
+    return;
+  }
+  await db
+    .insert(priceSnapshots)
+    .values({ assetId, date: snapshotDate, price })
+    .onConflictDoNothing({ target: [priceSnapshots.assetId, priceSnapshots.date] });
 }
 
-export async function recordSnapshot() {
+export async function recordSnapshot(snapshotDate = today()) {
+  await ensureSchema();
   const list = await db.select().from(assets);
   const t = computeTotals(list);
-  const d = today();
   await db
     .insert(snapshots)
-    .values({ date: d, totalValue: t.totalValue, costBasis: t.costBasis, cashValue: t.cashValue })
+    .values({ date: snapshotDate, totalValue: t.totalValue, costBasis: t.costBasis, cashValue: t.cashValue })
     .onConflictDoUpdate({
       target: snapshots.date,
       set: { totalValue: t.totalValue, costBasis: t.costBasis, cashValue: t.cashValue },
     });
+
+  const priced = list.filter((a) => a.type !== "cash" && a.currentPrice > 0);
+  if (priced.length > 0) {
+    await db
+      .insert(priceSnapshots)
+      .values(priced.map((a) => ({ assetId: a.id, date: snapshotDate, price: a.currentPrice })))
+      .onConflictDoUpdate({
+        target: [priceSnapshots.assetId, priceSnapshots.date],
+        set: { price: sql`excluded.price` },
+      });
+  }
+}
+
+/**
+ * Ensures today's portfolio snapshot and per-asset price snapshots exist on read
+ * without overwriting snapshots already captured today.
+ */
+export async function ensureDailySnapshot(snapshotDate = today()) {
+  await ensureSchema();
+  const list = await db.select().from(assets).orderBy(asc(assets.type), asc(assets.name));
+  if (list.length > 0) {
+    const t = computeTotals(list);
+    await db
+      .insert(snapshots)
+      .values({ date: snapshotDate, totalValue: t.totalValue, costBasis: t.costBasis, cashValue: t.cashValue })
+      .onConflictDoNothing({ target: snapshots.date });
+
+    const priced = list.filter((a) => a.type !== "cash" && a.currentPrice > 0);
+    if (priced.length > 0) {
+      await db
+        .insert(priceSnapshots)
+        .values(priced.map((a) => ({ assetId: a.id, date: snapshotDate, price: a.currentPrice })))
+        .onConflictDoNothing({ target: [priceSnapshots.assetId, priceSnapshots.date] });
+    }
+  }
+  return list;
+}
+
+export type DailySnapshotRunResult = {
+  date: string;
+  totalAssets: number;
+  totalCrypto: number;
+  attemptedCrypto: number;
+  refreshedCrypto: number;
+  snapshottedAssets: number;
+};
+
+/**
+ * Fetches fresh exchange prices for crypto holdings and records daily price & portfolio snapshots.
+ * Shared by manual one-click refresh, background daily check, and the scheduled daily cron job.
+ */
+export async function runDailyPriceSnapshot(options: { onlyStaleCrypto?: boolean } = {}): Promise<DailySnapshotRunResult> {
+  await ensureSchema();
+  const list = await db.select().from(assets);
+  const d = today();
+  const allCrypto = list.filter((asset) => asset.type === "crypto" && asset.symbol.trim() !== "");
+  const targets = options.onlyStaleCrypto
+    ? allCrypto.filter((asset) => localDateString(asset.priceUpdatedAt) < d)
+    : allCrypto;
+
+  let refreshedCrypto = 0;
+  if (targets.length > 0) {
+    const results = await Promise.all(
+      targets.map(async (asset) => {
+        try {
+          const price = await Promise.any(
+            PRICE_PROVIDERS.map((provider) => fetchMarketPrice(provider, asset.symbol, "USDT")),
+          );
+          return { asset, price };
+        } catch {
+          return { asset, price: null };
+        }
+      }),
+    );
+
+    const found = results.filter(
+      (result): result is { asset: (typeof targets)[number]; price: number } => result.price !== null,
+    );
+    const updatedAt = new Date();
+    for (const { asset, price } of found) {
+      await db.update(assets).set({ currentPrice: price, priceUpdatedAt: updatedAt }).where(eq(assets.id, asset.id));
+    }
+    refreshedCrypto = found.length;
+  }
+
+  if (list.length > 0) {
+    await recordSnapshot(d);
+  }
+
+  const latestList = await db.select().from(assets);
+  const snapshottedAssets = latestList.filter((a) => a.type !== "cash" && a.currentPrice > 0).length;
+
+  return {
+    date: d,
+    totalAssets: latestList.length,
+    totalCrypto: allCrypto.length,
+    attemptedCrypto: targets.length,
+    refreshedCrypto,
+    snapshottedAssets,
+  };
 }
 
 export async function getAllAssets() {
-  await ensureSchema();
-  return db.select().from(assets).orderBy(asc(assets.type), asc(assets.name));
+  return ensureDailySnapshot();
 }
 
 export async function getSnapshots() {
   await ensureSchema();
   return db.select().from(snapshots).orderBy(asc(snapshots.date));
+}
+
+export async function getAssetPriceSnapshots(assetId: number): Promise<PriceSnapshot[]> {
+  await ensureSchema();
+  return db
+    .select()
+    .from(priceSnapshots)
+    .where(eq(priceSnapshots.assetId, assetId))
+    .orderBy(asc(priceSnapshots.date));
+}
+
+export async function getAllPriceSnapshots(): Promise<PriceSnapshot[]> {
+  await ensureSchema();
+  return db
+    .select()
+    .from(priceSnapshots)
+    .orderBy(asc(priceSnapshots.assetId), asc(priceSnapshots.date));
 }
 
 export async function getRecentActivity(limit = 100) {
