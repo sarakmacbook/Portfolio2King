@@ -26,7 +26,6 @@ export function TransactionForm({
   available: number;
   cashAccounts: CashAccount[];
 }) {
-  const [state, action] = useActionState<ActionState, FormData>(addTransaction, {});
   const kinds = kindsFor(assetType);
   const [kind, setKind] = useState<TxKind>(kinds[0]);
   const [q, setQ] = useState("");
@@ -34,23 +33,23 @@ export function TransactionForm({
   const [fee, setFee] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
   const audioRef = useRef<AudioContext | null>(null);
-  const submittedKindRef = useRef<TxKind | null>(null);
 
-  useEffect(() => {
-    if (state.ok) {
+  const [state, action] = useActionState<ActionState, FormData>(async (prev, fd) => {
+    const submittedKind = fd.get("kind");
+    const result = await addTransaction(prev, fd);
+    if (result.ok) {
       setQ("");
       setFee("");
       const note = formRef.current?.querySelector<HTMLInputElement>("input[name=note]");
       if (note) note.value = "";
-      if (submittedKindRef.current === "deposit" && audioRef.current) {
+      if (submittedKind === "deposit" && audioRef.current) {
         void audioRef.current.resume().then(() => playMoneyChime(audioRef.current!));
       }
-      submittedKindRef.current = null;
     }
-  }, [state.ts, state.ok]);
+    return result;
+  }, {});
 
   function prepareTransactionFeedback() {
-    submittedKindRef.current = kind;
     if (kind !== "deposit") return;
 
     // Creating/resuming the context during the submit gesture keeps sound working on iOS.

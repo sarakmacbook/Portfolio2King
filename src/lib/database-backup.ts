@@ -1,4 +1,15 @@
-import { ASSET_TYPES, CRYPTO_CATEGORIES, TX_KINDS, type Asset, type AssetType, type CryptoCategory, type Snapshot, type Transaction, type TxKind } from "@/db/schema";
+import {
+  ASSET_TYPES,
+  CRYPTO_CATEGORIES,
+  TX_KINDS,
+  type Asset,
+  type AssetType,
+  type CryptoCategory,
+  type PriceSnapshot,
+  type Snapshot,
+  type Transaction,
+  type TxKind,
+} from "@/db/schema";
 import { replay } from "@/lib/portfolio";
 
 /**
@@ -10,7 +21,7 @@ import { replay } from "@/lib/portfolio";
  *
  *   { app: "ledgerly", kind: "portfolio-database-backup", version: 1,
  *     exportedAt: "<ISO timestamp>",
- *     tables: { assets: [...], transactions: [...], snapshots: [...] } }
+ *     tables: { assets: [...], transactions: [...], snapshots: [...], priceSnapshots: [...] } }
  */
 
 export const BACKUP_APP = "ledgerly";
@@ -19,7 +30,12 @@ export const BACKUP_VERSION = 1;
 
 /** Hard limits so a hostile / corrupt file cannot exhaust memory or the DB. */
 export const MAX_BACKUP_BYTES = 10 * 1024 * 1024; // 10 MB
-export const MAX_BACKUP_ROWS = { assets: 10_000, transactions: 100_000, snapshots: 20_000 } as const;
+export const MAX_BACKUP_ROWS = {
+  assets: 10_000,
+  transactions: 100_000,
+  snapshots: 20_000,
+  priceSnapshots: 500_000,
+} as const;
 
 export type BackupAsset = Omit<Asset, "priceUpdatedAt" | "createdAt"> & {
   priceUpdatedAt: string;
@@ -27,6 +43,7 @@ export type BackupAsset = Omit<Asset, "priceUpdatedAt" | "createdAt"> & {
 };
 export type BackupTransaction = Omit<Transaction, "createdAt"> & { createdAt: string };
 export type BackupSnapshot = Snapshot;
+export type BackupPriceSnapshot = PriceSnapshot;
 
 export type PortfolioBackup = {
   app: typeof BACKUP_APP;
@@ -37,6 +54,7 @@ export type PortfolioBackup = {
     assets: BackupAsset[];
     transactions: BackupTransaction[];
     snapshots: BackupSnapshot[];
+    priceSnapshots: BackupPriceSnapshot[];
   };
 };
 
@@ -66,6 +84,7 @@ export function createBackup(
   transactions: Transaction[],
   snapshots: Snapshot[],
   exportedAt = new Date(),
+  priceSnapshots: PriceSnapshot[] = [],
 ): PortfolioBackup {
   return {
     app: BACKUP_APP,
@@ -84,6 +103,11 @@ export function createBackup(
         createdAt: toIsoTimestamp(t.createdAt),
       })),
       snapshots: snapshots.map((s) => ({ ...s, date: toIsoDate(s.date) })),
+      priceSnapshots: priceSnapshots.map((p) => ({
+        assetId: p.assetId,
+        date: toIsoDate(p.date),
+        price: p.price,
+      })),
     },
   };
 }
@@ -225,6 +249,26 @@ export function parseBackup(input: unknown): PortfolioBackup {
     snapshotDates.add(snapshot.date);
   }
 
+  // Backward compatibility: older v1 backups may omit `priceSnapshots`.
+  const rawPriceSnapshots = input.tables.priceSnapshots === undefined ? [] : rows(input.tables.priceSnapshots, "priceSnapshots");
+  const priceSnapshots: BackupPriceSnapshot[] = rawPriceSnapshots.map((row) => {
+    const assetId = idField(row, "assetId");
+    if (!assetIds.has(assetId)) fail(`Price snapshot references asset id ${assetId}, which is not in the backup.`);
+    return {
+      assetId,
+      date: dateField(row, "date"),
+      price: numberField(row, "price", { min: 0, exclusiveMin: true }),
+    };
+  });
+  const priceSnapshotKeys = new Set<string>();
+  for (const ps of priceSnapshots) {
+    const key = `${ps.assetId}:${ps.date}`;
+    if (priceSnapshotKeys.has(key)) {
+      fail(`Backup contains price snapshot (${ps.assetId}, ${ps.date}) more than once.`);
+    }
+    priceSnapshotKeys.add(key);
+  }
+
   // Recompute derived balances per asset and reject impossible histories.
   for (const asset of assets) {
     const own = transactions
@@ -244,7 +288,13 @@ export function parseBackup(input: unknown): PortfolioBackup {
       ? new Date(input.exportedAt).toISOString()
       : new Date(0).toISOString();
 
-  return { app: BACKUP_APP, kind: BACKUP_KIND, version: BACKUP_VERSION, exportedAt, tables: { assets, transactions, snapshots } };
+  return {
+    app: BACKUP_APP,
+    kind: BACKUP_KIND,
+    version: BACKUP_VERSION,
+    exportedAt,
+    tables: { assets, transactions, snapshots, priceSnapshots },
+  };
 }
 
 export function backupFileName(date = new Date()): string {
@@ -256,5 +306,6 @@ export function backupCounts(backup: PortfolioBackup) {
     assets: backup.tables.assets.length,
     transactions: backup.tables.transactions.length,
     snapshots: backup.tables.snapshots.length,
+    priceSnapshots: backup.tables.priceSnapshots.length,
   };
 }

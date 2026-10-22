@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useState } from "react";
 import { bulkUpdatePrices, type ActionState } from "@/app/actions";
 import type { AssetType } from "@/lib/constants";
@@ -16,6 +17,7 @@ export type PriceRow = {
   quantity: number;
   currentPrice: number;
   updated: string;
+  snapshotsCount?: number;
 };
 
 export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
@@ -118,16 +120,19 @@ export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
               return (
                 <tr key={r.id} className={changed ? "bg-indigo-50/40" : ""}>
                   <td className="px-5 py-3">
-                    <div className="flex items-center gap-2">
+                    <Link href={`/assets/${r.id}`} className="group flex items-center gap-2">
                       {r.type === "crypto" ? (
                         <CryptoLogo symbol={r.symbol} name={r.name} className="h-7 w-7 rounded-lg" />
                       ) : (
                         <span className="h-2 w-2 rounded-full" style={{ background: TYPE_META[r.type].color }} />
                       )}
-                      <span className="font-medium text-slate-900">{r.symbol || r.name}</span>
+                      <span className="font-medium text-slate-900 group-hover:text-indigo-600">{r.symbol || r.name}</span>
                       {r.symbol && <span className="truncate text-slate-500">{r.name}</span>}
+                    </Link>
+                    <div className="ml-4 text-xs text-slate-400">
+                      updated {r.updated}
+                      {r.snapshotsCount ? ` · ${r.snapshotsCount} daily snapshot${r.snapshotsCount === 1 ? "" : "s"}` : ""}
                     </div>
-                    <div className="ml-4 text-xs text-slate-400">updated {r.updated}</div>
                   </td>
                   <td className="px-3 py-3 text-right tabular-nums text-slate-600">{qty(r.quantity)}</td>
                   <td className="px-3 py-3 text-right tabular-nums text-slate-900">{money(r.currentPrice)}</td>

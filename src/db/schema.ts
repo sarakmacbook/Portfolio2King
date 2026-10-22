@@ -3,6 +3,7 @@ import {
   doublePrecision,
   integer,
   pgTable,
+  primaryKey,
   serial,
   text,
   timestamp,
@@ -52,6 +53,19 @@ export const snapshots = pgTable("snapshots", {
   cashValue: doublePrecision("cash_value").notNull(),
 });
 
+export const priceSnapshots = pgTable(
+  "price_snapshots",
+  {
+    assetId: integer("asset_id")
+      .notNull()
+      .references(() => assets.id, { onDelete: "cascade" }),
+    date: date("date").notNull(),
+    price: doublePrecision("price").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.assetId, table.date] })],
+);
+
 export type Asset = typeof assets.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
 export type Snapshot = typeof snapshots.$inferSelect;
+export type PriceSnapshot = typeof priceSnapshots.$inferSelect;

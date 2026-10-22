@@ -15,6 +15,7 @@ export type HoldingRow = {
   quantity: number;
   avgCost: number;
   currentPrice: number;
+  dailyChangePct?: number | null;
   value: number;
   cost: number;
   pnl: number;
@@ -152,7 +153,18 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums text-slate-700">{isCash ? "—" : qty(r.quantity)}</td>
                   <td className="px-4 py-3 text-right tabular-nums text-slate-500">{isCash ? "—" : money(r.avgCost)}</td>
-                  <td className="px-4 py-3 text-right tabular-nums text-slate-700">{isCash ? "—" : money(r.currentPrice)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-slate-700">
+                    {isCash ? (
+                      "—"
+                    ) : (
+                      <>
+                        <div>{money(r.currentPrice)}</div>
+                        {r.dailyChangePct !== null && r.dailyChangePct !== undefined && (
+                          <div className={`text-xs ${pnlColor(r.dailyChangePct)}`}>{pct(r.dailyChangePct)}</div>
+                        )}
+                      </>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-900">{money(r.value)}</td>
                   <td className={`px-4 py-3 text-right tabular-nums ${pnlColor(r.pnl)}`}>
                     {isCash ? (

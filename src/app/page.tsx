@@ -2,6 +2,7 @@ import DatabaseSetup from "@/components/DatabaseSetup";
 import { isDatabaseConfigured } from "@/db";
 import Link from "next/link";
 import AddAssetDialog from "@/components/AddAssetDialog";
+import AutoDailySnapshot from "@/components/AutoDailySnapshot";
 import { Donut, HistoryChart, type Point } from "@/components/Charts";
 import HoldingsTable, { type HoldingRow } from "@/components/HoldingsTable";
 import RefreshPricesButton from "@/components/RefreshPricesButton";
@@ -11,22 +12,44 @@ import {
   assetValue,
   computeTotals,
   getAllAssets,
+  getAllPriceSnapshots,
   getRecentActivity,
   getSnapshots,
+  localDateString,
   today,
 } from "@/lib/portfolio";
+import { buildAssetPriceSeries, latestDailyPriceChange, type PricePoint } from "@/lib/price-history";
 
 export const dynamic = "force-dynamic";
 
 export default async function Dashboard() {
   if (!isDatabaseConfigured()) return <DatabaseSetup />;
-  const [list, snaps, activity] = await Promise.all([getAllAssets(), getSnapshots(), getRecentActivity(6)]);
+  const list = await getAllAssets();
+  const [snaps, priceSnaps, activity] = await Promise.all([
+    getSnapshots(),
+    getAllPriceSnapshots(),
+    getRecentActivity(6),
+  ]);
   const totals = computeTotals(list);
+  const t = today();
+  const staleCrypto = list.some(
+    (a) => a.type === "crypto" && a.symbol.trim() !== "" && localDateString(a.priceUpdatedAt) < t,
+  );
+
+  const byAsset = new Map<number, PricePoint[]>();
+  for (const row of priceSnaps) {
+    const existing = byAsset.get(row.assetId) ?? [];
+    existing.push({ date: row.date, price: row.price });
+    byAsset.set(row.assetId, existing);
+  }
+
   const cashAccounts = list.filter((a) => a.type === "cash").map((a) => ({ id: a.id, name: a.name, quantity: a.quantity }));
 
   const rows: HoldingRow[] = list.map((a) => {
     const value = assetValue(a);
     const cost = assetCost(a);
+    const series = a.type === "cash" ? [] : buildAssetPriceSeries(byAsset.get(a.id) ?? [], a.currentPrice, t);
+    const daily = latestDailyPriceChange(series);
     return {
       id: a.id,
       type: a.type,
@@ -36,6 +59,7 @@ export default async function Dashboard() {
       quantity: a.quantity,
       avgCost: a.avgCost,
       currentPrice: a.currentPrice,
+      dailyChangePct: daily?.changePct ?? null,
       value,
       cost,
       pnl: value - cost,
@@ -45,7 +69,6 @@ export default async function Dashboard() {
   });
 
   const points: Point[] = snaps.map((s) => ({ date: s.date, value: s.totalValue, cost: s.costBasis }));
-  const t = today();
   if (list.length && (!points.length || points[points.length - 1].date !== t)) {
     points.push({ date: t, value: totals.totalValue, cost: totals.costBasis });
   }
@@ -89,6 +112,7 @@ export default async function Dashboard() {
 
   return (
     <div className="space-y-6">
+      <AutoDailySnapshot stale={staleCrypto} currentDate={t} />
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-sm font-medium text-slate-500">Total portfolio value</p>
