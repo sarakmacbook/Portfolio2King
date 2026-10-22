@@ -257,15 +257,40 @@ export function zonedTimeToUtc(date: string, minutes: number, timeZone: string):
   return new Date(second);
 }
 
+export type PortfolioSchedule = {
+  /** Local date the update belongs to (the date of the scheduled run). */
+  date: string;
+  /** Instant it was due. */
+  at: Date;
+  /** Whole minutes since it was due; 0 when the run is punctual. */
+  lateMinutes: number;
+};
+
 /**
- * True once the local clock has reached the chosen time. The first scheduled
- * refresh after that time sends the update, and the per-day dedupe key stops
- * repeats, so a late or frequent schedule still yields exactly one message.
+ * The most recent scheduled run at or before `now`.
+ *
+ * A run stays open until the next one replaces it (24 h), so a coarse scheduler
+ * — a cron that fires once a day at a fixed hour, or a laptop that was asleep —
+ * still delivers the update instead of missing the window forever. The returned
+ * `date` is the alert's dedupe key, so a caught-up send and a punctual send can
+ * never both go out for the same scheduled run.
  */
-export function isPortfolioAlertDue(now: Date, time: string, timeZone: string): boolean {
+export function portfolioScheduleFor(
+  now: Date,
+  time: string,
+  timeZone: string,
+): PortfolioSchedule | null {
   const minutes = parseAlertTimeMinutes(time);
-  if (minutes === null) return false;
-  return zonedClock(now, timeZone).minutes >= minutes;
+  if (minutes === null) return null;
+  const zone = resolveTimeZone(timeZone);
+  const clock = zonedClock(now, zone);
+  const date = clock.minutes >= minutes ? clock.date : shiftIsoDate(clock.date, -1);
+  const at = zonedTimeToUtc(date, minutes, zone);
+  return {
+    date,
+    at,
+    lateMinutes: Math.max(0, Math.round((now.getTime() - at.getTime()) / 60_000)),
+  };
 }
 
 /** Next instant the update is due (strictly after `now`), for the UI. */
