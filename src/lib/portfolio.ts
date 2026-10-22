@@ -76,6 +76,38 @@ export function ensureSchema() {
           PRIMARY KEY (asset_id, date)
         )`);
 
+      // Alerting: Web Push subscriptions, delivered alerts, and app settings.
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+          id serial PRIMARY KEY,
+          endpoint text NOT NULL UNIQUE,
+          p256dh text NOT NULL,
+          auth text NOT NULL,
+          user_agent text NOT NULL DEFAULT '',
+          created_at timestamptz NOT NULL DEFAULT now(),
+          last_seen_at timestamptz NOT NULL DEFAULT now()
+        )`);
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS alert_events (
+          id serial PRIMARY KEY,
+          dedupe_key text NOT NULL UNIQUE,
+          kind text NOT NULL,
+          asset_id integer,
+          title text NOT NULL,
+          body text NOT NULL,
+          channels text NOT NULL DEFAULT '',
+          push_sent integer NOT NULL DEFAULT 0,
+          push_failed integer NOT NULL DEFAULT 0,
+          telegram_sent integer NOT NULL DEFAULT 0,
+          created_at timestamptz NOT NULL DEFAULT now()
+        )`);
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS app_settings (
+          key text PRIMARY KEY,
+          value text NOT NULL,
+          updated_at timestamptz NOT NULL DEFAULT now()
+        )`);
+
       // One-time backfill for pre-existing non-cash assets that predate price_snapshots.
       const unseeded = await db.execute<{ id: number }>(sql`
         SELECT a.id
@@ -328,14 +360,19 @@ export type DailySnapshotRunResult = {
  * Fetches fresh exchange prices for crypto holdings and records daily price & portfolio snapshots.
  * Shared by manual one-click refresh, background daily check, and the scheduled daily cron job.
  */
-export async function runDailyPriceSnapshot(options: { onlyStaleCrypto?: boolean } = {}): Promise<DailySnapshotRunResult> {
+export async function runDailyPriceSnapshot(
+  options: { onlyStaleCrypto?: boolean; staleAfterMs?: number } = {},
+): Promise<DailySnapshotRunResult> {
   await ensureSchema();
   const list = await db.select().from(assets);
   const d = today();
   const allCrypto = list.filter((asset) => asset.type === "crypto" && asset.symbol.trim() !== "");
-  const targets = options.onlyStaleCrypto
-    ? allCrypto.filter((asset) => localDateString(asset.priceUpdatedAt) < d)
-    : allCrypto;
+  const staleBefore = options.staleAfterMs ? Date.now() - options.staleAfterMs : null;
+  const targets = staleBefore !== null
+    ? allCrypto.filter((asset) => asset.priceUpdatedAt.getTime() <= staleBefore)
+    : options.onlyStaleCrypto
+      ? allCrypto.filter((asset) => localDateString(asset.priceUpdatedAt) < d)
+      : allCrypto;
 
   let refreshedCrypto = 0;
   if (targets.length > 0) {

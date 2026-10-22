@@ -22,6 +22,7 @@ import {
   runDailyPriceSnapshot,
   today,
 } from "@/lib/portfolio";
+import { refreshPricesWithAlerts } from "@/lib/price-refresh";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -234,7 +235,9 @@ export async function autoRefreshCryptoPrices(_prev: ActionState): Promise<Actio
  */
 export async function ensureDailyLiveSnapshot(): Promise<{ refreshed: number; date: string }> {
   try {
-    const summary = await runDailyPriceSnapshot({ onlyStaleCrypto: true });
+    // Goes through the alerting path so the first refresh of a new day can also
+    // send threshold notifications instead of silently updating prices.
+    const summary = await refreshPricesWithAlerts({ onlyStaleCrypto: true });
     if (summary.refreshedCrypto > 0) refresh();
     return { refreshed: summary.refreshedCrypto, date: summary.date };
   } catch {

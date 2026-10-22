@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import BackgroundRefresh from "@/components/BackgroundRefresh";
 import Nav from "@/components/Nav";
 import ThemeToggle from "@/components/ThemeToggle";
 import "./globals.css";
@@ -43,9 +44,13 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             </div>
           </div>
         </header>
+        <BackgroundRefresh />
         <main className="mx-auto max-w-6xl px-4 py-5 sm:px-6 sm:py-8">{children}</main>
         <footer className="mx-auto max-w-6xl px-4 pb-[calc(2.5rem+env(safe-area-inset-bottom))] text-center text-xs text-slate-400 sm:px-6">
-          All values entered manually · Amounts in USD
+          All values entered manually · Amounts in USD ·{" "}
+          <Link href="/alerts" className="hover:text-slate-600 hover:underline">
+            Price alerts
+          </Link>
         </footer>
       </body>
     </html>

@@ -6,7 +6,7 @@ import {
   filterPricePointsByRange,
   latestDailyPriceChange,
 } from "../src/lib/price-history";
-import { verifyCronRequest } from "../src/app/api/cron/daily-snapshot/route";
+import { verifyCronRequest } from "../src/lib/cron";
 
 test("buildAssetPriceSeries deduplicates dates, orders ascending, and appends today's snapshot price", () => {
   const series = buildAssetPriceSeries(

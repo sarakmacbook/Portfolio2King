@@ -1,0 +1,183 @@
+import DatabaseSetup from "@/components/DatabaseSetup";
+import Link from "next/link";
+import AlertSettingsForm, { TestAlertButton } from "@/components/AlertSettings";
+import NotificationSetup from "@/components/NotificationSetup";
+import { isDatabaseConfigured } from "@/db";
+import {
+  countPushSubscriptions,
+  getAlertSettings,
+  getLastPriceRefresh,
+  getRecentAlerts,
+  getVapidConfig,
+  telegramConfigured,
+} from "@/lib/alerts";
+export const dynamic = "force-dynamic";
+
+const CURL_SNIPPET = `curl -fsS -H "Authorization: Bearer $CRON_SECRET" \
+  https://your-ledgerly.example.com/api/cron/refresh-prices`;
+
+function timeAgo(date: Date | null): string {
+  if (!date) return "never";
+  const seconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+  if (seconds < 90) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 90) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 36) return `${hours} h ago`;
+  return `${Math.round(hours / 24)} d ago`;
+}
+
+export default async function AlertsPage() {
+  if (!isDatabaseConfigured()) return <DatabaseSetup />;
+
+  const [settings, subscribers, telegram, recent, lastRefresh] = await Promise.all([
+    getAlertSettings(),
+    countPushSubscriptions(),
+    Promise.resolve(telegramConfigured()),
+    getRecentAlerts(12),
+    getLastPriceRefresh(),
+  ]);
+
+  let publicKey: string | null = null;
+  let keyError = "";
+  try {
+    publicKey = (await getVapidConfig()).publicKey;
+  } catch {
+    keyError = "Push keys could not be initialised. Check the database connection.";
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Alerts</h1>
+        <p className="mt-1 max-w-2xl text-sm text-slate-500">
+          Refresh prices in the background and get notified on this device (web clip) and in Telegram when a holding
+          moves beyond your threshold. Last price update: <strong className="text-slate-700">{timeAgo(lastRefresh)}</strong>.
+        </p>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <section className="card p-5">
+          <h2 className="text-base font-semibold text-slate-900">Browser push · web clip</h2>
+          <p className="mt-1 mb-4 text-sm text-slate-500">
+            Works in desktop browsers and in an installed Home Screen app on iOS 16.4+ and Android.
+          </p>
+          <NotificationSetup publicKey={publicKey} subscribers={subscribers} />
+          {keyError && <p className="mt-3 text-xs text-rose-600">{keyError}</p>}
+          <div className="mt-4 border-t border-slate-100 pt-4">
+            <TestAlertButton channel="push" label="Send test notification" disabled={!publicKey} />
+          </div>
+        </section>
+
+        <section className="card p-5">
+          <h2 className="text-base font-semibold text-slate-900">Telegram</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Messages are sent through the Telegram Bot API using a bot you own. Nothing else is shared.
+          </p>
+          <div className="mt-3 flex items-center gap-2 text-sm text-slate-600">
+            <span className={`inline-flex h-2 w-2 rounded-full ${telegram ? "bg-emerald-500" : "bg-slate-300"}`} />
+            {telegram ? "Bot token and chat id configured" : "Not configured"}
+          </div>
+          {!telegram && (
+            <ol className="mt-3 list-decimal space-y-1 pl-5 text-xs text-slate-500">
+              <li>
+                Create a bot with <strong>@BotFather</strong> in Telegram and copy the token.
+              </li>
+              <li>Send your new bot a message so it is allowed to reply to you.</li>
+              <li>
+                Find your chat id (e.g. <code>@userinfobot</code>), then set{" "}
+                <code>TELEGRAM_BOT_TOKEN</code> and <code>TELEGRAM_CHAT_ID</code> on the server and restart.
+              </li>
+            </ol>
+          )}
+          <div className="mt-4 border-t border-slate-100 pt-4">
+            <TestAlertButton channel="telegram" label="Send test message" disabled={!telegram} />
+          </div>
+        </section>
+      </div>
+
+      <section className="card p-5 sm:p-6">
+        <h2 className="text-base font-semibold text-slate-900">Alert rules</h2>
+        <p className="mt-1 mb-5 text-sm text-slate-500">
+          Thresholds apply to stocks and crypto. Cash is never alerted.
+        </p>
+        <AlertSettingsForm settings={settings} />
+      </section>
+
+      <section className="card p-5 sm:p-6">
+        <h2 className="text-base font-semibold text-slate-900">Refresh in the background</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          The app refreshes prices while a tab is open. To refresh on a schedule with nobody watching, call the cron
+          endpoint from your server or scheduler.
+        </p>
+
+        <div className="mt-4 space-y-4 text-sm text-slate-600">
+          <div>
+            <p className="font-medium text-slate-800">1 · Set a secret (recommended)</p>
+            <p className="mt-1 text-xs text-slate-500">
+              Add <code className="rounded bg-slate-100 px-1 py-0.5">CRON_SECRET</code> to the server environment and
+              restart. Without it the endpoint is open and throttled to one run per minute.
+            </p>
+            <pre className="mt-2 overflow-x-auto rounded-xl bg-slate-900 px-4 py-3 text-xs leading-relaxed text-slate-100">
+{`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`}
+            </pre>
+          </div>
+
+          <div>
+            <p className="font-medium text-slate-800">2 · Call the endpoint every 15 minutes</p>
+            <pre className="mt-2 overflow-x-auto rounded-xl bg-slate-900 px-4 py-3 text-xs leading-relaxed text-slate-100">{CURL_SNIPPET}</pre>
+            <p className="mt-2 text-xs text-slate-500">
+              Host cron: <code>*/15 * * * * /usr/local/bin/ledgerly-refresh</code>. systemd timer and GitHub Actions
+              examples are in the README. On Vercel, schedule <code>/api/cron/refresh-prices</code> in{" "}
+              <code>vercel.json</code> (minute-level crons need a Pro plan; the bundled daily cron also sends alerts).
+            </p>
+          </div>
+
+          <div>
+            <p className="font-medium text-slate-800">3 · Verify</p>
+            <p className="mt-1 text-xs text-slate-500">
+              A healthy response looks like{" "}
+              <code className="rounded bg-slate-100 px-1 py-0.5">
+                {`{ "ok": true, "refreshedCrypto": 3, "alertsSent": 1 }`}
+              </code>
+              . Alerts are deduplicated, so frequent runs do not repeat the same message.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="card overflow-hidden">
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <h2 className="text-base font-semibold text-slate-900">Recent alerts</h2>
+          <Link href="/prices" className="text-xs font-medium text-indigo-600 hover:underline">
+            Refresh prices manually
+          </Link>
+        </div>
+        {recent.length === 0 ? (
+          <p className="px-5 py-10 text-center text-sm text-slate-400">
+            No alerts yet. They appear here once a holding moves beyond {settings.thresholdPct}%.
+          </p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {recent.map((event) => (
+              <li key={event.id} className="flex flex-wrap items-start justify-between gap-2 px-5 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-900">{event.title}</p>
+                  <p className="mt-0.5 text-xs text-slate-500">{event.body}</p>
+                </div>
+                <div className="text-right text-xs text-slate-400">
+                  <p>{event.createdAt.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</p>
+                  <p className="mt-0.5">
+                    {[event.pushSent > 0 ? `push ${event.pushSent}` : "", event.telegramSent ? "telegram" : ""]
+                      .filter(Boolean)
+                      .join(" · ") || "no channel delivered"}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
