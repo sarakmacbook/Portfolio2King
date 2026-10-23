@@ -79,6 +79,13 @@ export type PortfolioAlertSettings = {
    */
   thresholdPct: number | null;
   /**
+   * Send the recap even when the total is unchanged (0.00 %). With a threshold
+   * set, a flat day is skipped; this flag keeps the daily total coming anyway.
+   * A blank threshold already sends everything, so this only matters alongside
+   * one. Stored as `alerts.portfolio.sendUnchanged` ("true"/"false").
+   */
+  sendUnchanged: boolean;
+  /**
    * Telegram-only message template, using `{total}`, `{percent}`, … tokens
    * (see PORTFOLIO_MESSAGE_PLACEHOLDERS). Blank = the standard title + body.
    * Browser push always keeps the structured title/body.
@@ -161,6 +168,9 @@ export const DEFAULT_PORTFOLIO_ALERT_SETTINGS: PortfolioAlertSettings = {
   monthlyEnabled: true,
   monthlyDay: 1,
   thresholdPct: null,
+  // Opt-in: a threshold normally means "only wake me when it moved", and a
+  // perfectly flat day is the quietest of all.
+  sendUnchanged: false,
   telegramTemplate: "",
   telegramNote: "",
 };
@@ -226,6 +236,8 @@ export const SETTING_KEYS = {
   portfolioMonthly: "alerts.portfolio.monthly",
   /** Day of the month of the monthly recap — "1" … "28". */
   portfolioMonthlyDay: "alerts.portfolio.monthlyDay",
+  /** Send a recap even when the total is unchanged — "true" / "false". */
+  portfolioSendUnchanged: "alerts.portfolio.sendUnchanged",
   /** Optional portfolio threshold in percent — "" means "always send". */
   portfolioThresholdPct: "alerts.portfolio.thresholdPct",
   /** Custom Telegram message — "" = the standard title + body. */
@@ -660,6 +672,10 @@ export function parsePortfolioAlertSettings(
     ),
     monthlyDay: parseMonthDay(values[SETTING_KEYS.portfolioMonthlyDay]) ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.monthlyDay,
     thresholdPct: parseOptionalThresholdPct(threshold)?.value ?? null,
+    sendUnchanged: parseBooleanSetting(
+      values[SETTING_KEYS.portfolioSendUnchanged],
+      DEFAULT_PORTFOLIO_ALERT_SETTINGS.sendUnchanged,
+    ),
     telegramTemplate: clampText(values[SETTING_KEYS.portfolioTelegramTemplate], MAX_PORTFOLIO_TEMPLATE_LENGTH),
     telegramNote: clampText(values[SETTING_KEYS.portfolioTelegramNote], MAX_PORTFOLIO_NOTE_LENGTH),
   };
@@ -707,6 +723,7 @@ export function settingsToRows(settings: AlertSettings): Array<{ key: string; va
       key: SETTING_KEYS.portfolioThresholdPct,
       value: settings.portfolio.thresholdPct === null ? "" : String(settings.portfolio.thresholdPct),
     },
+    { key: SETTING_KEYS.portfolioSendUnchanged, value: settings.portfolio.sendUnchanged ? "true" : "false" },
     { key: SETTING_KEYS.portfolioTelegramTemplate, value: settings.portfolio.telegramTemplate },
     { key: SETTING_KEYS.portfolioTelegramNote, value: settings.portfolio.telegramNote },
   ];
@@ -830,10 +847,20 @@ export function describePortfolioMove(from: number, to: number, baseline: string
 /**
  * The threshold is optional by design: `null` means "always send at the chosen
  * time", which is what most people want for a daily portfolio update.
+ *
+ * `sendUnchanged` is for the narrower request "keep telling me my total even on
+ * the days it did not move": with a threshold set, a completely flat day is
+ * otherwise the one thing that gets skipped. Small moves below the threshold
+ * still respect it — the flag is about 0.00 %, not about ignoring the filter.
  */
-export function portfolioMovePassesThreshold(move: PortfolioMove, thresholdPct: number | null): boolean {
+export function portfolioMovePassesThreshold(
+  move: PortfolioMove,
+  thresholdPct: number | null,
+  sendUnchanged = false,
+): boolean {
   if (thresholdPct === null) return true;
   if (!Number.isFinite(thresholdPct) || thresholdPct <= 0) return true;
+  if (sendUnchanged && move.direction === "flat") return true;
   return Math.abs(move.changePct) * 100 + 1e-9 >= thresholdPct;
 }
 
