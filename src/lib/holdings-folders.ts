@@ -216,8 +216,9 @@ export function updateFolder(
 }
 
 /**
- * Removes a folder. Holdings filed into it are *not* deleted — they simply
- * become unfiled, which is why this returns the cleaned-up assignment map too.
+ * Removes a folder. Holdings filed into it are *not* deleted — they drop back
+ * into the plain list, which is why this returns the cleaned-up assignment map
+ * too.
  */
 export function removeFolder(
   folders: readonly HoldingFolder[],
@@ -232,7 +233,7 @@ export function removeFolder(
   return { folders: folders.filter((folder) => folder.id !== id), assignments: nextAssignments };
 }
 
-/** Files one holding into a folder (`null` = unfiled). */
+/** Files one holding into a folder (`null` = no folder). */
 export function assignHolding(
   assignments: FolderAssignments,
   assetId: number,
@@ -281,29 +282,32 @@ export function moveFolderTo(
 }
 
 export type FolderGroup<T> = {
-  /** `null` = the "Unfiled" group. */
-  folder: HoldingFolder | null;
+  folder: HoldingFolder;
   rows: T[];
   /** Sum of the group's row values. */
   totalValue: number;
 };
 
 /**
- * Splits rows into folder groups, in folder order, with unfiled holdings last.
- * Rows keep the order they arrive in inside their group, and a group with no
- * rows is left out so an empty folder does not take up a heading.
+ * Splits rows into folder groups, in folder order. Rows keep the order they
+ * arrive in inside their group, and a group with no rows is left out so an empty
+ * folder does not take up a heading.
+ *
+ * Only real folders are returned: a holding that is in no folder is not a group
+ * — there is no "Unfiled" bucket. Those rows are handed back separately as
+ * `ungrouped` so the table can list them plainly above the folders.
  */
-export function groupByFolder<T extends { id: number; value: number }>(
+export function splitByFolder<T extends { id: number; value: number }>(
   rows: readonly T[],
   folders: readonly HoldingFolder[],
   assignments: FolderAssignments,
-): FolderGroup<T>[] {
+): { ungrouped: T[]; groups: FolderGroup<T>[] } {
   const byFolder = new Map<string, T[]>();
-  const unfiled: T[] = [];
+  const ungrouped: T[] = [];
   for (const row of rows) {
     const folderId = assignments[row.id];
     if (!folderId || !folders.some((folder) => folder.id === folderId)) {
-      unfiled.push(row);
+      ungrouped.push(row);
       continue;
     }
     const list = byFolder.get(folderId) ?? [];
@@ -321,14 +325,16 @@ export function groupByFolder<T extends { id: number; value: number }>(
       totalValue: list.reduce((sum, row) => sum + row.value, 0),
     });
   }
-  if (unfiled.length > 0) {
-    groups.push({
-      folder: null,
-      rows: unfiled,
-      totalValue: unfiled.reduce((sum, row) => sum + row.value, 0),
-    });
-  }
-  return groups;
+  return { ungrouped, groups };
+}
+
+/** Just the folder groups — see `splitByFolder` for the rows in no folder. */
+export function groupByFolder<T extends { id: number; value: number }>(
+  rows: readonly T[],
+  folders: readonly HoldingFolder[],
+  assignments: FolderAssignments,
+): FolderGroup<T>[] {
+  return splitByFolder(rows, folders, assignments).groups;
 }
 
 /** Every holding filed into `folderId`, for the folder filter chips. */
@@ -336,7 +342,12 @@ export function countInFolder(assignments: FolderAssignments, folderId: string):
   return Object.values(assignments).filter((id) => id === folderId).length;
 }
 
-export type FolderFilter = "all" | "unfiled" | `folder:${string}`;
+/**
+ * Which folder the table is narrowed to. `all` is everything; there is
+ * deliberately no "unfiled" option — holdings that are in no folder are part of
+ * `all` and are listed above the folders.
+ */
+export type FolderFilter = "all" | `folder:${string}`;
 
 export function folderFilterFor(id: string): FolderFilter {
   return `folder:${id}`;
@@ -351,7 +362,6 @@ export function matchesFolderFilter(
 ): boolean {
   if (folderFilter === "all") return true;
   const folderId = assignments[assetId];
-  const filed = folderId !== undefined && folderIds.includes(folderId);
-  if (folderFilter === "unfiled") return !filed;
-  return filed && folderId === folderFilter.slice("folder:".length);
+  if (folderId === undefined || !folderIds.includes(folderId)) return false;
+  return folderId === folderFilter.slice("folder:".length);
 }

@@ -373,8 +373,8 @@ export async function resetDashboardLayout(_prev: ActionState, _fd: FormData): P
 }
 
 /**
- * Files one holding into a folder — or, with `folderId: null`, back to
- * **Unfiled** — and stores it straight away.
+ * Files one holding into a folder — or, with `folderId: null`, back to no
+ * folder at all — and stores it straight away.
  *
  * This is the drag-and-drop path used outside "Arrange layout" mode, where a
  * drop on a folder should take effect immediately instead of waiting for a

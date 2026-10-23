@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
-import { assignHolding, groupByFolder } from "../src/lib/holdings-folders";
+import { assignHolding, groupByFolder, splitByFolder } from "../src/lib/holdings-folders";
 
 const rootDir = resolve(__dirname, "..");
 const read = (file: string) => readFileSync(join(rootDir, file), "utf8");
@@ -20,28 +20,33 @@ test("dragging a holding onto a group files it and keeps the group order", () =>
   const before = { 1: "a" };
   const after = assignHolding(before, 2, "b");
 
-  assert.deepEqual(groupByFolder(rows, folders, before).map((g) => g.folder?.id ?? null), ["a", null]);
-  // The dragged holding now sits under its new folder, and the unfiled group
-  // keeps the remaining rows.
-  const groups = groupByFolder(rows, folders, after);
-  assert.deepEqual(groups.map((g) => g.folder?.id ?? null), ["a", "b", null]);
-  assert.deepEqual(groups[1].rows.map((row) => row.id), [2]);
-  assert.deepEqual(groups[2].rows.map((row) => row.id), [3]);
+  // Only real folders are groups — holdlings in no folder are plain rows.
+  const start = splitByFolder(rows, folders, before);
+  assert.deepEqual(start.groups.map((g) => g.folder.id), ["a"]);
+  assert.deepEqual(start.ungrouped.map((row) => row.id), [2, 3]);
+
+  const next = splitByFolder(rows, folders, after);
+  assert.deepEqual(next.groups.map((g) => g.folder.id), ["a", "b"]);
+  assert.deepEqual(next.groups[1].rows.map((row) => row.id), [2]);
+  assert.deepEqual(next.ungrouped.map((row) => row.id), [3]);
   // The original map is untouched, so an optimistic update can be rolled back.
   assert.deepEqual(before, { 1: "a" });
 });
 
-test("dropping a holding on the Unfiled group pulls it back out of a folder", () => {
+test("choosing \"No folder\" pulls a holding back out of its folder", () => {
   const folders = [
     { id: "a", name: "A", color: "#6366f1", icon: "auto" as const, glyph: "", collapsed: false },
   ];
   const rows = [{ id: 1, value: 10 }];
   const filed = { 1: "a" };
-  assert.equal(groupByFolder(rows, folders, filed)[0].folder?.id, "a");
-  const unfiled = assignHolding(filed, 1, null);
-  assert.deepEqual(unfiled, {});
-  // With nothing filed, the table renders one flat group again.
-  assert.equal(groupByFolder(rows, folders, unfiled).length, 1);
+  assert.equal(splitByFolder(rows, folders, filed).groups[0].folder.id, "a");
+
+  const ungrouped = assignHolding(filed, 1, null);
+  assert.deepEqual(ungrouped, {});
+  // With nothing filed there are no groups at all and the row is a plain row.
+  const split = splitByFolder(rows, folders, ungrouped);
+  assert.deepEqual(split.groups, []);
+  assert.deepEqual(split.ungrouped.map((row) => row.id), [1]);
 });
 
 test("the table implements in-place drag-and-drop filing, with an immediate save", () => {
