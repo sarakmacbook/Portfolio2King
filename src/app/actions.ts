@@ -24,8 +24,14 @@ import {
 } from "@/lib/portfolio";
 import { parsePriceSource } from "@/lib/market-prices";
 import { refreshPricesWithAlerts } from "@/lib/price-refresh";
-import { clearDashboardOrder, saveDashboardOrder } from "@/lib/dashboard-order-db";
+import {
+  clearDashboardOrder,
+  clearDashboardStatOrder,
+  saveDashboardOrder,
+  saveDashboardStatOrder,
+} from "@/lib/dashboard-order-db";
 import { isDashboardBlockKey } from "@/lib/dashboard-layout";
+import { isDashboardStatKey } from "@/lib/dashboard-stats";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -343,11 +349,31 @@ function parseDashboardOrder(raw: string): string[] {
   return keys;
 }
 
+function parseDashboardStatOrder(raw: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("Could not read the stat card order. Reload the page and try again.");
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("The stat card order is empty.");
+  if (parsed.length > 16) throw new Error("Too many stat cards.");
+  const keys = parsed.map((value) => (typeof value === "string" ? value.trim() : ""));
+  if (keys.some((key) => !isDashboardStatKey(key))) {
+    throw new Error("The stat card order contains an unknown card.");
+  }
+  return keys;
+}
+
 /** Saves the dashboard card order from the "Arrange layout" mode. */
 export async function saveDashboardLayout(_prev: ActionState, fd: FormData): Promise<ActionState> {
   try {
     await ensureSchema();
     await saveDashboardOrder(parseDashboardOrder(str(fd, "order")));
+    // The four stat cards are a small list of their own; an older client (or a
+    // form without the field) simply leaves the saved order untouched.
+    const statsOrder = str(fd, "statsOrder");
+    if (statsOrder) await saveDashboardStatOrder(parseDashboardStatOrder(statsOrder));
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save the dashboard layout" };
   }
@@ -359,6 +385,7 @@ export async function saveDashboardLayout(_prev: ActionState, fd: FormData): Pro
 export async function resetDashboardLayout(_prev: ActionState, _fd: FormData): Promise<ActionState> {
   try {
     await clearDashboardOrder();
+    await clearDashboardStatOrder();
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not reset the dashboard layout" };
   }

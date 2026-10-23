@@ -9,9 +9,15 @@ import {
   moveBlockTo,
   type DashboardBlockKey,
 } from "@/lib/dashboard-layout";
+import {
+  DEFAULT_DASHBOARD_STAT_ORDER,
+  type DashboardStatKey,
+} from "@/lib/dashboard-stats";
+import StatsGrid from "./StatsGrid";
 
 /** Column spans so the two charts stay side by side when they are adjacent. */
 const SPAN: Record<DashboardBlockKey, string> = {
+  stats: "lg:col-span-5",
   holdings: "lg:col-span-5",
   history: "lg:col-span-3",
   allocation: "lg:col-span-2",
@@ -38,12 +44,18 @@ function GripIcon() {
  */
 export default function DashboardLayout({
   blocks,
+  statsCards,
   initialOrder = DEFAULT_DASHBOARD_ORDER,
+  initialStatsOrder = DEFAULT_DASHBOARD_STAT_ORDER,
 }: {
-  blocks: Record<DashboardBlockKey, ReactNode>;
+  blocks: Record<Exclude<DashboardBlockKey, "stats">, ReactNode>;
+  /** The four numbers, rendered on the server, in default order. */
+  statsCards: Record<DashboardStatKey, ReactNode>;
   initialOrder?: DashboardBlockKey[];
+  initialStatsOrder?: DashboardStatKey[];
 }) {
   const [order, setOrder] = useState<DashboardBlockKey[]>(initialOrder);
+  const [statsOrder, setStatsOrder] = useState<DashboardStatKey[]>(initialStatsOrder);
   const [arranging, setArranging] = useState(false);
   const [dragging, setDragging] = useState<DashboardBlockKey | null>(null);
   const [drop, setDrop] = useState<{ key: DashboardBlockKey; after: boolean } | null>(null);
@@ -51,6 +63,7 @@ export default function DashboardLayout({
   const [announcement, setAnnouncement] = useState("");
   const [saving, startSaving] = useTransition();
   const savedOrder = useRef<DashboardBlockKey[]>(initialOrder);
+  const savedStatsOrder = useRef<DashboardStatKey[]>(initialStatsOrder);
 
   function clearDrag() {
     setDragging(null);
@@ -59,12 +72,14 @@ export default function DashboardLayout({
 
   function startArranging() {
     savedOrder.current = order;
+    savedStatsOrder.current = statsOrder;
     setNotice(null);
     setArranging(true);
   }
 
   function cancelArranging() {
     setOrder(savedOrder.current);
+    setStatsOrder(savedStatsOrder.current);
     clearDrag();
     setArranging(false);
   }
@@ -93,12 +108,14 @@ export default function DashboardLayout({
     startSaving(async () => {
       const fd = new FormData();
       fd.set("order", payload);
+      fd.set("statsOrder", JSON.stringify(statsOrder));
       const result: ActionState = await saveDashboardLayout({}, fd);
       if (result.error) {
         setNotice({ kind: "error", text: result.error });
         return;
       }
       savedOrder.current = order;
+      savedStatsOrder.current = statsOrder;
       setArranging(false);
       setNotice({ kind: "ok", text: result.message ?? "Dashboard layout saved." });
     });
@@ -112,7 +129,9 @@ export default function DashboardLayout({
         return;
       }
       setOrder(DEFAULT_DASHBOARD_ORDER);
+      setStatsOrder(DEFAULT_DASHBOARD_STAT_ORDER);
       savedOrder.current = DEFAULT_DASHBOARD_ORDER;
+      savedStatsOrder.current = DEFAULT_DASHBOARD_STAT_ORDER;
       clearDrag();
       setArranging(false);
       setNotice({ kind: "ok", text: result.message ?? "Dashboard layout reset to the default." });
@@ -238,7 +257,18 @@ export default function DashboardLayout({
                   </span>
                 </div>
               )}
-              <div className={arranging ? "rounded-2xl ring-2 ring-indigo-200/80" : ""}>{blocks[key]}</div>
+              <div className={arranging ? "rounded-2xl ring-2 ring-indigo-200/80" : ""}>
+                {key === "stats" ? (
+                  <StatsGrid
+                    cards={statsCards}
+                    order={statsOrder}
+                    onOrderChange={setStatsOrder}
+                    arranging={arranging}
+                  />
+                ) : (
+                  blocks[key]
+                )}
+              </div>
             </div>
           );
         })}

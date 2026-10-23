@@ -7,7 +7,7 @@ import { Donut, HistoryChart, type Point } from "@/components/Charts";
 import DashboardLayout from "@/components/DashboardLayout";
 import HoldingsTable, { type HoldingRow } from "@/components/HoldingsTable";
 import RefreshPricesButton from "@/components/RefreshPricesButton";
-import { loadDashboardOrder } from "@/lib/dashboard-order-db";
+import { loadDashboardOrder, loadDashboardStatOrder } from "@/lib/dashboard-order-db";
 import { KIND_META, TYPE_META, fmtDate, money, pct, pnlColor, qty } from "@/lib/format";
 import {
   assetCost,
@@ -27,11 +27,12 @@ export const dynamic = "force-dynamic";
 export default async function Dashboard() {
   if (!isDatabaseConfigured()) return <DatabaseSetup />;
   const list = await getAllAssets();
-  const [snaps, priceSnaps, activity, dashboardOrder] = await Promise.all([
+  const [snaps, priceSnaps, activity, dashboardOrder, statOrder] = await Promise.all([
     getSnapshots(),
     getAllPriceSnapshots(),
     getRecentActivity(6),
     loadDashboardOrder(),
+    loadDashboardStatOrder(),
   ]);
   const totals = computeTotals(list);
   const t = today();
@@ -137,26 +138,42 @@ export default async function Dashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat label="Cash" value={money(totals.cashValue)} hint={`${pct(totals.totalValue ? totals.cashValue / totals.totalValue : 0, false)} of portfolio`} />
-        <Stat label="Invested (cost basis)" value={money(invested)} hint={`${list.filter((a) => a.type !== "cash").length} positions`} />
-        <Stat
-          label="Unrealized P/L"
-          value={money(totals.unrealized, { sign: true })}
-          valueClass={pnlColor(totals.unrealized)}
-          hint={pct(unrealizedPct)}
-          hintClass={pnlColor(totals.unrealized)}
-        />
-        <Stat
-          label="Realized P/L + income"
-          value={money(totals.realized, { sign: true })}
-          valueClass={pnlColor(totals.realized)}
-          hint="From sells, dividends & interest"
-        />
-      </div>
-
       <DashboardLayout
         initialOrder={dashboardOrder}
+        initialStatsOrder={statOrder}
+        statsCards={{
+          cash: (
+            <Stat
+              label="Cash"
+              value={money(totals.cashValue)}
+              hint={`${pct(totals.totalValue ? totals.cashValue / totals.totalValue : 0, false)} of portfolio`}
+            />
+          ),
+          invested: (
+            <Stat
+              label="Invested (cost basis)"
+              value={money(invested)}
+              hint={`${list.filter((a) => a.type !== "cash").length} positions`}
+            />
+          ),
+          unrealized: (
+            <Stat
+              label="Unrealized P/L"
+              value={money(totals.unrealized, { sign: true })}
+              valueClass={pnlColor(totals.unrealized)}
+              hint={pct(unrealizedPct)}
+              hintClass={pnlColor(totals.unrealized)}
+            />
+          ),
+          realized: (
+            <Stat
+              label="Realized P/L + income"
+              value={money(totals.realized, { sign: true })}
+              valueClass={pnlColor(totals.realized)}
+              hint="From sells, dividends & interest"
+            />
+          ),
+        }}
         blocks={{
           holdings: (
             <section className="card overflow-hidden">
