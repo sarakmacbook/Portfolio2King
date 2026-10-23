@@ -6,6 +6,7 @@ import type { AssetType, TxKind } from "@/lib/constants";
 import { CEX_PROVIDERS, PROVIDER_LABELS, type PriceProvider } from "@/lib/market-prices";
 import { KIND_META, kindsFor, money, qty } from "@/lib/format";
 import { playMoneyChime } from "@/lib/sounds";
+import { WEB3_WALLETS, type Web3WalletId } from "@/lib/web3-wallets";
 import type { CashAccount } from "./AddAssetDialog";
 import { ErrorNote, Modal, SubmitButton } from "./ui";
 
@@ -215,6 +216,7 @@ export function EditAssetButton({
     type: AssetType;
     cryptoCategory: "stablecoin" | "volatile";
     priceSource: PriceProvider | "";
+    walletLogo?: Web3WalletId | "";
   };
 }) {
   const [open, setOpen] = useState(false);
@@ -242,6 +244,7 @@ function EditAssetForm({
     type: AssetType;
     cryptoCategory: "stablecoin" | "volatile";
     priceSource: PriceProvider | "";
+    walletLogo?: Web3WalletId | "";
   };
   onDone: () => void;
 }) {
@@ -263,26 +266,39 @@ function EditAssetForm({
         </div>
       </div>
       {asset.type === "crypto" && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label className="label">Crypto subcategory</label>
-            <select name="cryptoCategory" className="input" defaultValue={asset.cryptoCategory}>
-              <option value="stablecoin">Stablecoin</option>
-              <option value="volatile">Volatile asset</option>
-            </select>
+        <>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="label">Crypto subcategory</label>
+              <select name="cryptoCategory" className="input" defaultValue={asset.cryptoCategory}>
+                <option value="stablecoin">Stablecoin</option>
+                <option value="volatile">Volatile asset</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Price from</label>
+              <select name="priceSource" className="input" defaultValue={asset.priceSource}>
+                <option value="">Auto — any exchange</option>
+                {CEX_PROVIDERS.map((provider) => (
+                  <option key={provider} value={provider}>
+                    {PROVIDER_LABELS[provider]}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <div>
-            <label className="label">Price from</label>
-            <select name="priceSource" className="input" defaultValue={asset.priceSource}>
-              <option value="">Auto — any exchange</option>
-              {CEX_PROVIDERS.map((provider) => (
-                <option key={provider} value={provider}>
-                  {PROVIDER_LABELS[provider]}
+            <label className="label">Logo / Web3 wallet</label>
+            <select name="walletLogo" className="input" defaultValue={asset.walletLogo ?? ""}>
+              <option value="">Token logo (auto from symbol)</option>
+              {WEB3_WALLETS.map((wallet) => (
+                <option key={wallet.id} value={wallet.id}>
+                  {wallet.name}
                 </option>
               ))}
             </select>
           </div>
-        </div>
+        </>
       )}
       <div>
         <label className="label">Notes</label>

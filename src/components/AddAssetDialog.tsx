@@ -12,8 +12,13 @@ import type { CryptoCategory } from "@/db/schema";
 import { TYPE_META, money } from "@/lib/format";
 import { playMoneyChimeFromGesture } from "@/lib/sounds";
 import { CAMBODIAN_BANKS, CUSTOM_BANK, type CambodianBank } from "@/lib/cambodian-banks";
+import {
+  WEB3_WALLETS,
+  getWeb3Wallet,
+  type Web3WalletId,
+} from "@/lib/web3-wallets";
 import { ErrorNote, Modal, SubmitButton } from "./ui";
-import CryptoLogo from "./CryptoLogo";
+import CryptoLogo, { Web3WalletBadge } from "./CryptoLogo";
 
 export type CashAccount = { id: number; name: string; quantity: number };
 
@@ -70,6 +75,7 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
   const [state, action] = useActionState<ActionState, FormData>(createAsset, {});
   const [type, setType] = useState<AssetType>(defaultType);
   const [cryptoCategory, setCryptoCategory] = useState<CryptoCategory>("volatile");
+  const [walletLogo, setWalletLogo] = useState<Web3WalletId | "">("");
   const [priceSource, setPriceSource] = useState<PriceProvider | "">("");
   const [quoteCurrency, setQuoteCurrency] = useState<"USD" | "USDT">("USDT");
   const [quoteState, setQuoteState] = useState<{ status: "idle" | "loading" | "ok" | "error"; message: string }>({
@@ -192,11 +198,28 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
     if (quantity > 0) playMoneyChimeFromGesture();
   }
 
+  const selectedWallet = getWeb3Wallet(walletLogo);
+
+  function selectWeb3Wallet(nextWalletId: Web3WalletId | "") {
+    setWalletLogo(nextWalletId);
+    if (!nextWalletId) return;
+    const picked = getWeb3Wallet(nextWalletId);
+    if (!picked) return;
+    const trimmedName = name.trim();
+    const isAnotherWalletName = WEB3_WALLETS.some(
+      (w) => w.name.toLowerCase() === trimmedName.toLowerCase(),
+    );
+    if (!trimmedName || isAnotherWalletName) {
+      setName(picked.name);
+    }
+  }
+
   return (
     <form action={action} onSubmit={playSoundForFundedAsset} className="space-y-5">
       <input type="hidden" name="type" value={type} />
       <input type="hidden" name="cryptoCategory" value={cryptoCategory} />
       <input type="hidden" name="priceSource" value={type === "crypto" ? priceSource : ""} />
+      <input type="hidden" name="walletLogo" value={type === "crypto" ? walletLogo : ""} />
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {ASSET_TYPES.map((t) => (
           <button
@@ -236,6 +259,99 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
               </button>
             </div>
           </fieldset>
+
+          <div>
+            <label className="label">Logo / Web3 wallet</label>
+            <details className="bank-picker relative">
+              <summary className="input flex cursor-pointer list-none items-center justify-between gap-3">
+                <span className="flex min-w-0 items-center gap-2">
+                  <CryptoLogo
+                    symbol={symbol || "BTC"}
+                    name={name || "Token"}
+                    wallet={walletLogo}
+                    className="h-7 w-7 rounded-lg"
+                  />
+                  <span className="truncate text-slate-900">
+                    {selectedWallet
+                      ? `${selectedWallet.name} (Web3 wallet logo)`
+                      : "Token logo (auto from symbol)"}
+                  </span>
+                </span>
+                <span className="text-xs text-slate-400">▼</span>
+              </summary>
+              <div className="absolute z-30 mt-2 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+                <button
+                  type="button"
+                  className={`mb-1.5 flex w-full items-center gap-2 rounded-xl p-2 text-left text-sm transition hover:bg-slate-50 ${
+                    !walletLogo ? "bg-indigo-50 font-semibold text-indigo-700" : "text-slate-700"
+                  }`}
+                  onClick={(event) => {
+                    selectWeb3Wallet("");
+                    event.currentTarget.closest("details")?.removeAttribute("open");
+                  }}
+                >
+                  <CryptoLogo
+                    symbol={symbol || "BTC"}
+                    name={name || "Token"}
+                    className="h-7 w-7 rounded-lg"
+                  />
+                  <span>Token logo (auto from symbol)</span>
+                </button>
+                <div className="grid max-h-60 grid-cols-1 gap-1 overflow-y-auto border-t border-slate-100 pt-1.5 sm:grid-cols-2">
+                  {WEB3_WALLETS.map((wallet) => (
+                    <button
+                      key={wallet.id}
+                      type="button"
+                      className={`flex items-center gap-2 rounded-xl p-2 text-left text-sm transition hover:bg-slate-50 ${
+                        walletLogo === wallet.id
+                          ? "bg-indigo-50 font-semibold text-indigo-700"
+                          : "text-slate-700"
+                      }`}
+                      onClick={(event) => {
+                        selectWeb3Wallet(wallet.id);
+                        event.currentTarget.closest("details")?.removeAttribute("open");
+                      }}
+                    >
+                      <Web3WalletBadge wallet={wallet} className="h-7 w-7 rounded-lg" />
+                      <span>{wallet.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </details>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => selectWeb3Wallet("")}
+                className={`inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-xs font-medium transition ${
+                  !walletLogo
+                    ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300"
+                }`}
+              >
+                <span>🪙</span>
+                <span>Token logo</span>
+              </button>
+              {WEB3_WALLETS.slice(0, 6).map((wallet) => (
+                <button
+                  key={wallet.id}
+                  type="button"
+                  onClick={() => selectWeb3Wallet(wallet.id)}
+                  className={`inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-xs font-medium transition ${
+                    walletLogo === wallet.id
+                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300"
+                  }`}
+                >
+                  <Web3WalletBadge wallet={wallet} className="h-4 w-4 rounded" />
+                  <span>{wallet.name}</span>
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-xs text-slate-400">
+              Use the coin&apos;s own logo or pick a Web3 wallet logo like MetaMask, Phantom, or OKX Web3.
+            </p>
+          </div>
           <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3">
           <div>
             <p className="text-sm font-semibold text-slate-900">Find any crypto asset</p>

@@ -24,6 +24,7 @@ import {
 } from "@/lib/portfolio";
 import { buildAssetPriceSeries, latestDailyPriceChange } from "@/lib/price-history";
 import { describePriceSource } from "@/lib/market-prices";
+import { loadAssetWalletLogos } from "@/lib/web3-wallets-db";
 
 export const dynamic = "force-dynamic";
 
@@ -37,10 +38,12 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   if (!asset) notFound();
 
   const all = await getAllAssets();
-  const [txs, priceSnaps] = await Promise.all([
+  const [txs, priceSnaps, walletLogos] = await Promise.all([
     getAssetTransactions(id),
     getAssetPriceSnapshots(id),
+    loadAssetWalletLogos(),
   ]);
+  const walletLogo = walletLogos[asset.id] ?? "";
   const t = today();
   const stalePrices = all.some(
     (a) =>
@@ -71,7 +74,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 items-center gap-4">
           {asset.type === "crypto" ? (
-            <CryptoLogo symbol={asset.symbol} name={asset.name} className="h-14 w-14 rounded-2xl" />
+            <CryptoLogo symbol={asset.symbol} name={asset.name} wallet={walletLogo} className="h-14 w-14 rounded-2xl" />
           ) : (
             <span
               className="grid h-14 w-14 place-items-center rounded-2xl text-sm font-bold text-white shadow-sm"
@@ -103,6 +106,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               type: asset.type,
               cryptoCategory: asset.cryptoCategory,
               priceSource: asset.priceSource,
+              walletLogo,
             }}
           />
           <form action={deleteAsset}>

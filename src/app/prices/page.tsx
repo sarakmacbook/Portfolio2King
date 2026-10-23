@@ -6,13 +6,17 @@ import BulkPriceForm, { type PriceRow } from "@/components/BulkPriceForm";
 import { PortfolioPriceHistory, type AssetPriceHistoryItem } from "@/components/PriceHistorySection";
 import { getAllAssets, getAllPriceSnapshots, localDateString, today } from "@/lib/portfolio";
 import { buildAssetPriceSeries, type PricePoint } from "@/lib/price-history";
+import { loadAssetWalletLogos } from "@/lib/web3-wallets-db";
 
 export const dynamic = "force-dynamic";
 
 export default async function PricesPage() {
   if (!isDatabaseConfigured()) return <DatabaseSetup />;
   const list = await getAllAssets();
-  const priceSnaps = await getAllPriceSnapshots();
+  const [priceSnaps, walletLogos] = await Promise.all([
+    getAllPriceSnapshots(),
+    loadAssetWalletLogos(),
+  ]);
   const t = today();
   const stalePrices = list.some(
     (a) =>
@@ -39,6 +43,7 @@ export default async function PricesPage() {
     type: a.type,
     name: a.name,
     symbol: a.symbol,
+    wallet: walletLogos[a.id],
     avgCost: a.avgCost,
     currentPrice: a.currentPrice,
     points: buildAssetPriceSeries(byAsset.get(a.id) ?? [], a.currentPrice, t),
@@ -49,6 +54,7 @@ export default async function PricesPage() {
     type: a.type,
     name: a.name,
     symbol: a.symbol,
+    wallet: walletLogos[a.id],
     priceSource: a.priceSource,
     quantity: a.quantity,
     currentPrice: a.currentPrice,
