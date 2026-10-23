@@ -145,8 +145,11 @@ Details:
 
 Every screen is built to work on a phone as well as a desktop:
 
-- **Navigation** collapses into a menu button below 768 px (tablets keep the
-  inline links), with the active page highlighted in both modes.
+- **Navigation** keeps **Dashboard** and **Activity** directly in the top bar and
+  groups **Exchanges**, **Refresh prices**, **Alerts** and **Database** inside a
+  **Settings** submenu (which highlights whenever any of those pages is open);
+  below 768 px the bar collapses into a mobile menu button with an expandable
+  **Settings** section.
 - **Holdings** switches from a seven-column table to one card per holding below
   768 px, with value, P/L, quantity × price and the weight bar. Sorting moves to a
   **Sort** dropdown because the table header is not visible there.
