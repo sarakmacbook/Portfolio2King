@@ -7,6 +7,9 @@ import {
   PRIVACY_COOKIE_NAME,
   PRIVACY_HIDDEN_COOKIE_NAME,
   PRIVACY_SETTING_KEY,
+  hasAnyLockConfigured,
+  hasPasskeyConfigured,
+  hasPinConfigured,
   parsePrivacyConfig,
   verifySessionToken,
   type StoredPrivacyConfig,
@@ -48,8 +51,16 @@ export async function clearPrivacyConfig(): Promise<void> {
   await db.delete(appSettings).where(eq(appSettings.key, PRIVACY_SETTING_KEY));
 }
 
+export type PasskeySummary = {
+  id: string;
+  label: string;
+  createdAt: string;
+};
+
 export type ServerPrivacyStatus = {
   hasPin: boolean;
+  hasPasskey: boolean;
+  passkeys: PasskeySummary[];
   locked: boolean;
   hidden: boolean;
 };
@@ -59,9 +70,11 @@ export function evaluateRequestPrivacyStatus(
   sessionToken: string | null | undefined,
   hiddenCookie: string | null | undefined,
 ): ServerPrivacyStatus {
-  if (!config) {
+  if (!config || !hasAnyLockConfigured(config)) {
     return {
       hasPin: false,
+      hasPasskey: false,
+      passkeys: [],
       locked: false,
       hidden: hiddenCookie === "1",
     };
@@ -69,7 +82,13 @@ export function evaluateRequestPrivacyStatus(
   const unlocked = verifySessionToken(sessionToken, config);
   const locked = !unlocked;
   return {
-    hasPin: true,
+    hasPin: hasPinConfigured(config),
+    hasPasskey: hasPasskeyConfigured(config),
+    passkeys: (config.passkeys ?? []).map((pk) => ({
+      id: pk.id,
+      label: pk.label,
+      createdAt: pk.createdAt,
+    })),
     locked,
     hidden: locked || hiddenCookie === "1",
   };
@@ -82,6 +101,12 @@ export async function getServerPrivacyStatus(): Promise<ServerPrivacyStatus> {
     const hiddenCookie = cookieStore.get(PRIVACY_HIDDEN_COOKIE_NAME)?.value;
     return evaluateRequestPrivacyStatus(config, sessionToken, hiddenCookie);
   } catch {
-    return { hasPin: false, locked: false, hidden: false };
+    return {
+      hasPin: false,
+      hasPasskey: false,
+      passkeys: [],
+      locked: false,
+      hidden: false,
+    };
   }
 }
