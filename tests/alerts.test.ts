@@ -65,6 +65,7 @@ afterEach(() => {
 });
 
 test("parseAlertSettings falls back to defaults and honours stored values", () => {
+  assert.equal(DEFAULT_ALERT_SETTINGS.backgroundRefreshMinutes, 10);
   assert.deepEqual(parseAlertSettings({}), DEFAULT_ALERT_SETTINGS);
 
   const parsed = parseAlertSettings({

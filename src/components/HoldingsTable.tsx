@@ -1,9 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { AssetType } from "@/lib/constants";
 import { TYPE_META, money, pct, pnlColor, qty } from "@/lib/format";
+import {
+  HOLDING_FILTERS,
+  getSelectedHoldingFilter,
+  matchesHoldingFilter,
+  setSelectedHoldingFilter,
+  subscribeHoldingFilter,
+  type HoldingFilter,
+} from "@/lib/holdings-filter";
 import CryptoLogo from "./CryptoLogo";
 
 export type HoldingRow = {
@@ -36,21 +44,21 @@ const SORT_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "pnlPct:-1", label: "P/L % · best first" },
   { value: "weight:-1", label: "Weight · largest first" },
 ];
-type HoldingFilter = AssetType | "all" | "stablecoin" | "volatile";
-
-const FILTERS: Array<{ value: HoldingFilter; label: string }> = [
-  { value: "all", label: "All" },
-  { value: "cash", label: "Cash" },
-  { value: "stock", label: "Stocks" },
-  { value: "stablecoin", label: "Stablecoins" },
-  { value: "volatile", label: "Volatile crypto" },
-  { value: "other", label: "Other" },
-];
 
 export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
-  const [filter, setFilter] = useState<HoldingFilter>("all");
+  const filter = useSyncExternalStore<HoldingFilter>(
+    subscribeHoldingFilter,
+    getSelectedHoldingFilter,
+    () => "all",
+  );
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "value", dir: -1 });
+
+  useEffect(() => {
+    return () => {
+      setSelectedHoldingFilter("all");
+    };
+  }, []);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: rows.length, stablecoin: 0, volatile: 0 };
@@ -64,13 +72,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return rows
-      .filter((r) => {
-        if (filter === "all") return true;
-        if (filter === "stablecoin" || filter === "volatile") {
-          return r.type === "crypto" && r.cryptoCategory === filter;
-        }
-        return r.type === filter;
-      })
+      .filter((r) => matchesHoldingFilter(r, filter))
       .filter((r) => !q || r.name.toLowerCase().includes(q) || r.symbol.toLowerCase().includes(q))
       .sort((a, b) => {
         const k = sort.key;
@@ -98,11 +100,11 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
     <div>
       <div className="flex flex-col gap-3 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex gap-1 overflow-x-auto">
-          {FILTERS.map(({ value, label }) => (
+          {HOLDING_FILTERS.map(({ value, label }) => (
             <button
               key={value}
               type="button"
-              onClick={() => setFilter(value)}
+              onClick={() => setSelectedHoldingFilter(value)}
               className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition ${
                 filter === value ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
               }`}

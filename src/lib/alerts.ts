@@ -23,6 +23,7 @@ const PUSH_TTL_SECONDS = 60 * 60 * 12;
 const VAPID_PUBLIC_KEY = "push.vapidPublic";
 const VAPID_PRIVATE_KEY = "push.vapidPrivate";
 const AUTO_NOTE_STEP_KEY = "alerts.portfolio.autoNoteStep";
+const REFRESH_10M_MIGRATED_KEY = "refresh.intervalMinutes.default10Migrated";
 
 export type AlertChannelResult = {
   pushSent: number;
@@ -51,9 +52,19 @@ export async function getAlertSettings(): Promise<AlertSettings> {
   const rows = await db
     .select({ key: appSettings.key, value: appSettings.value })
     .from(appSettings)
-    .where(inArray(appSettings.key, Object.values(SETTING_KEYS)));
+    .where(inArray(appSettings.key, [...Object.values(SETTING_KEYS), REFRESH_10M_MIGRATED_KEY]));
   const values: Record<string, string> = {};
   for (const row of rows) values[row.key] = row.value;
+  if (values[REFRESH_10M_MIGRATED_KEY] !== "true") {
+    if (
+      !values[SETTING_KEYS.backgroundRefreshMinutes] ||
+      values[SETTING_KEYS.backgroundRefreshMinutes] === "15"
+    ) {
+      values[SETTING_KEYS.backgroundRefreshMinutes] = "10";
+      await writeSetting(SETTING_KEYS.backgroundRefreshMinutes, "10");
+    }
+    await writeSetting(REFRESH_10M_MIGRATED_KEY, "true");
+  }
   return parseAlertSettings(values);
 }
 
