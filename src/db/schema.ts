@@ -7,6 +7,7 @@ import {
   serial,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 import { ASSET_TYPES, TX_KINDS, type AssetType, type TxKind } from "../lib/constants";
@@ -100,6 +101,33 @@ export const alertEvents = pgTable("alert_events", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * What one exchange account reports for one holding, as of the last sync.
+ *
+ * The portfolio's own quantity still comes from transactions (that is what keeps
+ * P/L honest); this table only remembers *how much of it came from where*, so a
+ * re-sync can apply the difference for that venue instead of overwriting the
+ * holding. Same coin on Binance and OKX = two rows, and syncing one never
+ * touches the other.
+ */
+export const exchangeBalances = pgTable(
+  "exchange_balances",
+  {
+    id: serial("id").primaryKey(),
+    assetId: integer("asset_id")
+      .notNull()
+      .references(() => assets.id, { onDelete: "cascade" }),
+    /** Exchange id — see EXCHANGE_IDS ("binance" | "okx" | "bybit"). */
+    exchange: text("exchange").notNull(),
+    /** Units held there at the last sync (free + locked / wallet balance). */
+    quantity: doublePrecision("quantity").notNull(),
+    /** Symbol as the exchange reported it, e.g. "BTC" or OKX's "BTC". */
+    symbol: text("symbol").notNull().default(""),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("exchange_balances_asset_exchange").on(table.assetId, table.exchange)],
+);
+
 /** Small key/value store for alert settings and generated VAPID keys. */
 export const appSettings = pgTable("app_settings", {
   key: text("key").primaryKey(),
@@ -108,6 +136,7 @@ export const appSettings = pgTable("app_settings", {
 });
 
 export type Asset = typeof assets.$inferSelect;
+export type ExchangeBalance = typeof exchangeBalances.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
 export type Snapshot = typeof snapshots.$inferSelect;
 export type PriceSnapshot = typeof priceSnapshots.$inferSelect;

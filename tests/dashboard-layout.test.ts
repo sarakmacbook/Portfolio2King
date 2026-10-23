@@ -73,14 +73,14 @@ test("moveBlockTo drops a card before or after another", () => {
 test("navigation links map to the right sections", async () => {
   const { NAV_LINKS, isActivePath } = await import("../src/lib/nav-links");
 
-  assert.equal(NAV_LINKS.length, 5);
+  assert.equal(NAV_LINKS.length, 6);
   assert.deepEqual(
     NAV_LINKS.map((link) => link.label),
-    ["Dashboard", "Refresh prices", "Activity", "Alerts", "Database"],
+    ["Dashboard", "Exchanges", "Refresh prices", "Activity", "Alerts", "Database"],
   );
   assert.deepEqual(
     NAV_LINKS.map((link) => link.href),
-    ["/", "/prices", "/activity", "/alerts", "/database"],
+    ["/", "/exchanges", "/prices", "/activity", "/alerts", "/database"],
   );
 
   assert.equal(isActivePath("/", "/"), true);
@@ -91,4 +91,7 @@ test("navigation links map to the right sections", async () => {
   // A prefix that is not a section boundary must not light up.
   assert.equal(isActivePath("/prices-archive", "/prices"), false);
   assert.equal(isActivePath("/alerts", "/"), false);
+  assert.equal(isActivePath("/exchanges", "/exchanges"), true);
+  assert.equal(isActivePath("/exchanges/binance", "/exchanges"), true);
+  assert.equal(isActivePath("/prices", "/exchanges"), false);
 });

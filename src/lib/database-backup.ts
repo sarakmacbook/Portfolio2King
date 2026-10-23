@@ -5,11 +5,13 @@ import {
   type Asset,
   type AssetType,
   type CryptoCategory,
+  type ExchangeBalance,
   type PriceSnapshot,
   type Snapshot,
   type Transaction,
   type TxKind,
 } from "@/db/schema";
+import { EXCHANGE_IDS } from "@/lib/exchanges";
 import { parsePriceSource, type PriceProvider } from "@/lib/market-prices";
 import { replay } from "@/lib/portfolio";
 
@@ -22,7 +24,13 @@ import { replay } from "@/lib/portfolio";
  *
  *   { app: "ledgerly", kind: "portfolio-database-backup", version: 1,
  *     exportedAt: "<ISO timestamp>",
- *     tables: { assets: [...], transactions: [...], snapshots: [...], priceSnapshots: [...] } }
+ *     tables: { assets: [...], transactions: [...], snapshots: [...], priceSnapshots: [...],
+ *               exchangeBalances: [...] } }
+ *
+ * `exchangeBalances` is optional: files written before exchange imports existed
+ * simply do not have it. It must travel with a backup, because it is the
+ * baseline a re-sync diffs against — restoring without it would make the next
+ * sync import every balance a second time. API keys are never exported.
  */
 
 export const BACKUP_APP = "ledgerly";
@@ -36,6 +44,7 @@ export const MAX_BACKUP_ROWS = {
   transactions: 100_000,
   snapshots: 20_000,
   priceSnapshots: 500_000,
+  exchangeBalances: 100_000,
 } as const;
 
 export type BackupAsset = Omit<Asset, "priceUpdatedAt" | "createdAt" | "priceSource"> & {
@@ -47,6 +56,8 @@ export type BackupAsset = Omit<Asset, "priceUpdatedAt" | "createdAt" | "priceSou
 export type BackupTransaction = Omit<Transaction, "createdAt"> & { createdAt: string };
 export type BackupSnapshot = Snapshot;
 export type BackupPriceSnapshot = PriceSnapshot;
+/** Last figure each exchange reported for an asset — the sync baseline. */
+export type BackupExchangeBalance = Omit<ExchangeBalance, "id" | "syncedAt"> & { syncedAt: string };
 
 export type PortfolioBackup = {
   app: typeof BACKUP_APP;
@@ -58,6 +69,7 @@ export type PortfolioBackup = {
     transactions: BackupTransaction[];
     snapshots: BackupSnapshot[];
     priceSnapshots: BackupPriceSnapshot[];
+    exchangeBalances?: BackupExchangeBalance[];
   };
 };
 
@@ -88,30 +100,43 @@ export function createBackup(
   snapshots: Snapshot[],
   exportedAt = new Date(),
   priceSnapshots: PriceSnapshot[] = [],
+  exchangeBalances: ExchangeBalance[] = [],
 ): PortfolioBackup {
+  const tables: PortfolioBackup["tables"] = {
+    assets: assets.map((a) => ({
+      ...a,
+      priceUpdatedAt: toIsoTimestamp(a.priceUpdatedAt),
+      createdAt: toIsoTimestamp(a.createdAt),
+    })),
+    transactions: transactions.map((t) => ({
+      ...t,
+      date: toIsoDate(t.date),
+      createdAt: toIsoTimestamp(t.createdAt),
+    })),
+    snapshots: snapshots.map((s) => ({ ...s, date: toIsoDate(s.date) })),
+    priceSnapshots: priceSnapshots.map((p) => ({
+      assetId: p.assetId,
+      date: toIsoDate(p.date),
+      price: p.price,
+    })),
+  };
+  // Only written when there is something to write, so a portfolio without
+  // exchange imports keeps producing byte-identical backups.
+  if (exchangeBalances.length > 0) {
+    tables.exchangeBalances = exchangeBalances.map((row) => ({
+      assetId: row.assetId,
+      exchange: row.exchange,
+      quantity: row.quantity,
+      symbol: row.symbol,
+      syncedAt: toIsoTimestamp(row.syncedAt),
+    }));
+  }
   return {
     app: BACKUP_APP,
     kind: BACKUP_KIND,
     version: BACKUP_VERSION,
     exportedAt: exportedAt.toISOString(),
-    tables: {
-      assets: assets.map((a) => ({
-        ...a,
-        priceUpdatedAt: toIsoTimestamp(a.priceUpdatedAt),
-        createdAt: toIsoTimestamp(a.createdAt),
-      })),
-      transactions: transactions.map((t) => ({
-        ...t,
-        date: toIsoDate(t.date),
-        createdAt: toIsoTimestamp(t.createdAt),
-      })),
-      snapshots: snapshots.map((s) => ({ ...s, date: toIsoDate(s.date) })),
-      priceSnapshots: priceSnapshots.map((p) => ({
-        assetId: p.assetId,
-        date: toIsoDate(p.date),
-        price: p.price,
-      })),
-    },
+    tables,
   };
 }
 
@@ -276,6 +301,31 @@ export function parseBackup(input: unknown): PortfolioBackup {
     priceSnapshotKeys.add(key);
   }
 
+  // Backward compatibility: backups written before exchange imports omit this.
+  const rawExchangeBalances =
+    input.tables.exchangeBalances === undefined ? [] : rows(input.tables.exchangeBalances, "exchangeBalances");
+  const exchangeBalances: BackupExchangeBalance[] = rawExchangeBalances.map((row) => {
+    const assetId = idField(row, "assetId");
+    if (!assetIds.has(assetId)) fail(`Exchange balance references asset id ${assetId}, which is not in the backup.`);
+    const exchange = stringField(row, "exchange", 32);
+    if (!(EXCHANGE_IDS as readonly string[]).includes(exchange)) fail(`Unknown exchange "${exchange}".`);
+    return {
+      assetId,
+      exchange,
+      quantity: numberField(row, "quantity", { min: 0 }),
+      symbol: stringField(row, "symbol", 32),
+      syncedAt: timestampField(row, "syncedAt"),
+    };
+  });
+  const exchangeBalanceKeys = new Set<string>();
+  for (const balance of exchangeBalances) {
+    const key = `${balance.assetId}:${balance.exchange}`;
+    if (exchangeBalanceKeys.has(key)) {
+      fail(`Backup contains the ${balance.exchange} balance for asset ${balance.assetId} more than once.`);
+    }
+    exchangeBalanceKeys.add(key);
+  }
+
   // Recompute derived balances per asset and reject impossible histories.
   for (const asset of assets) {
     const own = transactions
@@ -300,7 +350,13 @@ export function parseBackup(input: unknown): PortfolioBackup {
     kind: BACKUP_KIND,
     version: BACKUP_VERSION,
     exportedAt,
-    tables: { assets, transactions, snapshots, priceSnapshots },
+    tables: {
+      assets,
+      transactions,
+      snapshots,
+      priceSnapshots,
+      ...(exchangeBalances.length > 0 ? { exchangeBalances } : {}),
+    },
   };
 }
 
@@ -314,5 +370,6 @@ export function backupCounts(backup: PortfolioBackup) {
     transactions: backup.tables.transactions.length,
     snapshots: backup.tables.snapshots.length,
     priceSnapshots: backup.tables.priceSnapshots.length,
+    exchangeBalances: backup.tables.exchangeBalances?.length ?? 0,
   };
 }

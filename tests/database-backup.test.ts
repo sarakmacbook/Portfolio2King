@@ -7,7 +7,7 @@ import {
   createBackup,
   parseBackup,
 } from "../src/lib/database-backup";
-import type { Asset, PriceSnapshot, Snapshot, Transaction } from "../src/db/schema";
+import type { Asset, ExchangeBalance, PriceSnapshot, Snapshot, Transaction } from "../src/db/schema";
 
 const now = new Date("2026-01-02T03:04:05.000Z");
 
@@ -35,7 +35,14 @@ test("createBackup emits a versioned document with daily price snapshots that pa
   assert.equal(backup.kind, "portfolio-database-backup");
   assert.equal(backup.version, 1);
   assert.equal(backup.exportedAt, now.toISOString());
-  assert.deepEqual(backupCounts(backup), { assets: 2, transactions: 2, snapshots: 1, priceSnapshots: 2 });
+  assert.deepEqual(backupCounts(backup), {
+    assets: 2,
+    transactions: 2,
+    snapshots: 1,
+    priceSnapshots: 2,
+    exchangeBalances: 0,
+  });
+  assert.equal(backup.tables.exchangeBalances, undefined, "no exchange rows means no extra table");
   assert.match(backupFileName(now), /^ledgerly-backup-2026-01-02\.json$/);
 
   const parsed = parseBackup(JSON.parse(JSON.stringify(backup)));
@@ -43,6 +50,35 @@ test("createBackup emits a versioned document with daily price snapshots that pa
   assert.equal(parsed.tables.assets[1].avgCost, 100);
   assert.equal(parsed.tables.transactions[0].date, "2026-01-01");
   assert.deepEqual(parsed.tables.priceSnapshots, priceSnapshots);
+});
+
+test("exchange sync baselines travel with the backup and survive a re-parse", () => {
+  const balances: ExchangeBalance[] = [
+    { id: 7, assetId: 2, exchange: "binance", quantity: 10, symbol: "AAPL", syncedAt: now },
+  ];
+  const backup = createBackup(assets, transactions, snapshots, now, priceSnapshots, balances);
+  assert.deepEqual(backupCounts(backup).exchangeBalances, 1);
+  assert.deepEqual(backup.tables.exchangeBalances, [
+    { assetId: 2, exchange: "binance", quantity: 10, symbol: "AAPL", syncedAt: now.toISOString() },
+  ]);
+
+  const parsed = parseBackup(JSON.parse(JSON.stringify(backup)));
+  assert.deepEqual(parsed.tables.exchangeBalances, backup.tables.exchangeBalances);
+
+  const legacy = JSON.parse(JSON.stringify(validBackup()));
+  assert.equal(parseBackup(legacy).tables.exchangeBalances, undefined);
+
+  const dangling = JSON.parse(JSON.stringify(backup));
+  dangling.tables.exchangeBalances[0].assetId = 999;
+  assert.throws(() => parseBackup(dangling), /Exchange balance references asset id 999/);
+
+  const unknown = JSON.parse(JSON.stringify(backup));
+  unknown.tables.exchangeBalances[0].exchange = "ftx";
+  assert.throws(() => parseBackup(unknown), /Unknown exchange/);
+
+  const duplicate = JSON.parse(JSON.stringify(backup));
+  duplicate.tables.exchangeBalances.push({ ...duplicate.tables.exchangeBalances[0], id: undefined, syncedAt: now.toISOString() });
+  assert.throws(() => parseBackup(duplicate), /more than once/);
 });
 
 test("parseBackup accepts legacy v1 backups without a priceSnapshots table", () => {
