@@ -119,10 +119,12 @@ activity** — can be moved up and down as whole blocks:
    pending moves and **Reset to default** restores Portfolio stats → Holdings →
    Value history → Allocation → Recent activity.
 
-The four stat cards can be shuffled **inside** their row at the same time: each
-one gets its own small header with a grip and **◀ / ▶** buttons, so Cash can sit
-last or Realized first without moving the whole row. Both orders are saved by the
-same **Save layout** click.
+The four stat cards can be shuffled **inside** their row and **renamed** at the
+same time: each one gets its own small header with a grip and **◀ / ▶** buttons
+plus an editable label field (up to 40 characters; clearing a label falls back
+to its default heading), so Cash can sit last or be renamed to "Dry powder"
+without moving the whole row. Both orders and any custom labels are saved by the
+same **Save layout** click and restored by **Reset to default**.
 
 Details:
 
@@ -132,7 +134,8 @@ Details:
   hand-edited setting cannot break the page. An order saved before the stat row
   became a block keeps that row at the top instead of pushing it to the bottom.
 - The stat-card order lives beside it under `dashboard.statsOrder`
-  (`cash,invested,unrealized,realized` by default).
+  (`cash,invested,unrealized,realized` by default), and custom headings live
+  under `dashboard.statsLabels` as a JSON map of `{ cash, invested, unrealized, realized }`.
 - The two charts stay side by side (Value history 3/5, Allocation 2/5) whenever
   they are next to each other, and full-width cards start a new row. On phones the
   cards stack in the saved order.

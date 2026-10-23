@@ -7,7 +7,11 @@ import { Donut, HistoryChart, type Point } from "@/components/Charts";
 import DashboardLayout from "@/components/DashboardLayout";
 import HoldingsTable, { type HoldingRow } from "@/components/HoldingsTable";
 import RefreshPricesButton from "@/components/RefreshPricesButton";
-import { loadDashboardOrder, loadDashboardStatOrder } from "@/lib/dashboard-order-db";
+import {
+  loadDashboardOrder,
+  loadDashboardStatLabels,
+  loadDashboardStatOrder,
+} from "@/lib/dashboard-order-db";
 import { KIND_META, TYPE_META, fmtDate, money, pct, pnlColor, qty } from "@/lib/format";
 import {
   assetCost,
@@ -27,12 +31,13 @@ export const dynamic = "force-dynamic";
 export default async function Dashboard() {
   if (!isDatabaseConfigured()) return <DatabaseSetup />;
   const list = await getAllAssets();
-  const [snaps, priceSnaps, activity, dashboardOrder, statOrder] = await Promise.all([
+  const [snaps, priceSnaps, activity, dashboardOrder, statOrder, statLabels] = await Promise.all([
     getSnapshots(),
     getAllPriceSnapshots(),
     getRecentActivity(6),
     loadDashboardOrder(),
     loadDashboardStatOrder(),
+    loadDashboardStatLabels(),
   ]);
   const totals = computeTotals(list);
   const t = today();
@@ -141,38 +146,27 @@ export default async function Dashboard() {
       <DashboardLayout
         initialOrder={dashboardOrder}
         initialStatsOrder={statOrder}
+        initialStatsLabels={statLabels}
         statsCards={{
-          cash: (
-            <Stat
-              label="Cash"
-              value={money(totals.cashValue)}
-              hint={`${pct(totals.totalValue ? totals.cashValue / totals.totalValue : 0, false)} of portfolio`}
-            />
-          ),
-          invested: (
-            <Stat
-              label="Invested (cost basis)"
-              value={money(invested)}
-              hint={`${list.filter((a) => a.type !== "cash").length} positions`}
-            />
-          ),
-          unrealized: (
-            <Stat
-              label="Unrealized P/L"
-              value={money(totals.unrealized, { sign: true })}
-              valueClass={pnlColor(totals.unrealized)}
-              hint={pct(unrealizedPct)}
-              hintClass={pnlColor(totals.unrealized)}
-            />
-          ),
-          realized: (
-            <Stat
-              label="Realized P/L + income"
-              value={money(totals.realized, { sign: true })}
-              valueClass={pnlColor(totals.realized)}
-              hint="From sells, dividends & interest"
-            />
-          ),
+          cash: {
+            value: money(totals.cashValue),
+            hint: `${pct(totals.totalValue ? totals.cashValue / totals.totalValue : 0, false)} of portfolio`,
+          },
+          invested: {
+            value: money(invested),
+            hint: `${list.filter((a) => a.type !== "cash").length} positions`,
+          },
+          unrealized: {
+            value: money(totals.unrealized, { sign: true }),
+            valueClass: pnlColor(totals.unrealized),
+            hint: pct(unrealizedPct),
+            hintClass: pnlColor(totals.unrealized),
+          },
+          realized: {
+            value: money(totals.realized, { sign: true }),
+            valueClass: pnlColor(totals.realized),
+            hint: "From sells, dividends & interest",
+          },
         }}
         blocks={{
           holdings: (
@@ -229,28 +223,6 @@ export default async function Dashboard() {
           ),
         }}
       />
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  hint,
-  valueClass = "text-slate-900",
-  hintClass = "text-slate-500",
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  valueClass?: string;
-  hintClass?: string;
-}) {
-  return (
-    <div className="card p-4">
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
-      <p className={`mt-2 truncate text-lg font-semibold tabular-nums sm:text-xl ${valueClass}`}>{value}</p>
-      {hint && <p className={`mt-0.5 text-xs ${hintClass}`}>{hint}</p>}
     </div>
   );
 }

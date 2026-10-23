@@ -26,12 +26,19 @@ import { parsePriceSource } from "@/lib/market-prices";
 import { refreshPricesWithAlerts } from "@/lib/price-refresh";
 import {
   clearDashboardOrder,
+  clearDashboardStatLabels,
   clearDashboardStatOrder,
   saveDashboardOrder,
+  saveDashboardStatLabels,
   saveDashboardStatOrder,
 } from "@/lib/dashboard-order-db";
 import { isDashboardBlockKey } from "@/lib/dashboard-layout";
-import { isDashboardStatKey } from "@/lib/dashboard-stats";
+import {
+  isDashboardStatKey,
+  MAX_DASHBOARD_STAT_LABEL_LENGTH,
+  normaliseDashboardStatLabels,
+  type DashboardStatKey,
+} from "@/lib/dashboard-stats";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -365,6 +372,27 @@ function parseDashboardStatOrder(raw: string): string[] {
   return keys;
 }
 
+function parseDashboardStatLabels(raw: string): Record<DashboardStatKey, string> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("Could not read the stat card labels. Reload the page and try again.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Could not read the stat card labels.");
+  }
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!isDashboardStatKey(key)) {
+      throw new Error("The stat card labels contain an unknown card.");
+    }
+    if (typeof value === "string" && value.trim().length > MAX_DASHBOARD_STAT_LABEL_LENGTH) {
+      throw new Error(`Stat card labels must be ${MAX_DASHBOARD_STAT_LABEL_LENGTH} characters or fewer.`);
+    }
+  }
+  return normaliseDashboardStatLabels(parsed);
+}
+
 /** Saves the dashboard card order from the "Arrange layout" mode. */
 export async function saveDashboardLayout(_prev: ActionState, fd: FormData): Promise<ActionState> {
   try {
@@ -374,6 +402,8 @@ export async function saveDashboardLayout(_prev: ActionState, fd: FormData): Pro
     // form without the field) simply leaves the saved order untouched.
     const statsOrder = str(fd, "statsOrder");
     if (statsOrder) await saveDashboardStatOrder(parseDashboardStatOrder(statsOrder));
+    const statsLabels = str(fd, "statsLabels");
+    if (statsLabels) await saveDashboardStatLabels(parseDashboardStatLabels(statsLabels));
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save the dashboard layout" };
   }
@@ -386,6 +416,7 @@ export async function resetDashboardLayout(_prev: ActionState, _fd: FormData): P
   try {
     await clearDashboardOrder();
     await clearDashboardStatOrder();
+    await clearDashboardStatLabels();
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not reset the dashboard layout" };
   }

@@ -10,10 +10,13 @@ import {
 } from "../src/lib/dashboard-layout";
 import {
   DASHBOARD_STATS,
+  DEFAULT_DASHBOARD_STAT_LABELS,
   DEFAULT_DASHBOARD_STAT_ORDER,
   isDashboardStatKey,
+  MAX_DASHBOARD_STAT_LABEL_LENGTH,
   moveStatBy,
   moveStatTo,
+  normaliseDashboardStatLabels,
   normaliseDashboardStatOrder,
 } from "../src/lib/dashboard-stats";
 
@@ -120,6 +123,42 @@ test("the four stat cards have their own left-to-right order", () => {
   assert.deepEqual(moveStatTo(start, "realized", "cash", false), ["realized", "cash", "invested", "unrealized"]);
   assert.deepEqual(moveStatTo(start, "cash", "unrealized", true), ["invested", "unrealized", "cash", "realized"]);
   assert.deepEqual(moveStatTo(start, "cash", "cash", true), start);
+});
+
+test("the four stat cards can be renamed and blank names fall back to defaults", () => {
+  assert.deepEqual(DEFAULT_DASHBOARD_STAT_LABELS, {
+    cash: "Cash",
+    invested: "Invested (cost basis)",
+    unrealized: "Unrealized P/L",
+    realized: "Realized P/L + income",
+  });
+  assert.deepEqual(normaliseDashboardStatLabels(undefined), DEFAULT_DASHBOARD_STAT_LABELS);
+  assert.deepEqual(normaliseDashboardStatLabels(""), DEFAULT_DASHBOARD_STAT_LABELS);
+  assert.deepEqual(normaliseDashboardStatLabels("{not json"), DEFAULT_DASHBOARD_STAT_LABELS);
+  assert.deepEqual(normaliseDashboardStatLabels(["array"]), DEFAULT_DASHBOARD_STAT_LABELS);
+
+  // Custom labels are trimmed; blank or missing entries fall back to defaults; unknown keys are ignored.
+  assert.deepEqual(
+    normaliseDashboardStatLabels(
+      JSON.stringify({
+        cash: "  Dry powder  ",
+        invested: "   ",
+        unrealized: "Open gain",
+        extra: "ignored",
+      }),
+    ),
+    {
+      cash: "Dry powder",
+      invested: "Invested (cost basis)",
+      unrealized: "Open gain",
+      realized: "Realized P/L + income",
+    },
+  );
+
+  // Overlong labels are clipped to MAX_DASHBOARD_STAT_LABEL_LENGTH.
+  const long = "x".repeat(MAX_DASHBOARD_STAT_LABEL_LENGTH + 20);
+  const clipped = normaliseDashboardStatLabels({ cash: long });
+  assert.equal(clipped.cash.length, MAX_DASHBOARD_STAT_LABEL_LENGTH);
 });
 
 test("navigation links map to the right sections", async () => {

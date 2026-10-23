@@ -2,7 +2,11 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { appSettings } from "@/db/schema";
 import { normaliseDashboardOrder, type DashboardBlockKey } from "@/lib/dashboard-layout";
-import { normaliseDashboardStatOrder, type DashboardStatKey } from "@/lib/dashboard-stats";
+import {
+  normaliseDashboardStatLabels,
+  normaliseDashboardStatOrder,
+  type DashboardStatKey,
+} from "@/lib/dashboard-stats";
 import { ensureSchema } from "@/lib/portfolio";
 
 /**
@@ -15,6 +19,9 @@ export const DASHBOARD_ORDER_SETTING = "dashboard.order";
 
 /** app_settings key holding the left-to-right order of the four stat cards. */
 export const DASHBOARD_STATS_SETTING = "dashboard.statsOrder";
+
+/** app_settings key holding custom headings for the four stat cards. */
+export const DASHBOARD_STAT_LABELS_SETTING = "dashboard.statsLabels";
 
 async function readSetting(key: string): Promise<string | null> {
   const [row] = await db
@@ -71,4 +78,26 @@ export async function saveDashboardStatOrder(order: readonly unknown[]): Promise
 export async function clearDashboardStatOrder(): Promise<void> {
   await ensureSchema();
   await db.delete(appSettings).where(eq(appSettings.key, DASHBOARD_STATS_SETTING));
+}
+
+/** Headings of the four stat cards, falling back to the defaults when unset. */
+export async function loadDashboardStatLabels(): Promise<Record<DashboardStatKey, string>> {
+  await ensureSchema();
+  return normaliseDashboardStatLabels(await readSetting(DASHBOARD_STAT_LABELS_SETTING));
+}
+
+/** Stores custom headings for the four stat cards; blank entries fall back to defaults. */
+export async function saveDashboardStatLabels(
+  labels: unknown,
+): Promise<Record<DashboardStatKey, string>> {
+  await ensureSchema();
+  const normalised = normaliseDashboardStatLabels(labels);
+  await writeSetting(DASHBOARD_STAT_LABELS_SETTING, JSON.stringify(normalised));
+  return normalised;
+}
+
+/** Removes custom stat headings (Reset to default). */
+export async function clearDashboardStatLabels(): Promise<void> {
+  await ensureSchema();
+  await db.delete(appSettings).where(eq(appSettings.key, DASHBOARD_STAT_LABELS_SETTING));
 }

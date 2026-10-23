@@ -1,12 +1,20 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import {
   DASHBOARD_STATS,
+  MAX_DASHBOARD_STAT_LABEL_LENGTH,
   moveStatBy,
   moveStatTo,
   type DashboardStatKey,
 } from "@/lib/dashboard-stats";
+
+export type StatCardData = {
+  value: string;
+  hint?: string;
+  valueClass?: string;
+  hintClass?: string;
+};
 
 function GripIcon() {
   return (
@@ -22,22 +30,24 @@ function GripIcon() {
 }
 
 /**
- * The four dashboard numbers. They keep their grid, but in "Arrange layout"
+ * The four dashboard numbers. They keep their grid, and in "Arrange layout"
  * mode each card can be dragged left/right (or nudged with the arrows) inside
- * the row; the order is saved with the rest of the dashboard layout.
- *
- * The cards themselves are rendered on the server and handed in as nodes, so
- * the numbers, colours and formatting stay in one place.
+ * the row and given a custom label; both the order and labels are saved with
+ * the rest of the dashboard layout.
  */
 export default function StatsGrid({
   cards,
   order,
   onOrderChange,
+  labels,
+  onLabelChange,
   arranging,
 }: {
-  cards: Record<DashboardStatKey, ReactNode>;
+  cards: Record<DashboardStatKey, StatCardData>;
   order: DashboardStatKey[];
   onOrderChange: (next: DashboardStatKey[]) => void;
+  labels: Record<DashboardStatKey, string>;
+  onLabelChange: (key: DashboardStatKey, label: string) => void;
   arranging: boolean;
 }) {
   const [dragging, setDragging] = useState<DashboardStatKey | null>(null);
@@ -49,12 +59,17 @@ export default function StatsGrid({
     setDrop(null);
   }
 
+  function displayLabel(key: DashboardStatKey): string {
+    const custom = labels[key]?.trim();
+    return custom && custom.length > 0 ? custom : DASHBOARD_STATS[key].label;
+  }
+
   function move(key: DashboardStatKey, delta: number) {
     const from = order.indexOf(key);
     const to = Math.max(0, Math.min(order.length - 1, from + delta));
     if (from < 0 || to === from) return;
     onOrderChange(moveStatBy(order, key, delta));
-    setAnnouncement(`${DASHBOARD_STATS[key].label} moved to position ${to + 1} of ${order.length}.`);
+    setAnnouncement(`${displayLabel(key)} moved to position ${to + 1} of ${order.length}.`);
   }
 
   function handleDrop() {
@@ -65,7 +80,7 @@ export default function StatsGrid({
     const next = moveStatTo(order, dragging, drop.key, drop.after);
     onOrderChange(next);
     setAnnouncement(
-      `${DASHBOARD_STATS[dragging].label} moved to position ${next.indexOf(dragging) + 1} of ${next.length}.`,
+      `${displayLabel(dragging)} moved to position ${next.indexOf(dragging) + 1} of ${next.length}.`,
     );
     clearDrag();
   }
@@ -78,6 +93,8 @@ export default function StatsGrid({
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {order.map((key, position) => {
           const meta = DASHBOARD_STATS[key];
+          const card = cards[key];
+          const label = displayLabel(key);
           const isDragging = dragging === key;
           const isDropTarget = drop?.key === key && !isDragging;
           return (
@@ -116,7 +133,7 @@ export default function StatsGrid({
                     title="Drag to move this card"
                   >
                     <GripIcon />
-                    <span className="truncate">{meta.label}</span>
+                    <span className="truncate">{label}</span>
                   </span>
                   <span className="ml-auto flex">
                     <button
@@ -124,7 +141,7 @@ export default function StatsGrid({
                       className="grid h-5 w-5 place-items-center rounded text-[10px] text-indigo-700 hover:bg-white disabled:opacity-30"
                       onClick={() => move(key, -1)}
                       disabled={position === 0}
-                      aria-label={`Move ${meta.label} left`}
+                      aria-label={`Move ${label} left`}
                     >
                       ◀
                     </button>
@@ -133,14 +150,40 @@ export default function StatsGrid({
                       className="grid h-5 w-5 place-items-center rounded text-[10px] text-indigo-700 hover:bg-white disabled:opacity-30"
                       onClick={() => move(key, 1)}
                       disabled={position === order.length - 1}
-                      aria-label={`Move ${meta.label} right`}
+                      aria-label={`Move ${label} right`}
                     >
                       ▶
                     </button>
                   </span>
                 </div>
               )}
-              {cards[key]}
+              <div className="card p-4">
+                {arranging ? (
+                  <input
+                    type="text"
+                    value={labels[key] ?? ""}
+                    placeholder={meta.label}
+                    maxLength={MAX_DASHBOARD_STAT_LABEL_LENGTH}
+                    aria-label={`${meta.label} label`}
+                    onChange={(event) => onLabelChange(key, event.target.value)}
+                    className="input px-2.5 py-1 text-xs font-medium uppercase tracking-wide"
+                  />
+                ) : (
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                    {label}
+                  </p>
+                )}
+                <p
+                  className={`mt-2 truncate text-lg font-semibold tabular-nums sm:text-xl ${
+                    card.valueClass ?? "text-slate-900"
+                  }`}
+                >
+                  {card.value}
+                </p>
+                {card.hint && (
+                  <p className={`mt-0.5 text-xs ${card.hintClass ?? "text-slate-500"}`}>{card.hint}</p>
+                )}
+              </div>
             </div>
           );
         })}
