@@ -162,16 +162,38 @@ test("the four stat cards can be renamed and blank names fall back to defaults",
 });
 
 test("navigation links map to the right sections", async () => {
-  const { NAV_LINKS, isActivePath } = await import("../src/lib/nav-links");
+  const {
+    NAV_LINKS,
+    PRIMARY_NAV_LINKS,
+    SETTINGS_NAV_LINKS,
+    isActivePath,
+    isSettingsPath,
+  } = await import("../src/lib/nav-links");
 
+  assert.deepEqual(
+    PRIMARY_NAV_LINKS.map((link) => link.label),
+    ["Dashboard", "Activity"],
+  );
+  assert.deepEqual(
+    PRIMARY_NAV_LINKS.map((link) => link.href),
+    ["/", "/activity"],
+  );
+  assert.deepEqual(
+    SETTINGS_NAV_LINKS.map((link) => link.label),
+    ["Exchanges", "Refresh prices", "Alerts", "Database"],
+  );
+  assert.deepEqual(
+    SETTINGS_NAV_LINKS.map((link) => link.href),
+    ["/exchanges", "/prices", "/alerts", "/database"],
+  );
   assert.equal(NAV_LINKS.length, 6);
   assert.deepEqual(
     NAV_LINKS.map((link) => link.label),
-    ["Dashboard", "Exchanges", "Refresh prices", "Activity", "Alerts", "Database"],
+    ["Dashboard", "Activity", "Exchanges", "Refresh prices", "Alerts", "Database"],
   );
   assert.deepEqual(
     NAV_LINKS.map((link) => link.href),
-    ["/", "/exchanges", "/prices", "/activity", "/alerts", "/database"],
+    ["/", "/activity", "/exchanges", "/prices", "/alerts", "/database"],
   );
 
   assert.equal(isActivePath("/", "/"), true);
@@ -185,4 +207,13 @@ test("navigation links map to the right sections", async () => {
   assert.equal(isActivePath("/exchanges", "/exchanges"), true);
   assert.equal(isActivePath("/exchanges/binance", "/exchanges"), true);
   assert.equal(isActivePath("/prices", "/exchanges"), false);
+
+  assert.equal(isSettingsPath("/"), false);
+  assert.equal(isSettingsPath("/assets/12"), false);
+  assert.equal(isSettingsPath("/activity"), false);
+  assert.equal(isSettingsPath("/exchanges"), true);
+  assert.equal(isSettingsPath("/exchanges/binance"), true);
+  assert.equal(isSettingsPath("/prices"), true);
+  assert.equal(isSettingsPath("/alerts"), true);
+  assert.equal(isSettingsPath("/database"), true);
 });
