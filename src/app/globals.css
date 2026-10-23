@@ -24,8 +24,14 @@
   }
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   font-feature-settings: "tnum" 1, "cv11" 1;
+  min-height: 100dvh;
   overflow-x: hidden;
   transition: background-color 180ms ease, color 180ms ease;
 }
@@ -44,25 +50,72 @@ body {
 }
 .theme-toggle:hover { background: rgb(255 255 255 / .2); }
 .theme-toggle:active { transform: scale(.94); }
+/* 44 px touch target on phones, where the header only has two controls. */
+@media (max-width: 767px) {
+  .theme-toggle { width: 2.75rem; height: 2.75rem; border-radius: .85rem; }
+}
+
+/* Category tabs stay a single swipeable row on narrow screens. */
+.tab-strip {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: .25rem;
+  overscroll-behavior-x: contain;
+}
+.tab-strip::-webkit-scrollbar { display: none; }
+.tab-strip > * { scroll-snap-align: start; flex: none; }
 .theme-sun { display: none; }
 
-/* Keep mobile menu motion on the compositor for smooth 60 Hz animation. */
+/* iOS taps: no 300 ms delay, no grey flash, no accidental text selection. */
+.tap,
+button,
+a {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Floating menu surface shared by the desktop dropdowns and the phone sheet. */
+.menu-surface {
+  border: 1px solid rgb(226 232 240);
+  background: #fff;
+  color: #0f172a;
+  box-shadow: 0 18px 45px rgb(15 23 42 / .18), 0 2px 6px rgb(15 23 42 / .06);
+  animation: menu-pop 160ms cubic-bezier(.2, .8, .2, 1);
+}
+html.dark .menu-surface {
+  border-color: rgb(100 116 139 / .34);
+  background: #121625;
+  color: #e8eaf2;
+  box-shadow: 0 20px 48px rgb(0 0 0 / .55), 0 2px 6px rgb(0 0 0 / .35);
+}
+
+/**
+ * Phone sheet: one scrollable panel under the sticky header. The old panel kept
+ * `will-change`/`backface-visibility` on permanently, which made iOS Safari
+ * composite the surface incorrectly (menu rows painting outside their box).
+ * Animating on mount instead keeps it cheap and always correctly painted.
+ */
 .mobile-menu-panel {
-  transform-origin: top center;
-  transition: opacity 160ms ease-out, transform 160ms cubic-bezier(.2, .8, .2, 1);
-  will-change: opacity, transform;
-  backface-visibility: hidden;
-  -webkit-font-smoothing: antialiased;
+  transform-origin: top right;
+  max-height: calc(100dvh - 5.5rem - env(safe-area-inset-top));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding-bottom: calc(.5rem + env(safe-area-inset-bottom));
+  padding-left: calc(.5rem + env(safe-area-inset-left));
+  padding-right: calc(.5rem + env(safe-area-inset-right));
 }
-.mobile-menu-open {
-  opacity: 1;
-  transform: translate3d(0, 0, 0) scale(1);
-  pointer-events: auto;
-}
-.mobile-menu-closed {
-  opacity: 0;
-  transform: translate3d(0, -8px, 0) scale(.98);
-  pointer-events: none;
+
+@keyframes menu-pop {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -6px, 0) scale(.98);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
 }
 
 html.dark .theme-sun { display: inline; }
@@ -214,12 +267,13 @@ html.dark .allocation-chart .bg-slate-50 { background-color: rgb(139 92 246 / .0
   input, select, textarea { font-size: 16px !important; } /* Prevent iOS form zoom. */
 }
 
-/* iOS standalone web clips need breathing room around the home indicator. */
+/* iOS standalone web clips need breathing room around the notch and indicator. */
 @media (display-mode: standalone) {
   .site-header { padding-top: env(safe-area-inset-top); }
-  body { min-height: 100dvh; }
+  body { min-height: 100dvh; overscroll-behavior-y: contain; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  body, .theme-toggle, .mobile-menu-panel { transition: none; }
+  body, .theme-toggle { transition: none; }
+  .menu-surface { animation: none; }
 }

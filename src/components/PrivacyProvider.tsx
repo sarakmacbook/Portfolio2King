@@ -35,7 +35,7 @@ type PrivacyContextValue = {
 
 const PrivacyContext = createContext<PrivacyContextValue | null>(null);
 
-function usePrivacy() {
+export function usePrivacy() {
   const ctx = useContext(PrivacyContext);
   if (!ctx) throw new Error("usePrivacy must be used within PrivacyProvider");
   return ctx;
@@ -909,89 +909,6 @@ export function PrivacyProvider({
   );
 }
 
-export function PrivacyHeaderControl() {
-  const {
-    hasPin,
-    hasPasskey,
-    locked,
-    hidden,
-    openDialog,
-    hideBalances,
-    requestRevealBalances,
-    lockPortfolio,
-  } = usePrivacy();
-  const hasLock = hasPin || hasPasskey;
-
-  if (locked) {
-    return (
-      <span
-        className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-white/15 px-3 text-xs font-semibold text-white ring-1 ring-white/20"
-        title="Portfolio is locked"
-      >
-        <span aria-hidden="true">🔒</span>
-        <span>Locked</span>
-      </span>
-    );
-  }
-
-  return (
-    <div className="flex items-center gap-1.5">
-      <button
-        type="button"
-        onClick={() => void (hidden ? requestRevealBalances() : hideBalances())}
-        className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-white/15 px-2.5 text-xs font-semibold text-white ring-1 ring-white/20 transition hover:bg-white/10"
-        aria-pressed={hidden}
-        aria-label={hidden ? "Reveal hidden balances" : "Hide portfolio balances"}
-        title={
-          hidden
-            ? hasLock
-              ? "Reveal balances (Face ID / Passkey or PIN required)"
-              : "Show portfolio balances"
-            : "Hide all balances (••••••)"
-        }
-      >
-        <span aria-hidden="true">{hidden ? "🙈" : "👁"}</span>
-        <span className="hidden sm:inline">{hidden ? "Hidden" : "Hide"}</span>
-      </button>
-
-      {hasLock ? (
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => void lockPortfolio()}
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-white/15 px-2.5 text-xs font-semibold text-white ring-1 ring-white/20 transition hover:bg-white/10"
-            aria-label="Lock portfolio now"
-            title="Lock portfolio now (requires Face ID, Passkey, or PIN to view)"
-          >
-            <span aria-hidden="true">🔒</span>
-            <span className="hidden sm:inline">Lock</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => openDialog("managePin")}
-            className="grid h-9 w-9 place-items-center rounded-xl bg-white/15 text-xs text-white ring-1 ring-white/20 transition hover:bg-white/10"
-            aria-label="Manage privacy lock"
-            title="Manage Face ID / Passkey or PIN lock"
-          >
-            {hasPasskey ? "🪪" : "🔑"}
-          </button>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => openDialog("setPin")}
-          className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-white/15 px-2.5 text-xs font-semibold text-white ring-1 ring-white/20 transition hover:bg-white/10"
-          aria-label="Set privacy lock"
-          title="Set Face ID, Passkey, or PIN lock for your portfolio"
-        >
-          <span aria-hidden="true">🔒</span>
-          <span className="hidden sm:inline">Lock setup</span>
-        </button>
-      )}
-    </div>
-  );
-}
-
 function PrivacyLockScreen() {
   const router = useRouter();
   const { hasPin, hasPasskey } = usePrivacy();
@@ -1182,16 +1099,7 @@ function PrivacyLockScreen() {
 }
 
 export function PrivacyGate({ children }: { children: ReactNode }) {
-  const {
-    hasPin,
-    hasPasskey,
-    locked,
-    hidden,
-    requestRevealBalances,
-    lockPortfolio,
-    openDialog,
-  } = usePrivacy();
-  const hasLock = hasPin || hasPasskey;
+  const { locked, hidden } = usePrivacy();
   const containerRef = useRef<HTMLDivElement>(null);
   const originalsRef = useRef<WeakMap<Text, string>>(new WeakMap());
 
@@ -1266,15 +1174,26 @@ export function PrivacyGate({ children }: { children: ReactNode }) {
     applyMasking();
     if (!hidden) return;
 
-    const observer = new MutationObserver(() => {
-      applyMasking();
-    });
+    // Coalesce bursts of DOM changes (typing, a menu opening, a refresh) into a
+    // single pass per frame so hidden mode stays smooth on an iPhone.
+    let frame = 0;
+    const schedule = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        applyMasking();
+      });
+    };
+    const observer = new MutationObserver(schedule);
     observer.observe(root, {
       childList: true,
       subtree: true,
       characterData: true,
     });
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (frame) window.cancelAnimationFrame(frame);
+    };
   }, [hidden, locked, children]);
 
   if (locked) {
@@ -1284,44 +1203,14 @@ export function PrivacyGate({ children }: { children: ReactNode }) {
   return (
     <div ref={containerRef}>
       {hidden && (
-        <div className="privacy-exempt mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-indigo-200 bg-indigo-50/60 px-4 py-2.5 text-xs text-slate-700 sm:text-sm">
-          <span className="flex items-center gap-2 font-medium text-indigo-900">
-            <span aria-hidden="true">🙈</span>
-            <span>
-              Hidden mode is on — all balances and quantities are masked (••••••).
-            </span>
+        <p className="privacy-exempt mb-5 flex items-center gap-2 rounded-2xl border border-indigo-200 bg-indigo-50/60 px-4 py-2.5 text-xs font-medium text-indigo-900 sm:text-sm">
+          <span aria-hidden="true">🙈</span>
+          <span>
+            Balances are hidden (••••••). Reveal them from the{" "}
+            <span className="md:hidden">☰ menu</span>
+            <span className="hidden md:inline">Privacy menu</span> in the header.
           </span>
-          <span className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void requestRevealBalances()}
-              className="btn-ghost px-3 py-1 text-xs"
-            >
-              {hasPasskey
-                ? "🪪 Reveal with Face ID / Passkey"
-                : hasPin
-                  ? "🔑 Enter PIN to reveal"
-                  : "👁 Reveal numbers"}
-            </button>
-            {hasLock ? (
-              <button
-                type="button"
-                onClick={() => void lockPortfolio()}
-                className="btn-primary px-3 py-1 text-xs"
-              >
-                🔒 Lock portfolio
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => openDialog("setPin")}
-                className="btn-primary px-3 py-1 text-xs"
-              >
-                🔒 Set Face ID / PIN lock
-              </button>
-            )}
-          </span>
-        </div>
+        </p>
       )}
       {children}
     </div>
