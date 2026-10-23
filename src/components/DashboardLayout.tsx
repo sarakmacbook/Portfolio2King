@@ -10,10 +10,12 @@ import {
   type DashboardBlockKey,
 } from "@/lib/dashboard-layout";
 import {
+  DEFAULT_DASHBOARD_STAT_LABELS,
   DEFAULT_DASHBOARD_STAT_ORDER,
+  normaliseDashboardStatLabels,
   type DashboardStatKey,
 } from "@/lib/dashboard-stats";
-import StatsGrid from "./StatsGrid";
+import StatsGrid, { type StatCardData } from "./StatsGrid";
 
 /** Column spans so the two charts stay side by side when they are adjacent. */
 const SPAN: Record<DashboardBlockKey, string> = {
@@ -47,15 +49,18 @@ export default function DashboardLayout({
   statsCards,
   initialOrder = DEFAULT_DASHBOARD_ORDER,
   initialStatsOrder = DEFAULT_DASHBOARD_STAT_ORDER,
+  initialStatsLabels = DEFAULT_DASHBOARD_STAT_LABELS,
 }: {
   blocks: Record<Exclude<DashboardBlockKey, "stats">, ReactNode>;
-  /** The four numbers, rendered on the server, in default order. */
-  statsCards: Record<DashboardStatKey, ReactNode>;
+  /** Values and hints for the four stat cards, keyed by stat id. */
+  statsCards: Record<DashboardStatKey, StatCardData>;
   initialOrder?: DashboardBlockKey[];
   initialStatsOrder?: DashboardStatKey[];
+  initialStatsLabels?: Record<DashboardStatKey, string>;
 }) {
   const [order, setOrder] = useState<DashboardBlockKey[]>(initialOrder);
   const [statsOrder, setStatsOrder] = useState<DashboardStatKey[]>(initialStatsOrder);
+  const [statsLabels, setStatsLabels] = useState<Record<DashboardStatKey, string>>(initialStatsLabels);
   const [arranging, setArranging] = useState(false);
   const [dragging, setDragging] = useState<DashboardBlockKey | null>(null);
   const [drop, setDrop] = useState<{ key: DashboardBlockKey; after: boolean } | null>(null);
@@ -64,6 +69,7 @@ export default function DashboardLayout({
   const [saving, startSaving] = useTransition();
   const savedOrder = useRef<DashboardBlockKey[]>(initialOrder);
   const savedStatsOrder = useRef<DashboardStatKey[]>(initialStatsOrder);
+  const savedStatsLabels = useRef<Record<DashboardStatKey, string>>(initialStatsLabels);
 
   function clearDrag() {
     setDragging(null);
@@ -73,6 +79,7 @@ export default function DashboardLayout({
   function startArranging() {
     savedOrder.current = order;
     savedStatsOrder.current = statsOrder;
+    savedStatsLabels.current = statsLabels;
     setNotice(null);
     setArranging(true);
   }
@@ -80,8 +87,13 @@ export default function DashboardLayout({
   function cancelArranging() {
     setOrder(savedOrder.current);
     setStatsOrder(savedStatsOrder.current);
+    setStatsLabels(savedStatsLabels.current);
     clearDrag();
     setArranging(false);
+  }
+
+  function updateStatLabel(key: DashboardStatKey, label: string) {
+    setStatsLabels((current) => ({ ...current, [key]: label }));
   }
 
   function move(key: DashboardBlockKey, delta: number) {
@@ -105,17 +117,21 @@ export default function DashboardLayout({
 
   function save() {
     const payload = JSON.stringify(order);
+    const normalisedLabels = normaliseDashboardStatLabels(statsLabels);
     startSaving(async () => {
       const fd = new FormData();
       fd.set("order", payload);
       fd.set("statsOrder", JSON.stringify(statsOrder));
+      fd.set("statsLabels", JSON.stringify(normalisedLabels));
       const result: ActionState = await saveDashboardLayout({}, fd);
       if (result.error) {
         setNotice({ kind: "error", text: result.error });
         return;
       }
+      setStatsLabels(normalisedLabels);
       savedOrder.current = order;
       savedStatsOrder.current = statsOrder;
+      savedStatsLabels.current = normalisedLabels;
       setArranging(false);
       setNotice({ kind: "ok", text: result.message ?? "Dashboard layout saved." });
     });
@@ -130,8 +146,10 @@ export default function DashboardLayout({
       }
       setOrder(DEFAULT_DASHBOARD_ORDER);
       setStatsOrder(DEFAULT_DASHBOARD_STAT_ORDER);
+      setStatsLabels(DEFAULT_DASHBOARD_STAT_LABELS);
       savedOrder.current = DEFAULT_DASHBOARD_ORDER;
       savedStatsOrder.current = DEFAULT_DASHBOARD_STAT_ORDER;
+      savedStatsLabels.current = DEFAULT_DASHBOARD_STAT_LABELS;
       clearDrag();
       setArranging(false);
       setNotice({ kind: "ok", text: result.message ?? "Dashboard layout reset to the default." });
@@ -164,7 +182,7 @@ export default function DashboardLayout({
         {arranging ? (
           <>
             <p className="mr-auto text-xs font-medium text-indigo-700">
-              Drag a card header to move it, or use ▲ / ▼. Nothing changes until you save.
+              Drag a card header to move it, use ▲ / ▼ or ◀ / ▶, and edit any stat label. Nothing changes until you save.
             </p>
             <button type="button" className="btn-ghost" onClick={cancelArranging} disabled={saving}>
               Cancel
@@ -263,6 +281,8 @@ export default function DashboardLayout({
                     cards={statsCards}
                     order={statsOrder}
                     onOrderChange={setStatsOrder}
+                    labels={statsLabels}
+                    onLabelChange={updateStatLabel}
                     arranging={arranging}
                   />
                 ) : (

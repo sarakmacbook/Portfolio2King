@@ -14,7 +14,7 @@ export type DashboardBlockKey = (typeof DASHBOARD_BLOCK_KEYS)[number];
 export type DashboardBlockMeta = { label: string; hint: string };
 
 export const DASHBOARD_BLOCKS: Record<DashboardBlockKey, DashboardBlockMeta> = {
-  stats: { label: "Portfolio stats", hint: "Cash, cost basis and P/L — shuffle the four cards inside" },
+  stats: { label: "Portfolio stats", hint: "Cash, cost basis and P/L — shuffle or rename the four cards inside" },
   holdings: { label: "Holdings", hint: "Table of every position" },
   history: { label: "Value history", hint: "Portfolio value over time" },
   allocation: { label: "Allocation", hint: "Breakdown by category" },
