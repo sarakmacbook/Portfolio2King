@@ -126,7 +126,10 @@ the form for you (or imports everything it finds):
 2. Click **Scan wallet**. Every non-zero balance comes back with its quantity,
    USD price, value and logo.
 3. Click one token to fill the form below, or **Import all** to book them all as
-   holdings in one go.
+   holdings in one go. The import files them into a **folder** — name it in the
+   *File into a folder* box, or leave the name blank and it is called after the
+   address (`0x1234…abcd`). Untick the box to import without a folder. Importing
+   the same wallet again reuses the same folder instead of making a second one.
 
 EVM addresses are read through **[DeBank](https://debank.com)**, which indexes
 every chain, so one call returns tokens from Ethereum, BNB Chain, Arbitrum, Base,
@@ -134,16 +137,21 @@ Polygon, Optimism, Avalanche, zkSync, Linea, Scroll, Mantle, Blast, Fantom, Gnos
 and Cronos together — with prices, so no per-token quote lookup is needed. The
 result says **via DeBank** so it is clear where the numbers came from.
 
-DeBank needs no key, but its public endpoints can rate-limit or block a server.
-Two things follow:
+DeBank needs no key, but its keyless routes do get blocked, renamed and
+rate-limited, so three are tried in order before giving up: DeBank's API gateway
+(`api.debank.com/v1/user/token_list`), its legacy web route
+(`api.debank.com/token/balance_list?user_id=…`) and Rabby's public API
+(`api.rabby.io`), which reads the same indexer. Two things follow:
 
 - Add a free **`DEBANK_ACCESS_KEY`** (from <https://cloud.debank.com>) to use the
-  supported Open API and get the reliable path. See `.env.example`.
-- Without a key — or when DeBank is down, blocked or rate-limited — the same scan
-  falls back to reading balances straight from public RPCs and block explorers.
-  The dialog then says so ("DeBank was unavailable (…) — read the chains
-  directly instead"), and everything still works; the fallback simply covers
-  fewer tokens per chain.
+  supported Open API and get the reliable path — one request, no fallbacks. See
+  `.env.example`.
+- Without a key — or when every DeBank route is down, blocked or rate-limited —
+  the same scan falls back to reading balances straight from public RPCs and
+  block explorers. The dialog says so quietly ("Read straight from the chains:
+  …") and everything still works; the fallback simply covers fewer tokens per
+  chain. A keyless 404 from one endpoint is not reported as a DeBank outage when
+  another endpoint answers.
 
 Notes:
 
@@ -260,6 +268,10 @@ of holdings and the folder's own total — followed by that folder's rows. Each
 header collapses, which is handy on a phone where the groups become stacked cards.
 There is no *Unfiled* group or chip: a holding without a folder is not a category,
 it is just a holding.
+
+Importing a wallet from **Add via wallet address** creates a folder named after
+the wallet (or whatever you type in *File into a folder*) and files the imported
+holdings into it, so a wallet reads as one group you can collapse or rename.
 
 Details:
 

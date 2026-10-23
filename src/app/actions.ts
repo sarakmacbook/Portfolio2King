@@ -27,7 +27,15 @@ import { getWeb3Wallet, parseWeb3WalletId } from "@/lib/web3-wallets";
 import { saveAssetWalletLogo } from "@/lib/web3-wallets-db";
 import { refreshPricesWithAlerts } from "@/lib/price-refresh";
 import { clearDashboardLayout, persistDashboardLayout } from "@/lib/dashboard-layout-save";
-import { setHoldingFolder } from "@/lib/dashboard-order-db";
+import {
+  loadHoldingFolderAssignments,
+  loadHoldingsFolders,
+  saveHoldingFolderAssignments,
+  saveHoldingsFolders,
+  setHoldingFolder,
+} from "@/lib/dashboard-order-db";
+import { folderForImport } from "@/lib/holdings-folders";
+import { shortWalletAddress } from "@/lib/wallet-chains";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -395,10 +403,22 @@ export async function saveHoldingFolderAssignment(input: {
   }
 }
 
+/**
+ * Imports a scanned wallet as holdings, filed into a folder named after the
+ * wallet.
+ *
+ * Importing a wallet used to leave its tokens loose in the table. They now land
+ * in one folder — the folder keeps the wallet together and can be collapsed,
+ * renamed or dragged like any other. `folderName` is what the user typed; left
+ * blank it falls back to the short address (`0x1234…abcd`). Pass
+ * `folderName: null` to import without a folder at all.
+ */
 export async function importWalletBalances(input: {
   address: string;
   walletLogo?: string;
   priceSource?: string;
+  /** Folder to file the holdings into; omit / empty for the short address, `null` for no folder. */
+  folderName?: string | null;
   balances: Array<{
     symbol: string;
     name: string;
@@ -408,7 +428,15 @@ export async function importWalletBalances(input: {
     category: CryptoCategory;
     contract: string | null;
   }>;
-}): Promise<{ ok: boolean; importedCount: number; error?: string }> {
+}): Promise<{
+  ok: boolean;
+  importedCount: number;
+  error?: string;
+  /** The folder the holdings were filed into, when one was used. */
+  folder?: { id: string; name: string };
+  /** Set when a folder was asked for but could not be created. */
+  folderNote?: string;
+}> {
   try {
     await ensureSchema();
     const address = String(input.address ?? "").trim();
@@ -421,9 +449,8 @@ export async function importWalletBalances(input: {
     const walletLogo = parseWeb3WalletId(input.walletLogo ?? "");
     const priceSource = parsePriceSource(input.priceSource ?? "");
     const d = today();
-    const shortAddr =
-      address.length > 14 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
-    let importedCount = 0;
+    const shortAddr = shortWalletAddress(address) || address;
+    const importedIds: number[] = [];
 
     for (const item of items.slice(0, 50)) {
       const symbol = String(item.symbol ?? "").trim().toUpperCase();
@@ -465,16 +492,41 @@ export async function importWalletBalances(input: {
       if (walletLogo) {
         await saveAssetWalletLogo(row.id, walletLogo);
       }
-      importedCount += 1;
+      importedIds.push(row.id);
     }
+
+    const importedCount = importedIds.length;
 
     if (importedCount === 0) {
       throw new Error("No non-zero balances could be imported from that wallet.");
     }
 
+    // File the new holdings into one folder so the wallet reads as a group
+    // instead of a pile of loose rows. `folderName: null` skips this; a blank
+    // name means "name the folder after the address".
+    let folder: { id: string; name: string } | undefined;
+    let folderNote: string | undefined;
+    if (input.folderName !== null) {
+      const folders = await loadHoldingsFolders();
+      const wanted = String(input.folderName ?? "").trim() || shortAddr;
+      const result = folderForImport(folders, wanted);
+      if (result.folder) {
+        if (result.folders.length !== folders.length) {
+          await saveHoldingsFolders(result.folders);
+        }
+        const current = await loadHoldingFolderAssignments(result.folders);
+        const next = { ...current };
+        for (const id of importedIds) next[id] = result.folder.id;
+        await saveHoldingFolderAssignments(next, result.folders);
+        folder = { id: result.folder.id, name: result.folder.name };
+      } else {
+        folderNote = `Imported without a folder: there is no room for another one (${folders.length} max).`;
+      }
+    }
+
     await recordSnapshot();
     refresh();
-    return { ok: true, importedCount };
+    return { ok: true, importedCount, folder, folderNote };
   } catch (e) {
     return {
       ok: false,

@@ -8,6 +8,7 @@ import {
   MAX_FOLDERS,
   assignHolding,
   countInFolder,
+  folderForImport,
   groupByFolder,
   splitByFolder,
   makeFolder,
@@ -258,4 +259,27 @@ test("folders are saved, loaded and reset with the rest of the dashboard layout"
   assert.ok(strip.includes("PRICE_PROVIDERS"), "a folder can wear an exchange icon");
   assert.ok(strip.includes("aria-label=\"Custom folder icon"), "or a custom icon");
   assert.ok(strip.includes("onDragOver"), "holdings can be dragged onto a folder");
+});
+
+test("folderForImport reuses a folder by name and creates one otherwise", () => {
+  const longTerm = folder("long-term");
+  longTerm.name = "Long term";
+  const empty: ReturnType<typeof folderForImport> = folderForImport([longTerm], "Long term");
+  assert.equal(empty.folder?.id, "long-term", "the same name reuses the folder");
+  assert.equal(empty.folders.length, 1);
+
+  const created = folderForImport([longTerm], "0x1234…abcd");
+  assert.equal(created.folders.length, 2);
+  assert.equal(created.folder?.name, "0x1234…abcd");
+  assert.ok(created.folder?.id, "the new folder gets an id");
+  assert.deepEqual(created.folders.map((f) => f.id), ["long-term", created.folder?.id]);
+
+  // A blank name means "no folder" rather than an empty-named folder.
+  assert.equal(folderForImport([longTerm], "   ").folder, null);
+  assert.deepEqual(folderForImport([longTerm], "   ").folders.map((f) => f.id), ["long-term"]);
+
+  // A full list is left alone instead of growing past MAX_FOLDERS.
+  const full = Array.from({ length: 20 }, (_, i) => folder(`f${i}`));
+  assert.equal(folderForImport(full, "Wallet").folder, null);
+  assert.equal(folderForImport(full, "Wallet").folders.length, 20);
 });

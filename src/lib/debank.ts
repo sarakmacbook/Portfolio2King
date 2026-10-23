@@ -10,10 +10,13 @@
  * - the **Open API** (`pro-openapi.debank.com/v1/...`) when `DEBANK_ACCESS_KEY`
  *   is set — the supported, documented route (a free key from
  *   <https://cloud.debank.com> is enough);
- * - the **public web endpoints** used by debank.com as a best-effort fallback
- *   when no key is configured. They can be rate-limited or blocked by DeBank,
- *   which is why every failure here is swallowed: the scanner then falls back to
- *   reading balances straight from public RPCs.
+ * - the **public endpoints** otherwise, tried in order: DeBank's own API gateway
+ *   (`api.debank.com/v1/user/token_list`, the same paths the Open API exposes),
+ *   its legacy web route (`api.debank.com/token/balance_list`, which takes
+ *   `user_id` — `user_addr` answers 404), and finally Rabby's public API
+ *   (`api.rabby.io`, DeBank's wallet, same response shape). Any of them can be
+ *   rate-limited or blocked, which is why every failure here is swallowed: the
+ *   scanner then falls back to reading balances straight from public RPCs.
  *
  * Everything that shapes a response into balances is a pure function so it can
  * be tested without a network — see tests/debank.test.ts.
@@ -23,6 +26,14 @@ import { isStablecoinSymbol } from "@/lib/stablecoins";
 import { WALLET_CHAIN_LABELS, type WalletChain } from "@/lib/wallet-chains";
 
 export const DEBANK_TIMEOUT_MS = 6000;
+
+/**
+ * How long one scan may spend on DeBank overall. Three keyless routes at six
+ * seconds each would make the wallet dialog crawl when they are all blocked, so
+ * the remaining routes are skipped once the budget is gone (the on-chain read
+ * then takes over).
+ */
+export const DEBANK_TOTAL_BUDGET_MS = 12000;
 
 /** How many tokens one scan may return (protects the picker from spam airdrops). */
 export const MAX_DEBANK_TOKENS = 100;
@@ -193,7 +204,10 @@ export function parseDebankTokens(
     if (!Number.isFinite(quantity) || quantity <= 0) continue;
 
     const price = readNumber(item.price) || readNumber(item.price_usd);
-    const valueUsd = readNumber(item.value_usd) || quantity * price;
+    // The Open API spells it `usd_value`, the web gateway `value_usd`; the last
+    // resort is quantity × price.
+    const valueUsd =
+      readNumber(item.value_usd) || readNumber(item.usd_value) || quantity * price;
     const isCore = item.is_core === true || item.is_verified === true || item.is_scam === false;
     // Airdropped junk: no price, not recognised by DeBank, no value.
     if (price <= 0 && valueUsd <= 0 && !isCore) continue;
@@ -222,10 +236,32 @@ export function parseDebankTokens(
     .slice(0, maxItems);
 }
 
+/** The browser-ish headers the keyless endpoints expect (they sit behind a CDN). */
+const PUBLIC_HEADERS: Record<string, string> = {
+  Accept: "application/json",
+  Origin: "https://debank.com",
+  Referer: "https://debank.com/",
+  "User-Agent":
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+};
+
+/** Rabby's public API is the same data behind DeBank's own wallet. */
+const RABBY_HEADERS: Record<string, string> = {
+  Accept: "application/json",
+  Origin: "https://rabby.io",
+  Referer: "https://rabby.io/",
+  "User-Agent": PUBLIC_HEADERS["User-Agent"],
+};
+
 /**
- * The endpoints to try, best first. With an access key the supported Open API
- * is used; without one the public web endpoints are attempted and the caller
- * falls back to on-chain RPC reads when they fail.
+ * The endpoints to try, best first.
+ *
+ * With an access key the supported Open API route is used on its own: a keyed
+ * failure is a configuration problem (bad or expired key), not something a
+ * keyless endpoint should paper over. Without one, three public routes are tried
+ * — DeBank's API gateway, its legacy web route and Rabby's API — because DeBank
+ * retires and renames keyless endpoints without notice, and a 404 from a stale
+ * one should not end the scan.
  */
 export function debankRequests(
   address: string,
@@ -238,23 +274,34 @@ export function debankRequests(
   const json = { Accept: "application/json" };
 
   if (key) {
+    // `/all_token_list` still answers for every chain; `/token_list` needs one.
     const url = chainId
       ? `https://pro-openapi.debank.com/v1/user/token_list?id=${addr}&chain_id=${chainId}&is_all=false`
       : `https://pro-openapi.debank.com/v1/user/all_token_list?id=${addr}&is_all=false`;
     return [{ url, headers: { ...json, AccessKey: key } }];
   }
 
-  const browserHeaders = {
-    ...json,
-    Referer: "https://debank.com/",
-    "User-Agent":
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
-  };
-  const web = [
-    `https://api.debank.com/token/balance_list?user_addr=${addr}&is_all=false`,
-    `https://api.debank.com/user/token_list?id=${addr}&is_all=false`,
+  const chainQuery = chainId ? `&chain_id=${chainId}` : "";
+  return [
+    // The gateway path the Open API documents, served without a key.
+    {
+      url: `https://api.debank.com/v1/user/token_list?id=${addr}${chainQuery}&is_all=false`,
+      headers: PUBLIC_HEADERS,
+    },
+    // The legacy web route still used by debank.com itself. It is keyed on
+    // `user_id`; `user_addr` (the old name) now answers 404.
+    {
+      url: `https://api.debank.com/token/balance_list?user_id=${addr}&is_all=false${
+        chainId ? `&chain=${chainId}` : ""
+      }`,
+      headers: PUBLIC_HEADERS,
+    },
+    // DeBank's wallet, Rabby, reads from the same indexer.
+    {
+      url: `https://api.rabby.io/v1/user/token_list?id=${addr}${chainQuery}&is_all=false`,
+      headers: RABBY_HEADERS,
+    },
   ];
-  return web.map((url) => ({ url, headers: browserHeaders }));
 }
 
 export type DebankFetchResult = {
@@ -263,6 +310,8 @@ export type DebankFetchResult = {
   /** Which endpoint answered, for the "detected via DeBank" note. */
   endpoint: string | null;
   error: string | null;
+  /** HTTP status of the last rejected endpoint, when there was one. */
+  status?: number | null;
 };
 
 /**
@@ -276,18 +325,27 @@ export async function fetchDebankBalances(
   fetchImpl: typeof fetch = fetch,
 ): Promise<DebankFetchResult> {
   const requests = debankRequests(address, chain);
+  const deadline = Date.now() + DEBANK_TOTAL_BUDGET_MS;
   let lastError: string | null = null;
+  let sawEmptyAnswer = false;
+  let lastStatus: number | null = null;
 
   for (const request of requests) {
+    const remaining = deadline - Date.now();
+    if (remaining < 500) {
+      lastError = lastError ?? "DeBank took too long to answer";
+      break;
+    }
     try {
       const response = await fetchImpl(request.url, {
         method: "GET",
         cache: "no-store",
         headers: request.headers,
-        signal: AbortSignal.timeout(DEBANK_TIMEOUT_MS),
+        signal: AbortSignal.timeout(Math.min(DEBANK_TIMEOUT_MS, remaining)),
       });
       if (!response.ok) {
-        lastError = `DeBank answered ${response.status}.`;
+        lastStatus = response.status;
+        lastError = describeHttpStatus(response.status);
         continue;
       }
       const payload: unknown = await response.json();
@@ -295,12 +353,30 @@ export async function fetchDebankBalances(
       if (balances.length > 0) {
         return { ok: true, balances, endpoint: request.url, error: null };
       }
-      lastError = lastError ?? "DeBank returned no tokens for that wallet.";
+      // A 200 with nothing in it means "DeBank knows this wallet and it is
+      // empty", which is a better answer than the next endpoint's 404.
+      sawEmptyAnswer = true;
     } catch (error) {
       const detail = error instanceof Error ? error.message : "";
       lastError = detail ? `DeBank could not be reached (${detail})` : "DeBank could not be reached";
     }
   }
 
-  return { ok: false, balances: [], endpoint: null, error: lastError };
+  return {
+    ok: false,
+    balances: [],
+    endpoint: null,
+    error: sawEmptyAnswer ? "DeBank returned no tokens for that wallet." : lastError,
+    status: lastStatus,
+  };
+}
+
+/** A short, human reason for a failed DeBank call. */
+function describeHttpStatus(status: number): string {
+  if (status === 404) return "DeBank no longer serves that endpoint (404).";
+  if (status === 401 || status === 403) {
+    return `DeBank refused the request (${status}) — check DEBANK_ACCESS_KEY.`;
+  }
+  if (status === 429) return "DeBank rate-limited the request (429).";
+  return `DeBank answered ${status}.`;
 }

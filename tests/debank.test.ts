@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   DEBANK_CHAIN_IDS,
+  DEBANK_TOTAL_BUDGET_MS,
   MAX_DEBANK_TOKENS,
   debankChainIdFor,
   debankRequests,
@@ -40,6 +41,12 @@ test("DeBank chain ids map both ways", () => {
   assert.equal(debankChainIdFor("solana"), "solana");
   // "auto" means "every chain", so no chain id is sent.
   assert.equal(debankChainIdFor("auto"), null);
+});
+
+test("one scan has a total DeBank budget, so a blocked endpoint cannot stall the dialog", () => {
+  // Three keyless routes at six seconds each would be 18s without this.
+  assert.ok(DEBANK_TOTAL_BUDGET_MS <= 15000);
+  assert.ok(DEBANK_TOTAL_BUDGET_MS >= 3000);
 });
 
 test("debankTokenItems accepts both API shapes and rejects error bodies", () => {
@@ -120,6 +127,22 @@ test("parseDebankTokens honours a chain filter and the token cap", () => {
   assert.ok(parseDebankTokens(many).length <= MAX_DEBANK_TOKENS);
 });
 
+test("parseDebankTokens accepts the gateway's usd_value spelling", () => {
+  const [balance] = parseDebankTokens([
+    {
+      id: "0x0000000000000000000000000000000000000001",
+      chain: "arb",
+      symbol: "ARB",
+      decimals: 18,
+      amount: 10,
+      price: 2,
+      usd_value: 20,
+    },
+  ]);
+  assert.equal(balance.valueUsd, 20);
+  assert.equal(balance.chain, "arbitrum");
+});
+
 test("parseDebankTokens accepts string numbers and raw amounts", () => {
   const [balance] = parseDebankTokens([
     token({ amount: undefined, raw_amount: "1250500000", decimals: 6, price: "1", value_usd: "1250.5" }),
@@ -136,16 +159,88 @@ test("debankRequests uses the Open API with a key and the public endpoints witho
   assert.equal(keyed[0].headers.AccessKey, "secret-key");
 
   const keyedChain = debankRequests("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "arbitrum", "secret-key");
+  assert.match(keyedChain[0].url, /pro-openapi\.debank\.com\/v1\/user\/token_list/);
   assert.match(keyedChain[0].url, /chain_id=arb/);
   assert.match(keyedChain[0].url, /id=0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045/);
 
+  // Without a key three public routes are tried, best first.
   const open = debankRequests("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "auto", "");
-  assert.equal(open.length, 2);
+  assert.equal(open.length, 3);
+  assert.match(open[0].url, /^https:\/\/api\.debank\.com\/v1\/user\/token_list\?/);
+  assert.match(open[1].url, /^https:\/\/api\.debank\.com\/token\/balance_list\?/);
+  assert.match(open[2].url, /^https:\/\/api\.rabby\.io\/v1\/user\/token_list\?/);
   for (const request of open) {
-    assert.match(request.url, /api\.debank\.com/);
-    assert.equal(request.headers.AccessKey, undefined);
-    assert.equal(request.headers.Referer, "https://debank.com/");
+    assert.equal(request.headers.AccessKey, undefined, "no key is sent to a keyless endpoint");
   }
+  assert.equal(open[0].headers.Referer, "https://debank.com/");
+});
+
+test("the keyless DeBank routes use the parameters the APIs actually accept", () => {
+  // Regression: the legacy web route is keyed on `user_id`; `user_addr` answers
+  // 404, which is what used to surface as "DeBank answered 404".
+  const [gateway, legacy, rabby] = debankRequests("0xAbC0000000000000000000000000000000000001", "auto", "");
+  assert.match(legacy.url, /[?&]user_id=0xAbC0000000000000000000000000000000000001/);
+  assert.ok(!legacy.url.includes("user_addr"), "user_addr is the retired parameter name");
+  assert.match(gateway.url, /[?&]id=0xAbC0000000000000000000000000000000000001/);
+  assert.match(rabby.url, /[?&]id=0xAbC0000000000000000000000000000000000001/);
+  for (const request of [gateway, legacy, rabby]) assert.match(request.url, /is_all=false/);
+
+  // A chain filter narrows every route to that chain.
+  const [chainGateway, chainLegacy, chainRabby] = debankRequests(
+    "0xAbC0000000000000000000000000000000000001",
+    "base",
+    "",
+  );
+  assert.match(chainGateway.url, /chain_id=base/);
+  assert.match(chainLegacy.url, /[?&]chain=base/);
+  assert.match(chainRabby.url, /chain_id=base/);
+});
+
+test("a stale endpoint does not end the scan: the next route is tried", async () => {
+  const seen: string[] = [];
+  const result = await fetchDebankBalances(
+    "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+    "auto",
+    (async (url: string) => {
+      seen.push(String(url));
+      if (String(url).includes("token/balance_list")) {
+        return new Response("not found", { status: 404 });
+      }
+      if (String(url).includes("api.rabby.io")) {
+        return new Response(JSON.stringify([token({ chain: "base", symbol: "USDC", id: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", amount: 42, price: 1, value_usd: 42 })]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response("blocked", { status: 403 });
+    }) as unknown as typeof fetch,
+  );
+
+  assert.equal(seen.length, 3, "every route was attempted");
+  assert.equal(result.ok, true);
+  assert.equal(result.balances[0].symbol, "USDC");
+  assert.equal(result.balances[0].chain, "base");
+  assert.match(String(result.endpoint), /api\.rabby\.io/);
+});
+
+test("an empty answer is reported as such, not as a 404 from a stale route", async () => {
+  let call = 0;
+  const result = await fetchDebankBalances(
+    "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+    "auto",
+    (async () => {
+      call += 1;
+      if (call === 1) {
+        return new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response("not found", { status: 404 });
+    }) as unknown as typeof fetch,
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "DeBank returned no tokens for that wallet.");
 });
 
 test("fetchDebankBalances returns balances, then reports failure instead of throwing", async () => {
@@ -171,6 +266,8 @@ test("fetchDebankBalances returns balances, then reports failure instead of thro
   assert.equal(blocked.ok, false);
   assert.deepEqual(blocked.balances, []);
   assert.match(String(blocked.error), /403/);
+  assert.equal(blocked.status, 403);
+  assert.match(String(blocked.error), /DEBANK_ACCESS_KEY/, "a refused key is explained");
 
   const offline = await fetchDebankBalances(
     "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",

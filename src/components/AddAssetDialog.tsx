@@ -17,6 +17,7 @@ import type { DiscoveredStock } from "@/lib/stock-search";
 import {
   WALLET_CHAINS,
   WALLET_CHAIN_LABELS,
+  shortWalletAddress,
   type ScannedWalletBalance,
   type WalletChain,
 } from "@/lib/wallet-scanner";
@@ -137,10 +138,16 @@ function AddAssetForm({
   const [walletScanSource, setWalletScanSource] = useState<"debank" | "onchain" | null>(null);
   const [walletScanNote, setWalletScanNote] = useState("");
   const [importingWallet, setImportingWallet] = useState(false);
+  /** Import the wallet's tokens into a folder, named by the user or by the address. */
+  const [walletFileIntoFolder, setWalletFileIntoFolder] = useState(true);
+  const [walletFolderName, setWalletFolderName] = useState("");
   const [walletImportMessage, setWalletImportMessage] = useState("");
   const [customBankSelected, setCustomBankSelected] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const isCash = type === "cash";
+  /** Folder the scan would be filed into; blank means "name it after the address". */
+  const walletFolderPlaceholder = shortWalletAddress(walletAddress.trim()) || "0x1234…abcd";
+  const walletFolderLabel = walletFolderName.trim() || walletFolderPlaceholder;
   const total = (Number(q) || 0) * (Number(cost) || 0) + (Number(fee) || 0);
   const selectedBank = CAMBODIAN_BANKS.find((bank) => bank.name === name);
   const isCustomBank = !selectedBank && (customBankSelected || Boolean(name.trim()));
@@ -273,7 +280,7 @@ function AddAssetForm({
       // quiet on a plain on-chain read for Solana / Bitcoin / Tron.
       setWalletScanNote(
         data.source === "onchain" && data.sourceNote
-          ? `DeBank was unavailable (${data.sourceNote}) — read the chains directly instead.`
+          ? `Read straight from the chains: ${data.sourceNote}`
           : "",
       );
       if (list.length === 0) {
@@ -318,15 +325,24 @@ function AddAssetForm({
         address: walletAddress.trim(),
         walletLogo,
         priceSource,
+        folderName: walletFileIntoFolder ? walletFolderName.trim() : null,
         balances: walletBalances,
       });
       if (!result.ok) {
         throw new Error(result.error || "Could not import wallet balances.");
       }
       playMoneyChimeFromGesture();
-      setWalletImportMessage(
-        `Imported ${result.importedCount} holding${result.importedCount === 1 ? "" : "s"} from wallet.`,
-      );
+      const count = `${result.importedCount} holding${result.importedCount === 1 ? "" : "s"}`;
+      if (result.folder) {
+        setWalletImportMessage(`Imported ${count} into the “${result.folder.name}” folder.`);
+        setWalletFolderName("");
+      } else {
+        setWalletImportMessage(
+          result.folderNote
+            ? `Imported ${count}. ${result.folderNote}`
+            : `Imported ${count} from wallet.`,
+        );
+      }
       router.refresh();
       onDone?.();
     } catch (error) {
@@ -704,6 +720,8 @@ function AddAssetForm({
                     DeBank
                   </a>{" "}
                   — every chain, prices and logos in one call — and fall back to a direct on-chain read.
+                  <strong className="font-medium text-slate-600"> Import all</strong> files the tokens into
+                  one folder for this wallet.
                 </p>
               </div>
               {walletBalances.length > 0 && (
@@ -715,7 +733,9 @@ function AddAssetForm({
                 >
                   {importingWallet
                     ? "Importing…"
-                    : `Import all (${walletBalances.length}) to portfolio`}
+                    : walletFileIntoFolder
+                      ? `Import all (${walletBalances.length}) into “${walletFolderLabel}”`
+                      : `Import all (${walletBalances.length}) to portfolio`}
                 </button>
               )}
             </div>
@@ -757,6 +777,27 @@ function AddAssetForm({
               >
                 {scanningWallet ? "Scanning…" : "Scan wallet"}
               </button>
+            </div>
+
+            <div className="mt-2 flex flex-col gap-2 rounded-xl border border-indigo-100 bg-white/70 p-2 sm:flex-row sm:items-center">
+              <label className="flex shrink-0 items-center gap-2 text-xs font-medium text-slate-600">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-indigo-600"
+                  checked={walletFileIntoFolder}
+                  onChange={(event) => setWalletFileIntoFolder(event.target.checked)}
+                />
+                File into a folder
+              </label>
+              <input
+                className="input min-w-0 flex-1 text-xs disabled:opacity-50"
+                value={walletFolderName}
+                onChange={(event) => setWalletFolderName(event.target.value)}
+                disabled={!walletFileIntoFolder}
+                maxLength={28}
+                placeholder={`Folder name (optional) — ${walletFolderPlaceholder}`}
+                aria-label="Folder name for the imported holdings"
+              />
             </div>
 
             {walletScanError && (
