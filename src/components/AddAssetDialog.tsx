@@ -3,6 +3,11 @@
 import { useActionState, useState } from "react";
 import { createAsset, type ActionState } from "@/app/actions";
 import { ASSET_TYPES, type AssetType } from "@/lib/constants";
+import {
+  CEX_PROVIDERS,
+  PROVIDER_LABELS,
+  type PriceProvider,
+} from "@/lib/market-prices";
 import type { CryptoCategory } from "@/db/schema";
 import { TYPE_META, money } from "@/lib/format";
 import { playMoneyChimeFromGesture } from "@/lib/sounds";
@@ -65,6 +70,12 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
   const [state, action] = useActionState<ActionState, FormData>(createAsset, {});
   const [type, setType] = useState<AssetType>(defaultType);
   const [cryptoCategory, setCryptoCategory] = useState<CryptoCategory>("volatile");
+  const [priceSource, setPriceSource] = useState<PriceProvider | "">("");
+  const [quoteCurrency, setQuoteCurrency] = useState<"USD" | "USDT">("USDT");
+  const [quoteState, setQuoteState] = useState<{ status: "idle" | "loading" | "ok" | "error"; message: string }>({
+    status: "idle",
+    message: "",
+  });
   const [q, setQ] = useState("");
   const [cost, setCost] = useState("");
   const [fee, setFee] = useState("");
@@ -100,6 +111,52 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
     }
   }
 
+  /**
+   * Pulls one price from the selected exchange. The dialog has no asset id yet,
+   * so it uses the single-quote endpoint instead of the bulk /prices one.
+   */
+  async function fetchQuote(
+    symbolOverride?: string,
+    sourceOverride?: PriceProvider | "",
+    quoteOverride?: "USD" | "USDT",
+  ) {
+    const ticker = (symbolOverride ?? symbol).trim();
+    const source = sourceOverride ?? priceSource;
+    const quote = quoteOverride ?? quoteCurrency;
+    if (!ticker) {
+      setQuoteState({ status: "error", message: "Type a symbol first, e.g. BTC." });
+      return;
+    }
+    if (!source) {
+      setQuoteState({ status: "error", message: "Pick an exchange first, e.g. Binance." });
+      return;
+    }
+    setQuoteState({ status: "loading", message: "" });
+    try {
+      const params = new URLSearchParams({ symbol: ticker, provider: source, quote });
+      const response = await fetch(`/api/prices/quote?${params.toString()}`);
+      const data = (await response.json()) as {
+        price?: number;
+        providerLabel?: string;
+        quote?: string;
+        error?: string;
+      };
+      if (!response.ok || typeof data.price !== "number") {
+        throw new Error(data.error || "No price returned");
+      }
+      setCurrentPrice(String(data.price));
+      setQuoteState({
+        status: "ok",
+        message: `${data.providerLabel || PROVIDER_LABELS[source]} · ${data.quote || quote} · ${money(data.price)}`,
+      });
+    } catch (error) {
+      setQuoteState({
+        status: "error",
+        message: error instanceof Error ? error.message : "Could not fetch a live price",
+      });
+    }
+  }
+
   function chooseCrypto(asset: (typeof topAssets)[number]) {
     setName(asset.name);
     setSymbol(asset.symbol);
@@ -107,6 +164,9 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
     const stableSymbols = new Set(["USDT", "USDC", "DAI", "FDUSD", "TUSD", "USDE", "PYUSD", "USDD", "FRAX"]);
     setCryptoCategory(stableSymbols.has(asset.symbol.toUpperCase()) ? "stablecoin" : "volatile");
     if (asset.contract) setNotes(`Contract: ${asset.contract}${asset.chain ? ` · Chain: ${asset.chain}` : ""}`);
+    // A chosen exchange is more authoritative than the search index's price.
+    if (priceSource) void fetchQuote(asset.symbol, priceSource);
+    else setQuoteState({ status: "idle", message: "" });
   }
 
   const placeholders: Record<AssetType, { name: string; symbol: string }> = {
@@ -125,6 +185,7 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
     <form action={action} onSubmit={playSoundForFundedAsset} className="space-y-5">
       <input type="hidden" name="type" value={type} />
       <input type="hidden" name="cryptoCategory" value={cryptoCategory} />
+      <input type="hidden" name="priceSource" value={type === "crypto" ? priceSource : ""} />
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {ASSET_TYPES.map((t) => (
           <button
@@ -223,6 +284,70 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
               ))}
             </div>
           )}
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 p-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-40 flex-1">
+                <label className="label" htmlFor="priceSourcePicker">
+                  Price from
+                </label>
+                <select
+                  id="priceSourcePicker"
+                  className="input"
+                  value={priceSource}
+                  onChange={(event) => {
+                    const next = event.target.value as PriceProvider | "";
+                    setPriceSource(next);
+                    setQuoteState({ status: "idle", message: "" });
+                  }}
+                >
+                  <option value="">Auto — any exchange</option>
+                  {CEX_PROVIDERS.map((provider) => (
+                    <option key={provider} value={provider}>
+                      {PROVIDER_LABELS[provider]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="w-28">
+                <label className="label" htmlFor="quoteCurrency">
+                  Quote
+                </label>
+                <select
+                  id="quoteCurrency"
+                  className="input"
+                  value={quoteCurrency}
+                  onChange={(event) => {
+                    const next = event.target.value as "USD" | "USDT";
+                    setQuoteCurrency(next);
+                    setQuoteState({ status: "idle", message: "" });
+                    if (priceSource && symbol.trim()) void fetchQuote(symbol, priceSource, next);
+                  }}
+                >
+                  <option value="USDT">USDT</option>
+                  <option value="USD">USD</option>
+                </select>
+              </div>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => void fetchQuote()}
+                disabled={quoteState.status === "loading"}
+              >
+                {quoteState.status === "loading" ? "Fetching…" : "Fetch live price"}
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-slate-400">
+              Saved with the holding, so background refreshes keep pricing it from the same exchange. Public
+              tickers only — no API keys. Auto tries every exchange.
+            </p>
+            {quoteState.status === "error" && (
+              <p className="mt-1 text-xs font-medium text-rose-600">{quoteState.message}</p>
+            )}
+            {quoteState.status === "ok" && (
+              <p className="mt-1 text-xs font-medium text-emerald-600">{quoteState.message}</p>
+            )}
           </div>
         </div>
       )}

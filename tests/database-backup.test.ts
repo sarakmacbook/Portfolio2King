@@ -12,8 +12,8 @@ import type { Asset, PriceSnapshot, Snapshot, Transaction } from "../src/db/sche
 const now = new Date("2026-01-02T03:04:05.000Z");
 
 const assets: Asset[] = [
-  { id: 1, type: "cash", name: "Main cash", symbol: "", cryptoCategory: "volatile", quantity: 900, avgCost: 1, currentPrice: 1, realizedPnl: 0, notes: "", priceUpdatedAt: now, createdAt: now },
-  { id: 2, type: "stock", name: "Apple", symbol: "AAPL", cryptoCategory: "volatile", quantity: 10, avgCost: 100, currentPrice: 150, realizedPnl: 0, notes: "core", priceUpdatedAt: now, createdAt: now },
+  { id: 1, type: "cash", name: "Main cash", symbol: "", cryptoCategory: "volatile", priceSource: "", quantity: 900, avgCost: 1, currentPrice: 1, realizedPnl: 0, notes: "", priceUpdatedAt: now, createdAt: now },
+  { id: 2, type: "stock", name: "Apple", symbol: "AAPL", cryptoCategory: "volatile", priceSource: "", quantity: 10, avgCost: 100, currentPrice: 150, realizedPnl: 0, notes: "core", priceUpdatedAt: now, createdAt: now },
 ];
 const transactions: Transaction[] = [
   { id: 1, assetId: 1, kind: "deposit", quantity: 900, price: 1, fee: 0, date: "2026-01-01", note: "", createdAt: now },
@@ -109,4 +109,41 @@ test("parseBackup rejects foreign, future, corrupt, and inconsistent files", () 
     date: "2026-01-02", note: "", createdAt: now.toISOString(),
   });
   assert.throws(() => parseBackup(oversell), /inconsistent/);
+});
+
+test("the exchange an asset was added from survives export and import", () => {
+  const withCrypto: Asset[] = [
+    ...assets,
+    {
+      id: 3, type: "crypto", name: "Bitcoin", symbol: "BTC", cryptoCategory: "volatile", priceSource: "binance",
+      quantity: 1, avgCost: 40_000, currentPrice: 60_000, realizedPnl: 0, notes: "", priceUpdatedAt: now, createdAt: now,
+    },
+    {
+      id: 4, type: "crypto", name: "Ether", symbol: "ETH", cryptoCategory: "volatile", priceSource: "",
+      quantity: 2, avgCost: 1_500, currentPrice: 2_000, realizedPnl: 0, notes: "", priceUpdatedAt: now, createdAt: now,
+    },
+  ];
+  const backup = createBackup(withCrypto, [], snapshots, now, []);
+  assert.equal(backup.tables.assets[2].priceSource, "binance");
+
+  const parsed = parseBackup(JSON.parse(JSON.stringify(backup)));
+  assert.equal(parsed.tables.assets[2].priceSource, "binance");
+  assert.equal(parsed.tables.assets[3].priceSource, "");
+
+  // Older backups have no priceSource at all: they must still import, as "auto".
+  const legacy = JSON.parse(JSON.stringify(backup));
+  for (const row of legacy.tables.assets) delete row.priceSource;
+  const legacyParsed = parseBackup(legacy);
+  assert.equal(legacyParsed.tables.assets[2].priceSource, "");
+
+  // An unknown exchange in a hand-edited file falls back to "auto" instead of
+  // failing the whole restore.
+  const typo = JSON.parse(JSON.stringify(backup));
+  typo.tables.assets[2].priceSource = "binanse";
+  assert.equal(parseBackup(typo).tables.assets[2].priceSource, "");
+
+  // Only crypto keeps a source; a stock row claiming one is normalised away.
+  const stockWithSource = JSON.parse(JSON.stringify(backup));
+  stockWithSource.tables.assets[1].priceSource = "kraken";
+  assert.equal(parseBackup(stockWithSource).tables.assets[1].priceSource, "");
 });

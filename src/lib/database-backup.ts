@@ -10,6 +10,7 @@ import {
   type Transaction,
   type TxKind,
 } from "@/db/schema";
+import { parsePriceSource, type PriceProvider } from "@/lib/market-prices";
 import { replay } from "@/lib/portfolio";
 
 /**
@@ -37,9 +38,11 @@ export const MAX_BACKUP_ROWS = {
   priceSnapshots: 500_000,
 } as const;
 
-export type BackupAsset = Omit<Asset, "priceUpdatedAt" | "createdAt"> & {
+export type BackupAsset = Omit<Asset, "priceUpdatedAt" | "createdAt" | "priceSource"> & {
   priceUpdatedAt: string;
   createdAt: string;
+  /** Absent in backups written before an asset could be pinned to an exchange. */
+  priceSource?: PriceProvider | "";
 };
 export type BackupTransaction = Omit<Transaction, "createdAt"> & { createdAt: string };
 export type BackupSnapshot = Snapshot;
@@ -189,12 +192,16 @@ export function parseBackup(input: unknown): PortfolioBackup {
     const cryptoCategory: CryptoCategory = typeof rawCategory === "string" && (CRYPTO_CATEGORIES as readonly string[]).includes(rawCategory)
       ? rawCategory as CryptoCategory
       : "volatile"; // Backward compatibility with version 1 backups created before subcategories.
+    // Unknown or missing sources mean "any exchange", never an import failure:
+    // older backups predate the picker and a typo must not block a restore.
+    const priceSource = parsePriceSource(row.priceSource);
     return {
       id: idField(row, "id"),
       type: type as AssetType,
       name: stringField(row, "name", 200, { allowEmpty: false }),
       symbol: stringField(row, "symbol", 64),
       cryptoCategory,
+      priceSource: type === "crypto" ? priceSource : "",
       quantity: numberField(row, "quantity"),
       avgCost: numberField(row, "avgCost"),
       currentPrice: numberField(row, "currentPrice"),

@@ -23,6 +23,7 @@ import {
   today,
 } from "@/lib/portfolio";
 import { buildAssetPriceSeries, latestDailyPriceChange } from "@/lib/price-history";
+import { describePriceSource } from "@/lib/market-prices";
 
 export const dynamic = "force-dynamic";
 
@@ -101,6 +102,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               notes: asset.notes,
               type: asset.type,
               cryptoCategory: asset.cryptoCategory,
+              priceSource: asset.priceSource,
             }}
           />
           <form action={deleteAsset}>
@@ -146,6 +148,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               <div className="mb-3 flex items-baseline justify-between">
                 <h2 className="font-semibold">Current price</h2>
                 <span className="text-xs text-slate-400">
+                  {asset.type === "crypto" ? `${describePriceSource(asset.priceSource)} · ` : ""}
                   updated {asset.priceUpdatedAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                 </span>
               </div>

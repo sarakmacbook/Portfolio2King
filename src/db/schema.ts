@@ -10,6 +10,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { ASSET_TYPES, TX_KINDS, type AssetType, type TxKind } from "../lib/constants";
+import type { PriceProvider } from "../lib/market-prices";
 
 export { ASSET_TYPES, TX_KINDS };
 export type { AssetType, TxKind };
@@ -23,6 +24,11 @@ export const assets = pgTable("assets", {
   name: text("name").notNull(),
   symbol: text("symbol").notNull().default(""),
   cryptoCategory: text("crypto_category").$type<CryptoCategory>().notNull().default("volatile"),
+  /**
+   * Exchange a crypto asset was added from (Bybit, OKX, Binance, Coinbase,
+   * Kraken or DexScreener). "" = no preference, every provider is tried.
+   */
+  priceSource: text("price_source").$type<PriceProvider | "">().notNull().default(""),
   quantity: doublePrecision("quantity").notNull().default(0),
   avgCost: doublePrecision("avg_cost").notNull().default(0),
   currentPrice: doublePrecision("current_price").notNull().default(0),

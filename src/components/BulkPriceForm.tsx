@@ -14,6 +14,8 @@ export type PriceRow = {
   type: AssetType;
   name: string;
   symbol: string;
+  /** Exchange the asset was added from ("" = any provider). */
+  priceSource: PriceProvider | "";
   quantity: number;
   currentPrice: number;
   updated: string;
@@ -48,9 +50,16 @@ export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
         body: JSON.stringify({
           provider,
           quote,
-          // Crypto uses the chosen exchange; stocks always use Yahoo Finance.
+          // Each crypto holding asks the exchange it was added from; the
+          // selector above is the fallback for holdings without one. Stocks
+          // always use Yahoo Finance.
           assets: [
-            ...crypto.map(({ id, symbol }) => ({ id, symbol, type: "crypto" as const })),
+            ...crypto.map(({ id, symbol, priceSource }) => ({
+              id,
+              symbol,
+              type: "crypto" as const,
+              provider: priceSource || provider,
+            })),
             ...stocks.map(({ id, symbol }) => ({ id, symbol, type: "stock" as const })),
           ],
         }),
@@ -95,7 +104,7 @@ export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
       <div className="border-b border-slate-100 bg-indigo-50/50 p-4 sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <div className="min-w-0 flex-1">
-            <label className="label">Crypto price source</label>
+            <label className="label">Crypto price source (fallback)</label>
             <select className="input" value={provider} onChange={(event) => setProvider(event.target.value as PriceProvider)}>
               {PRICE_PROVIDERS.map((value) => <option key={value} value={value}>{PROVIDER_LABELS[value]}</option>)}
             </select>
@@ -113,7 +122,8 @@ export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
         </div>
         <div className="mt-2 flex flex-col justify-between gap-1 text-xs text-slate-500 sm:flex-row">
           <span>
-            Crypto uses the exchange above; stocks use Yahoo Finance. Public market-data APIs only — no API keys.
+            Holdings added with an exchange keep using it; the source above covers the rest. Stocks use Yahoo
+            Finance. Public APIs only — no API keys.
           </span>
           {liveMessage && <span className="font-medium text-indigo-600">{liveMessage}</span>}
         </div>
@@ -148,6 +158,7 @@ export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
                       {r.symbol && <span className="truncate text-slate-500">{r.name}</span>}
                     </Link>
                     <div className="ml-4 text-xs text-slate-400">
+                      {r.priceSource ? `${PROVIDER_LABELS[r.priceSource]} · ` : ""}
                       updated {r.updated}
                       {r.snapshotsCount ? ` · ${r.snapshotsCount} daily snapshot${r.snapshotsCount === 1 ? "" : "s"}` : ""}
                     </div>

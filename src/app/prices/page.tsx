@@ -49,6 +49,7 @@ export default async function PricesPage() {
     type: a.type,
     name: a.name,
     symbol: a.symbol,
+    priceSource: a.priceSource,
     quantity: a.quantity,
     currentPrice: a.currentPrice,
     updated: a.priceUpdatedAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),

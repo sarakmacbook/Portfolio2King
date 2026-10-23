@@ -22,6 +22,7 @@ import {
   runDailyPriceSnapshot,
   today,
 } from "@/lib/portfolio";
+import { parsePriceSource } from "@/lib/market-prices";
 import { refreshPricesWithAlerts } from "@/lib/price-refresh";
 import { clearDashboardOrder, saveDashboardOrder } from "@/lib/dashboard-order-db";
 import { isDashboardBlockKey } from "@/lib/dashboard-layout";
@@ -97,6 +98,8 @@ export async function createAsset(_prev: ActionState, fd: FormData): Promise<Act
     const requestedCategory = str(fd, "cryptoCategory") as CryptoCategory;
     const cryptoCategory: CryptoCategory =
       type === "crypto" && CRYPTO_CATEGORIES.includes(requestedCategory) ? requestedCategory : "volatile";
+    // Only crypto is priced from an exchange; anything else stores no source.
+    const priceSource = type === "crypto" ? parsePriceSource(str(fd, "priceSource")) : "";
     if (!name && !symbol) throw new Error("Name or symbol is required");
     const quantity = num(fd, "quantity");
     const isCash = type === "cash";
@@ -114,7 +117,7 @@ export async function createAsset(_prev: ActionState, fd: FormData): Promise<Act
 
     const [row] = await db
       .insert(assets)
-      .values({ type, name: name || symbol, symbol, cryptoCategory, currentPrice, notes })
+      .values({ type, name: name || symbol, symbol, cryptoCategory, priceSource, currentPrice, notes })
       .returning({ id: assets.id });
     newId = row.id;
 
@@ -162,9 +165,14 @@ export async function updateAsset(_prev: ActionState, fd: FormData): Promise<Act
       asset.type === "crypto" && CRYPTO_CATEGORIES.includes(requestedCategory)
         ? requestedCategory
         : asset.cryptoCategory;
+    // Absent field = leave the exchange as it is (other callers do not send it).
+    const priceSource =
+      asset.type === "crypto" && fd.has("priceSource")
+        ? parsePriceSource(str(fd, "priceSource"))
+        : asset.priceSource;
     await db
       .update(assets)
-      .set({ name: name || symbol, symbol, cryptoCategory, notes: str(fd, "notes") })
+      .set({ name: name || symbol, symbol, cryptoCategory, priceSource, notes: str(fd, "notes") })
       .where(eq(assets.id, id));
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Failed to update" };
