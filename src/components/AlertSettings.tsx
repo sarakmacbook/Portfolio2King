@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useActionState, useState, useSyncExternalStore } from "react";
+import { startTransition, useActionState, useRef, useState, useSyncExternalStore } from "react";
 import { useFormStatus } from "react-dom";
 import {
   saveAlertSettingsAction,
@@ -8,7 +8,18 @@ import {
   sendTestAlertAction,
   type AlertActionState,
 } from "@/app/alert-actions";
-import { type AlertSettings } from "@/lib/alert-rules";
+import {
+  MAX_PORTFOLIO_NOTE_LENGTH,
+  MAX_PORTFOLIO_TEMPLATE_LENGTH,
+  PORTFOLIO_MESSAGE_PLACEHOLDERS,
+  composePortfolioTelegramMessage,
+  formatPortfolioMove,
+  unknownPortfolioPlaceholders,
+  type AlertSettings,
+  type PortfolioAlertSettings,
+  type PortfolioMessageContext,
+  type PortfolioMove,
+} from "@/lib/alert-rules";
 import { SubmitButton } from "./ui";
 
 const REFRESH_OPTIONS = [0, 5, 10, 15, 30, 60, 120];
@@ -70,7 +81,27 @@ function Note({ state }: { state: AlertActionState }) {
     return <p className="mt-2 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700 ring-1 ring-rose-200">{state.error}</p>;
   }
   if (state.ok && state.message) {
-    return <p className="mt-2 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700 ring-1 ring-emerald-200">{state.message}</p>;
+    return (
+      <div className="mt-2 space-y-2">
+        <p className="rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700 ring-1 ring-emerald-200">
+          {state.message}
+        </p>
+        {state.warning && (
+          <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-200">{state.warning}</p>
+        )}
+        {state.sample && state.sample !== state.message && (
+          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              Message sent to Telegram
+            </p>
+            <pre className="whitespace-pre-wrap break-words font-sans text-xs text-slate-700">{state.sample}</pre>
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (state.warning) {
+    return <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-200">{state.warning}</p>;
   }
   return null;
 }
@@ -134,6 +165,130 @@ function PortfolioTestButton() {
         {pending ? "Sending…" : "Send portfolio update now"}
       </button>
       <Note state={state} />
+    </div>
+  );
+}
+
+/**
+ * Fixed sample so the server and the browser render the same preview (a live
+ * clock or the real portfolio here would cause a hydration mismatch and make
+ * the preview jump around while typing).
+ */
+const SAMPLE_MOVE: PortfolioMove = {
+  from: 52_000,
+  to: 53_222,
+  changeMoney: 1_222,
+  changePct: 0.0235,
+  direction: "up",
+  baseline: "yesterday's close",
+};
+const SAMPLE_CONTEXT: PortfolioMessageContext = { date: "2026-10-22", time: "18:00", window: "day" };
+const SAMPLE_MESSAGE = { ...formatPortfolioMove(SAMPLE_MOVE), move: SAMPLE_MOVE };
+const STANDARD_PREVIEW = `${SAMPLE_MESSAGE.title}\n${SAMPLE_MESSAGE.body}`;
+
+/**
+ * Template + note for the Telegram copy of the portfolio update. Both are plain
+ * text, so nothing needs escaping and emoji just work.
+ */
+function PortfolioTelegramEditor({ settings }: { settings: PortfolioAlertSettings }) {
+  const [template, setTemplate] = useState(settings.telegramTemplate);
+  const [note, setNote] = useState(settings.telegramNote);
+  const templateRef = useRef<HTMLTextAreaElement>(null);
+
+  const preview = composePortfolioTelegramMessage(
+    SAMPLE_MESSAGE,
+    { telegramTemplate: template, telegramNote: note },
+    SAMPLE_CONTEXT,
+  );
+  const unknown = [...new Set([...unknownPortfolioPlaceholders(template), ...unknownPortfolioPlaceholders(note)])];
+
+  function insertToken(token: string) {
+    const snippet = `{${token}}`;
+    const field = templateRef.current;
+    if (!field) {
+      setTemplate((current) => `${current}${snippet}`);
+      return;
+    }
+    const start = field.selectionStart ?? template.length;
+    const end = field.selectionEnd ?? start;
+    const next = `${template.slice(0, start)}${snippet}${template.slice(end)}`;
+    setTemplate(next);
+    // Put the caret after the inserted token so chips can be combined.
+    requestAnimationFrame(() => {
+      field.focus();
+      field.setSelectionRange(start + snippet.length, start + snippet.length);
+    });
+  }
+
+  return (
+    <div className="mt-4 rounded-2xl border border-slate-200 p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold text-slate-900">Custom Telegram message</h3>
+        <span className="text-xs text-slate-400">Telegram only — browser push keeps the standard text</span>
+      </div>
+
+      <div className="mt-3">
+        <label className="label" htmlFor="portfolioTelegramTemplate">
+          Message
+        </label>
+        <textarea
+          id="portfolioTelegramTemplate"
+          name="portfolioTelegramTemplate"
+          ref={templateRef}
+          rows={4}
+          maxLength={MAX_PORTFOLIO_TEMPLATE_LENGTH}
+          value={template}
+          onChange={(event) => setTemplate(event.target.value)}
+          placeholder={STANDARD_PREVIEW}
+          className="input font-mono text-xs leading-relaxed"
+        />
+        <p className="mt-1 text-xs text-slate-400">
+          Leave blank for the standard message. Type your own text and drop in placeholders — click one to insert it.
+        </p>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {PORTFOLIO_MESSAGE_PLACEHOLDERS.map((placeholder) => (
+            <button
+              key={placeholder.token}
+              type="button"
+              onClick={() => insertToken(placeholder.token)}
+              title={placeholder.description}
+              className="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700"
+            >
+              {`{${placeholder.token}}`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-3">
+        <label className="label" htmlFor="portfolioTelegramNote">
+          Extra note (optional)
+        </label>
+        <input
+          id="portfolioTelegramNote"
+          name="portfolioTelegramNote"
+          maxLength={MAX_PORTFOLIO_NOTE_LENGTH}
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+          placeholder="e.g. — sent from Ledgerly"
+          className="input"
+        />
+        <p className="mt-1 text-xs text-slate-400">Added as the last line, after the message above.</p>
+      </div>
+
+      {unknown.length > 0 && (
+        <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-200">
+          {unknown.map((token) => `{${token}}`).join(", ")}{" "}
+          {unknown.length === 1 ? "is not a placeholder" : "are not placeholders"} and will be sent as typed.
+        </p>
+      )}
+
+      <div className="mt-3 rounded-xl bg-slate-900 px-3 py-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+          Preview · what Telegram receives
+        </p>
+        <pre className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-100">{preview}</pre>
+      </div>
     </div>
   );
 }
@@ -335,6 +490,8 @@ export default function AlertSettingsForm({
               <p className="mt-1 text-xs text-slate-400">Deposits and withdrawals count as part of the change.</p>
             </div>
           </div>
+
+          <PortfolioTelegramEditor settings={settings.portfolio} />
 
           {portfolioEnabled && (nextPortfolioLabel || lastPortfolioLabel) && (
             <div className="mt-3 text-xs text-slate-500">

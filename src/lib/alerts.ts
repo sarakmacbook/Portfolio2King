@@ -251,6 +251,8 @@ export async function sendTelegramMessage(text: string): Promise<{ ok: boolean; 
 async function sendToChannels(
   alert: { title: string; body: string; url?: string; tag?: string },
   channels: AlertChannel[],
+  /** Channel-specific wording (the portfolio update's custom Telegram text). */
+  telegramText?: string,
 ): Promise<AlertChannelResult> {
   const result: AlertChannelResult = { pushSent: 0, pushFailed: 0, pushRemoved: 0, telegramSent: false };
 
@@ -268,7 +270,7 @@ async function sendToChannels(
   }
 
   if (channels.includes("telegram")) {
-    const telegram = await sendTelegramMessage(formatAlertText(alert));
+    const telegram = await sendTelegramMessage(telegramText ?? formatAlertText(alert));
     result.telegramSent = telegram.ok;
     if (!telegram.ok && telegram.error && telegram.error !== "Telegram is not configured") {
       result.telegramError = telegram.error;
@@ -293,6 +295,11 @@ export async function dispatchAlert(input: {
   channels?: AlertChannel[];
   /** Test sends bypass the master switch but still honour the channel list. */
   force?: boolean;
+  /**
+   * Text for Telegram when it differs from the standard title + body. Push keeps
+   * the structured title/body, so this never changes the notification itself.
+   */
+  telegramText?: string;
 }): Promise<DispatchResult> {
   const settings = input.settings ?? (await getAlertSettings());
   const channels = input.channels ?? parseChannels(settings.channels);
@@ -326,6 +333,7 @@ export async function dispatchAlert(input: {
   const result = await sendToChannels(
     { title: input.title, body: input.body, url: input.url, tag: input.dedupeKey },
     channels,
+    input.telegramText,
   );
 
   await db
