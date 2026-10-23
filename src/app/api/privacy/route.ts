@@ -1,6 +1,7 @@
 import { sameOrigin } from "@/lib/database-admin";
 import {
   PRIVACY_COOKIE_NAME,
+  PRIVACY_DEVICE_MAX_AGE,
   PRIVACY_HIDDEN_COOKIE_NAME,
   createPasskeyChallenge,
   createPasskeyOnlyPrivacyConfig,
@@ -169,6 +170,42 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  if (action === "forgetDevice") {
+    // Drops this browser's remembered unlock so the next visit is treated as a
+    // new device and has to pass Face ID / Passkey (or the PIN) again.
+    if (!existingConfig || !hasAnyLockConfigured(existingConfig)) {
+      return buildPrivacyResponse(
+        {
+          ok: true,
+          hasPin: false,
+          hasPasskey: false,
+          passkeys: [],
+          locked: false,
+          hidden: false,
+          remembered: false,
+        },
+        [
+          formatCookie(PRIVACY_COOKIE_NAME, "", { maxAge: 0, httpOnly: true }),
+          formatCookie(PRIVACY_HIDDEN_COOKIE_NAME, "", { maxAge: 0 }),
+        ],
+      );
+    }
+    return buildPrivacyResponse(
+      {
+        ok: true,
+        ...currentStatus,
+        locked: true,
+        hidden: true,
+        remembered: false,
+        message: "This device is forgotten. Unlock with Face ID next time.",
+      },
+      [
+        formatCookie(PRIVACY_COOKIE_NAME, "", { maxAge: 0, httpOnly: true }),
+        formatCookie(PRIVACY_HIDDEN_COOKIE_NAME, "1", { maxAge: 60 * 60 * 24 * 365 }),
+      ],
+    );
+  }
+
   if (action === "passkeyRegisterOptions") {
     if (existingConfig && currentStatus.locked) {
       if (!hasPinConfigured(existingConfig) || !verifyPin(body.currentPin, existingConfig)) {
@@ -258,7 +295,7 @@ export async function POST(request: Request): Promise<Response> {
           ]
         : [
             formatCookie(PRIVACY_COOKIE_NAME, token, {
-              maxAge: 60 * 60 * 24 * 30,
+              maxAge: PRIVACY_DEVICE_MAX_AGE,
               httpOnly: true,
             }),
           ],
@@ -325,10 +362,10 @@ export async function POST(request: Request): Promise<Response> {
       keepHidden ? "1" : "",
     );
     return buildPrivacyResponse(
-      { ok: true, ...nextStatus },
+      { ok: true, ...nextStatus, remembered: true },
       [
         formatCookie(PRIVACY_COOKIE_NAME, token, {
-          maxAge: 60 * 60 * 24 * 30,
+          maxAge: PRIVACY_DEVICE_MAX_AGE,
           httpOnly: true,
         }),
         formatCookie(PRIVACY_HIDDEN_COOKIE_NAME, keepHidden ? "1" : "", {
@@ -392,7 +429,7 @@ export async function POST(request: Request): Promise<Response> {
       },
       [
         formatCookie(PRIVACY_COOKIE_NAME, token, {
-          maxAge: 60 * 60 * 24 * 30,
+          maxAge: PRIVACY_DEVICE_MAX_AGE,
           httpOnly: true,
         }),
       ],
@@ -423,7 +460,7 @@ export async function POST(request: Request): Promise<Response> {
         { ok: true, ...nextStatus },
         [
           formatCookie(PRIVACY_COOKIE_NAME, token, {
-            maxAge: 60 * 60 * 24 * 30,
+            maxAge: PRIVACY_DEVICE_MAX_AGE,
             httpOnly: true,
           }),
           formatCookie(PRIVACY_HIDDEN_COOKIE_NAME, "", { maxAge: 0 }),
@@ -467,10 +504,10 @@ export async function POST(request: Request): Promise<Response> {
       keepHidden ? "1" : "",
     );
     return buildPrivacyResponse(
-      { ok: true, ...nextStatus },
+      { ok: true, ...nextStatus, remembered: true },
       [
         formatCookie(PRIVACY_COOKIE_NAME, token, {
-          maxAge: 60 * 60 * 24 * 30,
+          maxAge: PRIVACY_DEVICE_MAX_AGE,
           httpOnly: true,
         }),
         formatCookie(PRIVACY_HIDDEN_COOKIE_NAME, keepHidden ? "1" : "", {
@@ -544,7 +581,7 @@ export async function POST(request: Request): Promise<Response> {
       },
       [
         formatCookie(PRIVACY_COOKIE_NAME, token, {
-          maxAge: 60 * 60 * 24 * 30,
+          maxAge: PRIVACY_DEVICE_MAX_AGE,
           httpOnly: true,
         }),
       ],
@@ -610,7 +647,7 @@ export async function POST(request: Request): Promise<Response> {
       },
       [
         formatCookie(PRIVACY_COOKIE_NAME, token, {
-          maxAge: 60 * 60 * 24 * 30,
+          maxAge: PRIVACY_DEVICE_MAX_AGE,
           httpOnly: true,
         }),
       ],

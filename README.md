@@ -187,9 +187,40 @@ There is exactly **one** control that hides or reveals money, and it lives in th
 navigation menu: **☰ → Privacy** on a phone and **Privacy ▾** in the header on
 desktop (`src/components/PrivacyMenu.tsx`). The header itself has no eye button,
 and the “balances are hidden” notice is informational only — it never offers a
-second toggle that could fall out of sync. The same menu holds **Lock now** and
-**Manage Face ID / PIN**; the lock screen still owns unlocking, because that is a
-gate rather than a toggle.
+second toggle that could fall out of sync. The same menu holds **Lock now**,
+**Forget this device** and **Manage Face ID / PIN**; the lock screen still owns
+unlocking, because that is a gate rather than a toggle.
+
+#### First visit: Face ID once, then remembered
+
+When a Face ID / Passkey lock is set up:
+
+1. **A new device** (nothing in its cache) gets the lock screen with an automatic
+   Face ID / Passkey attempt. Safari only shows a WebAuthn prompt after a tap, so
+   the sheet also focuses the **Unlock with Face ID / Passkey** button — one tap
+   or press of Enter unlocks.
+2. A successful unlock is written to two places: an `HttpOnly` session cookie on
+   the server (`ledgerly_privacy_session`, `PRIVACY_DEVICE_MAX_AGE` = 400 days,
+   the longest lifetime browsers accept) **and** a small device record in the
+   browser cache (`ledgerly-privacy-device` in `localStorage`, via
+   `src/lib/device-memory.ts`). The record holds only a credential id, a label
+   and a timestamp — never a PIN hash, token or signature.
+3. Later launches on that device go straight to the dashboard; the lock screen is
+   only shown again after **Lock now** or **Forget this device**, or when the
+   server cookie is gone (cache cleared, private window, other browser).
+4. **PIN fallback:** if the passkey prompt is cancelled or unavailable, “Use PIN
+   instead” reveals the PIN form, so a device without a passkey can still get in.
+   If no PIN is set and Face ID keeps failing, the portfolio stays locked — set a
+   PIN when you enable Face ID if you want a way back in.
+
+5. **Locking does not re-prompt:** tapping **Lock now** or **Forget this device**
+   also sets a tab-scoped lock intent (`sessionStorage`), so the lock screen does
+   not immediately pop Face ID and undo the lock. The first successful unlock
+   clears it again.
+
+Remembering a device is a *convenience* layer, not a second security boundary:
+the server still decides whether a request is unlocked, and `/api/privacy`
+supports `forgetDevice` so the browser can drop it on request.
 
 ### Install as an iPhone web clip
 
