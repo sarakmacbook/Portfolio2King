@@ -9,7 +9,7 @@ import {
   type PriceSnapshot,
   type Transaction,
 } from "@/db/schema";
-import { fetchMarketPrice, PRICE_PROVIDERS } from "@/lib/market-prices";
+import { fetchPreferredMarketPrice } from "@/lib/market-prices";
 import { fetchStockQuote } from "@/lib/stock-prices";
 import { asc, desc, eq, inArray, sql } from "drizzle-orm";
 
@@ -41,6 +41,7 @@ export function ensureSchema() {
           name text NOT NULL,
           symbol text NOT NULL DEFAULT '',
           crypto_category text NOT NULL DEFAULT 'volatile',
+          price_source text NOT NULL DEFAULT '',
           quantity double precision NOT NULL DEFAULT 0,
           avg_cost double precision NOT NULL DEFAULT 0,
           current_price double precision NOT NULL DEFAULT 0,
@@ -50,6 +51,8 @@ export function ensureSchema() {
           created_at timestamptz NOT NULL DEFAULT now()
         )`);
       await db.execute(sql`ALTER TABLE assets ADD COLUMN IF NOT EXISTS crypto_category text NOT NULL DEFAULT 'volatile'`);
+      // Exchange a crypto asset is pinned to ("" = any provider).
+      await db.execute(sql`ALTER TABLE assets ADD COLUMN IF NOT EXISTS price_source text NOT NULL DEFAULT ''`);
       await db.execute(sql`
         CREATE TABLE IF NOT EXISTS transactions (
           id serial PRIMARY KEY,
@@ -403,9 +406,8 @@ export async function runDailyPriceSnapshot(
       const results = await Promise.all(
         targets.map(async (asset) => {
           try {
-            const price = await Promise.any(
-              PRICE_PROVIDERS.map((provider) => fetchMarketPrice(provider, asset.symbol, "USDT")),
-            );
+            // The exchange picked when the asset was added goes first.
+            const { price } = await fetchPreferredMarketPrice(asset.priceSource, asset.symbol, "USDT");
             return { id: asset.id, price };
           } catch {
             return { id: asset.id, price: null };

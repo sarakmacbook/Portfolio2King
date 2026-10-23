@@ -1,6 +1,9 @@
 export const PRICE_PROVIDERS = ["bybit", "okx", "binance", "coinbase", "kraken", "dexscreener"] as const;
 export type PriceProvider = (typeof PRICE_PROVIDERS)[number];
 
+/** Centralised exchanges with public spot tickers — what a crypto asset can be pinned to. */
+export const CEX_PROVIDERS = ["bybit", "okx", "binance", "coinbase", "kraken"] as const;
+
 export const PROVIDER_LABELS: Record<PriceProvider, string> = {
   bybit: "Bybit",
   okx: "OKX",
@@ -9,6 +12,34 @@ export const PROVIDER_LABELS: Record<PriceProvider, string> = {
   kraken: "Kraken",
   dexscreener: "DexScreener (DEX)",
 };
+
+export function isPriceProvider(value: unknown): value is PriceProvider {
+  return typeof value === "string" && (PRICE_PROVIDERS as readonly string[]).includes(value);
+}
+
+/**
+ * The exchange stored on an asset. Blank means "no preference" — every provider
+ * is tried, which is what assets created before this setting existed get.
+ */
+export function parsePriceSource(value: unknown): PriceProvider | "" {
+  const normalised = String(value ?? "").trim().toLowerCase();
+  return isPriceProvider(normalised) ? normalised : "";
+}
+
+/** Human wording for a stored source, e.g. "Binance" or "Auto (any exchange)". */
+export function describePriceSource(value: unknown): string {
+  const source = parsePriceSource(value);
+  return source ? PROVIDER_LABELS[source] : "Auto (any exchange)";
+}
+
+/**
+ * Providers to try for one asset, in order: the pinned exchange first, then the
+ * others. A pinned exchange that does not list the symbol never blocks a refresh.
+ */
+export function providerOrder(preferred: PriceProvider | ""): PriceProvider[] {
+  if (!preferred) return [...PRICE_PROVIDERS];
+  return [preferred, ...PRICE_PROVIDERS.filter((provider) => provider !== preferred)];
+}
 
 function baseSymbol(value: string) {
   return value.trim().toUpperCase().split(/[\/-]/)[0].replace(/[^A-Z0-9]/g, "");
@@ -33,7 +64,6 @@ function validPrice(value: unknown) {
 /** Read a public spot ticker. Private exchange keys are intentionally never required. */
 export async function fetchMarketPrice(provider: PriceProvider, rawSymbol: string, quote: "USD" | "USDT") {
   const symbol = baseSymbol(rawSymbol);
-  if (!symbol) throw new Error("Asset has no valid symbol");
 
   switch (provider) {
     case "bybit": {
@@ -66,5 +96,55 @@ export async function fetchMarketPrice(provider: PriceProvider, rawSymbol: strin
         .sort((a: any, b: any) => Number(b?.liquidity?.usd || 0) - Number(a?.liquidity?.usd || 0));
       return validPrice(matches[0]?.priceUsd);
     }
+  }
+}
+
+/**
+ * Best price for one asset, starting at the exchange stored on it.
+ *
+ * A pinned exchange is tried first, on its own, so the price really comes from
+ * the market the user chose. If that exchange does not list the pair (or is
+ * briefly down) the remaining providers are raced in parallel, so a stale
+ * holding never blocks on six timeouts in a row. Assets without a preference
+ * keep the old "fastest provider wins" behaviour. The provider that answered is
+ * returned so screens can say where a price came from instead of guessing.
+ */
+export async function fetchPreferredMarketPrice(
+  preferred: PriceProvider | "",
+  rawSymbol: string,
+  quote: "USD" | "USDT" = "USDT",
+): Promise<{ price: number; provider: PriceProvider }> {
+  const attempt = async (provider: PriceProvider) => ({
+    provider,
+    price: await fetchMarketPrice(provider, rawSymbol, quote),
+  });
+  // Promise.any rejects with an AggregateError; callers want one plain sentence.
+  const unavailable = () => {
+    const symbol = baseSymbol(rawSymbol) || "this symbol";
+    return new Error(
+      preferred
+        ? `No exchange returned a price for ${symbol} — ${PROVIDER_LABELS[preferred]} was tried first`
+        : `No exchange returned a price for ${symbol}`,
+    );
+  };
+
+  if (!preferred) {
+    try {
+      return await Promise.any(PRICE_PROVIDERS.map(attempt));
+    } catch {
+      throw unavailable();
+    }
+  }
+
+  try {
+    return await attempt(preferred);
+  } catch {
+    // Pinned exchange has no such pair (or is down): fall back to the rest.
+  }
+  const others = PRICE_PROVIDERS.filter((provider) => provider !== preferred);
+  try {
+    return await Promise.any(others.map(attempt));
+  } catch {
+    throw unavailable();
   }
 }

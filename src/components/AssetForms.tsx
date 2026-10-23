@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useRef, useState } from "react";
 import { addTransaction, updateAsset, updatePrice, type ActionState } from "@/app/actions";
 import type { AssetType, TxKind } from "@/lib/constants";
+import { CEX_PROVIDERS, PROVIDER_LABELS, type PriceProvider } from "@/lib/market-prices";
 import { KIND_META, kindsFor, money, qty } from "@/lib/format";
 import { playMoneyChime } from "@/lib/sounds";
 import type { CashAccount } from "./AddAssetDialog";
@@ -206,7 +207,15 @@ export function PriceForm({ assetId, currentPrice }: { assetId: number; currentP
 export function EditAssetButton({
   asset,
 }: {
-  asset: { id: number; name: string; symbol: string; notes: string; type: AssetType; cryptoCategory: "stablecoin" | "volatile" };
+  asset: {
+    id: number;
+    name: string;
+    symbol: string;
+    notes: string;
+    type: AssetType;
+    cryptoCategory: "stablecoin" | "volatile";
+    priceSource: PriceProvider | "";
+  };
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -225,7 +234,15 @@ function EditAssetForm({
   asset,
   onDone,
 }: {
-  asset: { id: number; name: string; symbol: string; notes: string; type: AssetType; cryptoCategory: "stablecoin" | "volatile" };
+  asset: {
+    id: number;
+    name: string;
+    symbol: string;
+    notes: string;
+    type: AssetType;
+    cryptoCategory: "stablecoin" | "volatile";
+    priceSource: PriceProvider | "";
+  };
   onDone: () => void;
 }) {
   const [state, action] = useActionState<ActionState, FormData>(updateAsset, {});
@@ -246,12 +263,25 @@ function EditAssetForm({
         </div>
       </div>
       {asset.type === "crypto" && (
-        <div>
-          <label className="label">Crypto subcategory</label>
-          <select name="cryptoCategory" className="input" defaultValue={asset.cryptoCategory}>
-            <option value="stablecoin">Stablecoin</option>
-            <option value="volatile">Volatile asset</option>
-          </select>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <label className="label">Crypto subcategory</label>
+            <select name="cryptoCategory" className="input" defaultValue={asset.cryptoCategory}>
+              <option value="stablecoin">Stablecoin</option>
+              <option value="volatile">Volatile asset</option>
+            </select>
+          </div>
+          <div>
+            <label className="label">Price from</label>
+            <select name="priceSource" className="input" defaultValue={asset.priceSource}>
+              <option value="">Auto — any exchange</option>
+              {CEX_PROVIDERS.map((provider) => (
+                <option key={provider} value={provider}>
+                  {PROVIDER_LABELS[provider]}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       )}
       <div>

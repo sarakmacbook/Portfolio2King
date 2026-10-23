@@ -18,7 +18,8 @@ the deployment before storing real portfolio data (see the
   / unrealized P/L replayed from the full transaction history.
 - Manual prices plus live crypto quotes from Bybit, OKX, Binance, Coinbase,
   Kraken, or DexScreener, and live stock/ETF quotes from Yahoo Finance — no API
-  keys required.
+  keys required. A crypto holding can be **added from a specific exchange**, and
+  every later refresh keeps pricing it there.
 - Crypto asset search that falls back automatically between public data
   providers when one is rate-limited or down.
 - Daily per-asset price snapshots and portfolio snapshots, allocation donut and
@@ -854,6 +855,41 @@ and no account.
 > Yahoo's endpoint is unofficial and can change or rate-limit without notice.
 > Failures never corrupt prices: the previous value is kept and the refresh
 > summary reports how many holdings could not be priced.
+
+### Adding a crypto asset from an exchange
+
+**Add asset → Crypto → Price from** pins the holding to one exchange (Bybit,
+OKX, Binance, Coinbase Exchange, or Kraken). **Fetch live price** calls the
+exchange's public spot ticker and fills *Current price*; the choice is saved as
+`assets.price_source` and reused by every later refresh, so the holding is not
+silently priced from a different market.
+
+- **Automatic** (the default, stored as an empty string) keeps the old
+  behaviour: the fastest of the six public providers wins. Holdings created
+  before this setting existed are automatic.
+- A pinned exchange is asked **first and on its own**. If it does not list the
+  pair — a long-tail token, a delisted pair, an outage — the remaining providers
+  are raced in parallel, so a holding never goes stale just because the chosen
+  exchange is missing it. The page shows which exchange is pinned
+  (`Binance · updated Oct 23` on the asset page, and under each row on `/prices`).
+- **Quote** is `USDT` or `USD`. Coinbase and Kraken always use USD pairs;
+  Binance, OKX and Bybit map `USD` to their USDT market.
+- **Change it later** with **Edit** on the asset page; `/prices` still has a
+  page-level source selector, which is now the fallback for holdings without a
+  pinned exchange.
+- **Public APIs only** — the same endpoints as `/prices`, no keys or secrets.
+  The dialogs call two routes:
+
+  | Endpoint | Used by | Body / query |
+  | --- | --- | --- |
+  | `GET /api/prices/quote` | Add asset dialog (no asset id yet) | `?symbol=BTC&provider=binance&quote=USDT` → `{ symbol, provider, providerLabel, quote, price }` |
+  | `POST /api/prices/live` | `/prices` bulk fetch | `{ provider, quote, assets: [{ id, symbol, type, provider? }] }` — a per-asset `provider` overrides the page default |
+
+  Failures return a readable message (`No exchange returned a price for XYZ —
+  Binance was tried first`) and never store a zero price.
+- **Backups:** the field is part of the JSON export/import. Older backups without
+  it import as automatic, and an unknown value in a hand-edited file is treated
+  as automatic instead of failing the restore.
 
 ### Crypto search providers
 

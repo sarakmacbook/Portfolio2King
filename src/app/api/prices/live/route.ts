@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchMarketPrice, PRICE_PROVIDERS, type PriceProvider } from "@/lib/market-prices";
+import { fetchMarketPrice, isPriceProvider, PRICE_PROVIDERS, type PriceProvider } from "@/lib/market-prices";
 import { fetchStockQuote } from "@/lib/stock-prices";
 
 export const dynamic = "force-dynamic";
@@ -7,7 +7,8 @@ export const dynamic = "force-dynamic";
 type RequestBody = {
   provider?: string;
   quote?: string;
-  assets?: Array<{ id?: number; symbol?: string; type?: string }>;
+  /** `provider` per asset overrides the request default (the exchange it was added from). */
+  assets?: Array<{ id?: number; symbol?: string; type?: string; provider?: string }>;
 };
 
 /**
@@ -36,14 +37,16 @@ export async function POST(request: Request) {
   const quote = body.quote === "USD" ? "USD" : "USDT";
 
   const results = await Promise.all(
-    assets.map(async ({ id, symbol, type }) => {
+    assets.map(async ({ id, symbol, type, provider: preferred }) => {
       if (!Number.isInteger(id) || !symbol || !symbol.trim()) return { id, error: "Missing symbol" };
+      // The exchange stored on an asset wins over the page-level selector.
+      const source = isPriceProvider(preferred) ? preferred : provider;
       try {
         const price =
           type === "stock"
             ? (await fetchStockQuote(symbol)).price
-            : await fetchMarketPrice(provider, symbol, quote);
-        return { id, price };
+            : await fetchMarketPrice(source, symbol, quote);
+        return { id, price, provider: source };
       } catch (error) {
         return { id, error: error instanceof Error ? error.message : "Price unavailable" };
       }
