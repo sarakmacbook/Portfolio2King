@@ -20,6 +20,9 @@ import {
   unknownPortfolioPlaceholders,
   detectPriceMoves,
   formatAlertText,
+  formatCappedPercent,
+  formatMoveGain,
+  formatMoveMultiple,
   formatMovePercent,
   formatPortfolioMove,
   formatPriceMove,
@@ -701,6 +704,8 @@ test("the custom Telegram message fills placeholders, keeps the note, and falls 
   const values = portfolioMessageValues(sampleMessage, sampleContext);
   assert.equal(values.total, "$53,222.00");
   assert.equal(values.percent, "+2.35%");
+  assert.equal(values.gain, "+2.35%");
+  assert.equal(values.x, "1.02x");
   assert.equal(values.amount, "+$1,222.00");
   assert.equal(values.from, "$52,000.00");
   assert.equal(values.arrow, "▲");
@@ -758,7 +763,27 @@ test("placeholders are case- and space-insensitive, and typos are reported inste
   assert.deepEqual(unknownPortfolioPlaceholders("{percent} {btc} {Total}"), ["btc"]);
   assert.deepEqual(unknownPortfolioPlaceholders("{a} {b} {a}"), ["a", "b"]);
   assert.deepEqual(unknownPortfolioPlaceholders("no placeholders here"), []);
-  assert.deepEqual(unknownPortfolioPlaceholders("{date} {time} {window}"), []);
+  assert.deepEqual(unknownPortfolioPlaceholders("{date} {time} {window} {gain} {x}"), []);
+
+  // {percent} never exceeds ±100%, while {gain} switches to "% (x)" above +100% and {x} shows the multiple.
+  assert.equal(formatCappedPercent(0.25), "+25.00%");
+  assert.equal(formatCappedPercent(1), "+100.00%");
+  assert.equal(formatCappedPercent(1.5), "+100.00%");
+  assert.equal(formatCappedPercent(-1.2), "-100.00%");
+
+  assert.equal(formatMoveGain(0.25), "+25.00%");
+  assert.equal(formatMoveGain(1), "+100.00%");
+  assert.equal(formatMoveGain(1.5), "+150.00% (2.50x)");
+  assert.equal(formatMoveGain(-0.5), "-50.00%");
+  assert.equal(formatMoveMultiple(1.5), "2.50x");
+  assert.equal(formatMoveMultiple(0), "1.00x");
+
+  const bigMove = describePortfolioMove(10_000, 25_000, "yesterday's close")!;
+  const bigUpdate = { ...formatPortfolioMove(bigMove), move: bigMove };
+  const bigValues = portfolioMessageValues(bigUpdate, sampleContext);
+  assert.equal(bigValues.percent, "+100.00%");
+  assert.equal(bigValues.gain, "+150.00% (2.50x)");
+  assert.equal(bigValues.x, "2.50x");
 });
 
 test("a very long message is cut to Telegram's limit instead of being rejected", () => {
