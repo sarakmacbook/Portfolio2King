@@ -326,12 +326,16 @@ function PortfolioTelegramEditor({
         </p>
       )}
 
-      <div className="mt-3 rounded-xl bg-slate-900 px-3 py-2">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+      {/* The colour lives on the wrapper, never on the children: in dark mode
+          `html.dark .bg-slate-900` inverts this block to a light surface, and a
+          child with its own `text-slate-100` would stay near-white on it. The
+          secondary lines use opacity so they follow whichever surface is on. */}
+      <div className="mt-3 rounded-xl bg-slate-900 px-3 py-2 text-slate-100">
+        <p className="text-[10px] font-semibold uppercase tracking-wide opacity-70">
           Preview · what Telegram receives
         </p>
-        <pre className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-100">{preview}</pre>
-        <p className="mt-1 text-[10px] text-slate-400">
+        <pre className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed">{preview}</pre>
+        <p className="mt-1 text-[10px] opacity-60">
           {usingSample
             ? "Sample numbers — add a holding with a value to see your own totals here."
             : "Your real totals. Telegram gets this text, updated as you type."}
