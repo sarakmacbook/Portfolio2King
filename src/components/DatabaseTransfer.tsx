@@ -31,7 +31,9 @@ export default function DatabaseTransfer() {
   }, []);
 
   function authHeaders(): Record<string, string> {
-    return status?.authRequired ? { Authorization: `Bearer ${key}` } : {};
+    const headers: Record<string, string> = { "X-Requested-With": "XMLHttpRequest" };
+    if (status?.authRequired) headers.Authorization = `Bearer ${key}`;
+    return headers;
   }
 
   async function exportDatabase() {

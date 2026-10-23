@@ -42,7 +42,11 @@ export default function DatabaseSetup() {
     try {
       const response = await fetch("/api/database", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Requested-With": "XMLHttpRequest",
+          Authorization: `Bearer ${key}`,
+        },
         body: JSON.stringify({ action, connectionString: url }),
       });
       const result = await response.json();

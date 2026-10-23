@@ -3,6 +3,7 @@ import { readFile, rename, writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import { Pool } from "pg";
 import { getDatabaseUrlVariable, resetDatabaseConnection } from "@/db";
+import { sameOrigin } from "@/lib/database-admin";
 import { connectionConfig, validateDatabaseUrl } from "@/lib/database-connection";
 
 export const runtime = "nodejs";
@@ -24,11 +25,7 @@ let lastAttempt = 0;
 let busy = false;
 
 export async function POST(request: Request) {
-  const origin = request.headers.get("origin");
-  const allowedHosts = [request.headers.get("host"), request.headers.get("x-forwarded-host"), new URL(request.url).host].filter(Boolean);
-  let originHost: string | undefined;
-  try { originHost = origin ? new URL(origin).host : undefined; } catch { /* Reject malformed origins. */ }
-  if (!originHost || !allowedHosts.includes(originHost) || request.headers.get("sec-fetch-site") === "cross-site") {
+  if (!sameOrigin(request)) {
     return Response.json({ error: "Database setup requests must come from this app." }, { status: 403 });
   }
   if (!enabled()) return Response.json({ error: "Ask the administrator to set DATABASE_SETUP_TOKEN to a random secret of at least 32 characters, then restart or redeploy." }, { status: 403 });
