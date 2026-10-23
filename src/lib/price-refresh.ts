@@ -18,14 +18,16 @@ import {
   formatPortfolioMove,
   formatPriceMove,
   formatRefreshFailure,
+  duePortfolioRuns,
   portfolioAlertKey,
-  portfolioScheduleFor,
   portfolioMovePassesThreshold,
   priceAlertKey,
   refreshFailureKey,
   type AlertSettings,
   type AlertWindow,
+  type PortfolioAlertSettings,
   type PortfolioMove,
+  type PortfolioRun,
   type PriceBaseline,
 } from "@/lib/alert-rules";
 import {
@@ -51,6 +53,13 @@ export type PortfolioUpdateSummary = {
   status: PortfolioUpdateStatus;
   changeMoney?: number;
   changePct?: number;
+  /** Which recap this is: day = daily, week = weekly, month = monthly. */
+  cadence?: AlertWindow;
+};
+
+export type PortfolioUpdatesSummary = {
+  /** One entry per enabled cadence that was due on this run. */
+  runs: PortfolioUpdateSummary[];
 };
 
 export type RefreshSummary = DailySnapshotRunResult & {
@@ -58,7 +67,7 @@ export type RefreshSummary = DailySnapshotRunResult & {
   alertsSent: number;
   alertsSkipped: number;
   alertErrors: string[];
-  portfolio?: PortfolioUpdateSummary;
+  portfolio?: PortfolioUpdatesSummary;
   skipped?: "recently-refreshed" | "disabled" | "no-assets";
 };
 
@@ -169,7 +178,7 @@ async function loadPortfolioBaseline(
 
   // A month window with less than 30 days of history: use the oldest snapshot and
   // say how old it is, mirroring the per-asset rule.
-  if (window === "month") {
+  if (window !== "day") {
     const oldest = await db.execute<{ total_value: number; date: string }>(sql`
       SELECT total_value, date::text AS date
       FROM snapshots
@@ -208,6 +217,11 @@ export type BuildPortfolioUpdateOptions = {
    * on a portfolio younger than one snapshot, so delivery can be checked.
    */
   preview?: boolean;
+  /**
+   * Comparison window: `day` (yesterday), `week` (7 days back) or `month`
+   * (~30 days back). Defaults to the daily window.
+   */
+  window?: AlertWindow;
 };
 
 /**
@@ -248,10 +262,11 @@ export async function buildPortfolioUpdate(
 ): Promise<PortfolioUpdate | null> {
   const list = await loadAssets();
   const current = computeTotals(list).totalValue;
-  let baseline = await loadPortfolioBaseline(settings.portfolio.window, fallbackTotal);
+  const window = options.window ?? "day";
+  let baseline = await loadPortfolioBaseline(window, fallbackTotal);
   let previewFallback = false;
   if (!baseline && options.preview) {
-    baseline = await loadLatestSnapshotBaseline(current, settings.portfolio.window);
+    baseline = await loadLatestSnapshotBaseline(current, window);
     previewFallback = baseline !== null;
   }
   if (!baseline) return null;
@@ -399,10 +414,10 @@ export async function refreshPricesWithAlerts(options: RefreshOptions = {}): Pro
   } catch {
     // A portfolio-update problem must not fail the price refresh (and the cron
     // response) that already succeeded.
-    summary.portfolio = { status: "error" };
+    summary.portfolio = { runs: [{ status: "error" }] };
     errors.add("Portfolio update could not be sent");
   }
-  if (summary.portfolio.status === "sent") summary.alertsSent += 1;
+  summary.alertsSent += summary.portfolio.runs.filter((run) => run.status === "sent").length;
 
   // 4. Housekeeping: keep the alert log bounded.
   await pruneAlertEvents(90).catch(() => 0);
@@ -411,42 +426,74 @@ export async function refreshPricesWithAlerts(options: RefreshOptions = {}): Pro
   return summary;
 }
 
+/**
+ * Sends every recap that is due on this run — the daily, weekly and monthly
+ * cadences are independent schedules that share one time of day. Each one
+ * dedupes per period, so a second refresh the same day sends nothing and a
+ * weekly recap landing on the same day as the daily one still goes out.
+ */
 async function dispatchPortfolioUpdate(input: {
   settings: AlertSettings;
   beforeTotal: number;
   afterTotal: number;
   errors: Set<string>;
   now?: Date;
-}): Promise<PortfolioUpdateSummary> {
+}): Promise<PortfolioUpdatesSummary> {
   const { settings, beforeTotal, afterTotal, errors } = input;
   const portfolio = settings.portfolio;
   const now = input.now ?? new Date();
 
-  if (!portfolio.enabled || !portfolio.time) return { status: "disabled" };
+  if (!portfolio.enabled || !portfolio.time) return { runs: [{ status: "disabled" }] };
 
-  // Today's run only: nothing before the chosen local time, and the day's own
-  // date is the dedupe key, so each day sends exactly once.
-  const schedule = portfolioScheduleFor(now, portfolio.time, portfolio.timezone);
-  if (!schedule) return { status: "not-due" };
+  const runs = duePortfolioRuns(now, portfolio, portfolio.timezone);
+  if (runs.length === 0) return { runs: [{ status: "not-due" }] };
 
-  const baseline = await loadPortfolioBaseline(portfolio.window, beforeTotal);
+  const results: PortfolioUpdateSummary[] = [];
+  for (const run of runs) {
+    results.push(
+      await dispatchPortfolioRun({
+        run,
+        portfolio,
+        settings,
+        beforeTotal,
+        afterTotal,
+        errors,
+      }),
+    );
+  }
+  return { runs: results };
+}
+
+async function dispatchPortfolioRun(input: {
+  run: PortfolioRun;
+  portfolio: PortfolioAlertSettings;
+  settings: AlertSettings;
+  beforeTotal: number;
+  afterTotal: number;
+  errors: Set<string>;
+}): Promise<PortfolioUpdateSummary> {
+  const { run, portfolio, settings, beforeTotal, afterTotal, errors } = input;
+
+  // Each cadence compares with its own horizon: day → yesterday, week → the
+  // close 7 days back, month → ~30 days back.
+  const baseline = await loadPortfolioBaseline(run.cadence, beforeTotal);
   const move = baseline ? describePortfolioMove(baseline.value, afterTotal, baseline.label) : null;
-  if (!move) return { status: "no-baseline" };
+  if (!move) return { status: "no-baseline", cadence: run.cadence };
 
   const change = { changeMoney: move.changeMoney, changePct: move.changePct };
   if (!portfolioMovePassesThreshold(move, portfolio.thresholdPct)) {
-    return { status: "below-threshold", ...change };
+    return { status: "below-threshold", cadence: run.cadence, ...change };
   }
 
   const alert = formatPortfolioMove(move);
   // Telegram may be formatted by the user; push keeps the structured message.
   const telegramText = composePortfolioTelegramMessage({ ...alert, move }, portfolio, {
-    date: schedule.date,
+    date: run.date,
     time: portfolio.time,
-    window: portfolio.window,
+    window: run.cadence,
   });
   const result = await dispatchAlert({
-    dedupeKey: portfolioAlertKey(schedule.date, portfolio.window),
+    dedupeKey: portfolioAlertKey(run),
     kind: "portfolio_move",
     title: alert.title,
     body: alert.body,
@@ -463,5 +510,5 @@ async function dispatchPortfolioUpdate(input: {
 
   const status: PortfolioUpdateStatus =
     result.status === "sent" ? "sent" : result.status === "duplicate" ? "duplicate" : "no-channel";
-  return { status, ...change };
+  return { status, cadence: run.cadence, ...change };
 }

@@ -189,11 +189,14 @@ Portfolio ▲ +2.35% (+$1,222.00)
 Your portfolio moved from $52,000.00 to $53,222.00 since yesterday’s close: +$1,222.00 (+2.35%).
 ```
 
-- Pick a **time of day** and a **time zone** on `/alerts`. Your device’s zone is
-  selected by default; the first refresh at or after that local time sends the
-  update, and the key for that scheduled run (`portfolio:2026-10-22:day`) means
-  exactly one message per day, whether the refresh comes from the cron job or an
-  open tab.
+- Pick **how often** (daily, weekly and/or monthly — each one has its own
+  switch), a **time of day** and a **time zone** on `/alerts`. All ticked
+  cadences share that time; your device’s zone is selected by default.
+- Every recap sends **once per period**, whatever runs the refresh: the dedupe
+  keys are `portfolio:day:2026-10-22`, `portfolio:week:2026-10-22` (the scheduled
+  weekday) and `portfolio:month:2026-10`, so a cron job and an open tab cannot
+  double-send, and a weekly recap landing on the same day as the daily one still
+  goes out. Changing the weekday or the day of the month re-arms that period.
 - **The update belongs to its own day.** It is sent on the first refresh at or
   after the chosen time, and never before it: enabling an 18:00 update at 10:00
   stays quiet until 18:00, and the previous day’s update is never delivered the
@@ -204,10 +207,13 @@ Your portfolio moved from $52,000.00 to $53,222.00 since yesterday’s close: +$
   (%)* blank and the update arrives every day at that time, even when nothing
   moved (`Portfolio ▬ 0.00% ($0.00)`). Enter e.g. `2` to skip days with a
   smaller move.
-- **Compare over** day (yesterday’s total) or month (the total ~30 days ago).
-  The baseline is the newest daily snapshot before the cutoff. Until one exists,
-  the previous refresh total is used and labelled “the last refresh”; with no
-  history at all, no message is invented.
+- **Each cadence compares with its own horizon:** daily vs yesterday’s total,
+  weekly vs the total 7 days ago, monthly vs ~30 days ago. The baseline is the
+  newest daily snapshot before that cutoff. Until one exists, the previous
+  refresh total is used and labelled “the last refresh”; with no history at all,
+  no message is invented. The weekly picker offers every weekday; the monthly
+  one accepts the 1st–28th, so every month actually has that day (the 31st would
+  skip February).
 - The portfolio switch is **independent of Automatic price alerts** — you can
   keep the timed update while per-holding threshold alerts are off.
 - Deposits, withdrawals and new buys move the total, so they count as part of the
@@ -219,6 +225,8 @@ Your portfolio moved from $52,000.00 to $53,222.00 since yesterday’s close: +$
   portfolio with no earlier snapshot it still sends — the message compares
   against the newest snapshot (0.00 %) and says so, instead of refusing with
   “not enough history”.
+- The same optional threshold applies to every cadence, and *Preview recap* on the
+  form chooses which of the three messages the preview shows.
 - **The Telegram copy can be reworded.** On `/alerts`, *Portfolio update → Custom
   Telegram message* replaces the standard two lines with your own text and
   placeholders, and *Extra note* appends one more line. Browser push always keeps
@@ -229,8 +237,8 @@ Your portfolio moved from $52,000.00 to $53,222.00 since yesterday’s close: +$
 
 ### Custom Telegram message for the portfolio update
 
-The daily portfolio update is the one message people forward to a chat or pin in
-a group. On `/alerts`, under **Portfolio update**, the *Custom Telegram message*
+The scheduled portfolio recap is the one message people forward to a chat or pin
+in a group. On `/alerts`, under **Portfolio update**, the *Custom Telegram message*
 box replaces the standard wording; leave it blank to keep the default.
 
 ```text
@@ -252,7 +260,7 @@ Now {total} ({percent} from {from})
 plus the note `— sent from Ledgerly`. The panel under the box is a live preview
 of **your own** next message: the real totals, window and date are computed on
 the server and every placeholder is filled in, so it matches what Telegram
-receives and follows your edits (and the "Compare over" picker) as you type. A
+receives and follows your edits (and the *Preview recap* picker) as you type. A
 portfolio with nothing in it yet falls back to a clearly-labelled sample. The
 buttons above the box insert placeholders at the cursor.
 
@@ -265,7 +273,7 @@ buttons above the box insert placeholders at the cursor.
 | `{arrow}` | `▲`, `▼`, or `▬` |
 | `{direction}` | `up`, `down`, or `flat` |
 | `{baseline}` | What it is compared with — `yesterday's close` |
-| `{window}` | `1 day` or `30 days` |
+| `{window}` | `1 day`, `7 days` or `30 days` — the cadence's horizon |
 | `{date}` | Send date in the chosen zone — `2026-10-22` |
 | `{time}` | Scheduled time — `18:00` |
 | `{title}` | Standard title line |
@@ -387,7 +395,9 @@ already sends alerts once a day. Because the portfolio update only fires at or
 after the time you chose, a once-a-day cron must run at (or after) that time —
 a daily 00:00 UTC run cannot deliver an 18:00 Phnom Penh update. Schedule
 `/api/cron/refresh-prices` a few times a day (GitHub Actions or a Pro plan) for a
-precise local time; minute-level schedules need Pro.
+precise local time; minute-level schedules need Pro. The same rule covers the
+weekly and monthly recaps: they need one refresh on their own day, and a day
+with no run at all is skipped rather than delivered late with stale numbers.
 
 **While someone is browsing** — no scheduler is needed as long as a tab is open;
 the page triggers a throttled refresh on the interval above.

@@ -13,11 +13,12 @@ export const ALERT_CHANNELS = ["push", "telegram"] as const;
 export type AlertChannel = (typeof ALERT_CHANNELS)[number];
 
 /** Window a price move is measured over: one day, or one month (30 days). */
-export const ALERT_WINDOWS = ["day", "month"] as const;
+export const ALERT_WINDOWS = ["day", "week", "month"] as const;
 export type AlertWindow = (typeof ALERT_WINDOWS)[number];
 
 /** How far back each window looks, in days. A month is a fixed 30 days. */
-export const WINDOW_DAYS: Record<AlertWindow, number> = { day: 1, month: 30 };
+export const WINDOW_DAYS: Record<AlertWindow, number> = { day: 1, week: 7, month: 30 };
+
 
 /**
  * The whole-portfolio update: one message at a chosen local time that reports
@@ -46,11 +47,31 @@ export type PortfolioAlertSettings = {
    */
   timezone: string;
   /**
-   * What the total is compared against: `day` = yesterday's snapshot,
-   * `month` = the snapshot ~30 days back (falling back to the oldest one).
-   * Stored as `alerts.portfolio.window`.
+   * Send a recap every day, compared with yesterday's snapshot.
+   * Stored as `alerts.portfolio.daily`.
    */
-  window: AlertWindow;
+  dailyEnabled: boolean;
+  /**
+   * Send a recap once a week, compared with the snapshot 7 days back.
+   * Stored as `alerts.portfolio.weekly`.
+   */
+  weeklyEnabled: boolean;
+  /**
+   * Which day the weekly recap goes out: `0` = Sunday … `6` = Saturday.
+   * Stored as `alerts.portfolio.weeklyDay`.
+   */
+  weeklyDay: number;
+  /**
+   * Send a recap once a month, compared with the snapshot ~30 days back.
+   * Stored as `alerts.portfolio.monthly`.
+   */
+  monthlyEnabled: boolean;
+  /**
+   * Day of the month the monthly recap goes out, `1`–`28` so every month has
+   * that day (a 31st would skip February). Stored as
+   * `alerts.portfolio.monthlyDay`.
+   */
+  monthlyDay: number;
   /**
    * Optional filter in percent (0.5–50). `null` (blank in the form) means
    * "always send at this time", which is the common case for a daily update.
@@ -131,7 +152,14 @@ export const DEFAULT_PORTFOLIO_ALERT_SETTINGS: PortfolioAlertSettings = {
   enabled: false,
   time: "18:00",
   timezone: "",
-  window: "day",
+  // All three cadences start ticked: the point of the feature is an automatic
+  // daily, weekly and monthly recap. The master switch above still decides
+  // whether anything is sent at all, and each cadence can be unticked.
+  dailyEnabled: true,
+  weeklyEnabled: true,
+  weeklyDay: 1,
+  monthlyEnabled: true,
+  monthlyDay: 1,
   thresholdPct: null,
   telegramTemplate: "",
   telegramNote: "",
@@ -182,8 +210,22 @@ export const SETTING_KEYS = {
   portfolioTime: "alerts.portfolio.time",
   /** IANA zone the time is read in — empty means the server's zone. */
   portfolioTimezone: "alerts.portfolio.timezone",
-  /** Portfolio comparison window — "day" or "month". */
+  /**
+   * LEGACY: the single comparison window portfolios used before the cadence
+   * schedules existed ("day" or "month"). Still read so old rows do not break,
+   * never written any more — the cadences below replace it.
+   */
   portfolioWindow: "alerts.portfolio.window",
+  /** Daily recap switch — "true" / "false". */
+  portfolioDaily: "alerts.portfolio.daily",
+  /** Weekly recap switch — "true" / "false". */
+  portfolioWeekly: "alerts.portfolio.weekly",
+  /** Weekday of the weekly recap — "0" (Sunday) … "6" (Saturday). */
+  portfolioWeeklyDay: "alerts.portfolio.weeklyDay",
+  /** Monthly recap switch — "true" / "false". */
+  portfolioMonthly: "alerts.portfolio.monthly",
+  /** Day of the month of the monthly recap — "1" … "28". */
+  portfolioMonthlyDay: "alerts.portfolio.monthlyDay",
   /** Optional portfolio threshold in percent — "" means "always send". */
   portfolioThresholdPct: "alerts.portfolio.thresholdPct",
   /** Custom Telegram message — "" = the standard title + body. */
@@ -213,8 +255,30 @@ export function parseAlertWindow(raw: unknown): AlertWindow | null {
   if (raw === null || raw === undefined) return null;
   const value = String(raw).trim().toLowerCase();
   if (["day", "daily", "1d", "24h", "yesterday"].includes(value)) return "day";
+  if (["week", "weekly", "7d", "7 days"].includes(value)) return "week";
   if (["month", "monthly", "30d", "30 days"].includes(value)) return "month";
   return null;
+}
+
+/** Weekday `0` (Sunday) … `6` (Saturday); anything else is `null`. */
+export function parseWeekday(raw: unknown): number | null {
+  if (raw === null || raw === undefined) return null;
+  const value = String(raw).trim();
+  if (!/^[0-6]$/.test(value)) return null;
+  return Number(value);
+}
+
+/**
+ * Day of the month `1`–`28`. The 29th–31st are refused on purpose: those days do
+ * not exist in every month, so a monthly recap set to the 31st would silently
+ * skip February (and the 30th would skip it too).
+ */
+export function parseMonthDay(raw: unknown): number | null {
+  if (raw === null || raw === undefined) return null;
+  const value = String(raw).trim();
+  if (!/^\d{1,2}$/.test(value)) return null;
+  const day = Number(value);
+  return day >= 1 && day <= 28 ? day : null;
 }
 
 /** Shifts an ISO date (`YYYY-MM-DD`) by whole days, in UTC. */
@@ -250,6 +314,7 @@ export function describeBaseline(window: AlertWindow, gapDays: number, earliest 
   const ago = gapDays <= 1 ? "yesterday" : `${gapDays} days ago`;
   if (earliest) return `the earliest recorded price (${ago})`;
   if (window === "day") return gapDays <= 1 ? "yesterday's close" : `the close ${ago}`;
+  if (window === "week") return gapDays === 7 ? "last week's close" : `the close ${ago}`;
   return `the price ${ago}`;
 }
 
@@ -351,6 +416,33 @@ export function resolveTimeZone(timeZone: string | null | undefined): string {
   }
 }
 
+/** Weekday names, Sunday first, matching `weeklyDay` (0–6). */
+export const WEEKDAY_NAMES = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+] as const;
+
+/** `1` → "1st", `2` → "2nd", `11` → "11th", `22` → "22nd". */
+export function ordinal(day: number): string {
+  const mod100 = day % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${day}th`;
+  switch (day % 10) {
+    case 1:
+      return `${day}st`;
+    case 2:
+      return `${day}nd`;
+    case 3:
+      return `${day}rd`;
+    default:
+      return `${day}th`;
+  }
+}
+
 export type ZonedClock = { date: string; minutes: number };
 
 /** Wall clock in a zone: local `YYYY-MM-DD` plus minutes after midnight. */
@@ -392,7 +484,40 @@ export type PortfolioSchedule = {
 };
 
 /**
- * Today's scheduled run, or `null` before the chosen time.
+ * A run that is due today, for one cadence. `cadence` is also the comparison
+ * window: the daily recap compares with yesterday, the weekly one with the
+ * close 7 days back, the monthly one with ~30 days back.
+ */
+export type PortfolioRun = PortfolioSchedule & {
+  cadence: PortfolioCadence;
+  /**
+   * Identifies the period the run belongs to, so the dedupe key fires once per
+   * period. Daily = the local date, weekly = the local date of the chosen
+   * weekday, monthly = `YYYY-MM`. Changing the weekday / day of month therefore
+   * re-arms the period, which is what a deliberate schedule edit should do.
+   */
+  periodKey: string;
+};
+
+/** The three recap cadences; each one is also its own comparison window. */
+export const PORTFOLIO_CADENCES = ["day", "week", "month"] as const;
+export type PortfolioCadence = AlertWindow;
+
+/** Local weekday (`0` Sunday … `6` Saturday) of an ISO date. */
+export function isoDateWeekday(date: string): number {
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+}
+
+/** Local day of the month (`1`–`31`) of an ISO date. */
+export function isoDateDayOfMonth(date: string): number {
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDate();
+}
+
+/**
+ * Today's scheduled run of one cadence, or `null` when today is not that
+ * cadence's day (or the clock is still before the chosen time).
  *
  * The run belongs to the local day it fires on: once the clock passes the
  * chosen time, the next refresh sends *that day's* update — later the same day
@@ -401,33 +526,107 @@ export type PortfolioSchedule = {
  * "18:00" setting must not arrive at 00:05 just because a tab opened.
  *
  * A day with no refresh at all is skipped rather than sent stale, which is why
- * the scheduler should run at least a few times a day (see the README).
+ * the scheduler should run at least once shortly after the chosen time; a
+ * weekly or monthly slot missed for a whole day waits for its next period
+ * instead of arriving late with stale numbers.
  */
 export function portfolioScheduleFor(
   now: Date,
   time: string,
   timeZone: string,
-): PortfolioSchedule | null {
+  cadence: PortfolioCadence = "day",
+  settings?: Pick<PortfolioAlertSettings, "weeklyDay" | "monthlyDay">,
+): PortfolioRun | null {
   const minutes = parseAlertTimeMinutes(time);
   if (minutes === null) return null;
   const zone = resolveTimeZone(timeZone);
   const clock = zonedClock(now, zone);
   if (clock.minutes < minutes) return null;
+  if (!cadenceFallsOnDate(cadence, clock.date, settings)) return null;
   return {
+    cadence,
     date: clock.date,
     at: zonedTimeToUtc(clock.date, minutes, zone),
     lateMinutes: clock.minutes - minutes,
+    periodKey: cadence === "month" ? clock.date.slice(0, 7) : clock.date,
   };
 }
 
-/** Next instant the update is due (strictly after `now`), for the UI. */
-export function nextPortfolioAlertAt(now: Date, time: string, timeZone: string): Date | null {
+/** Whether a cadence is scheduled on this local date. */
+function cadenceFallsOnDate(
+  cadence: PortfolioCadence,
+  date: string,
+  settings?: Pick<PortfolioAlertSettings, "weeklyDay" | "monthlyDay">,
+): boolean {
+  if (cadence === "day") return true;
+  if (cadence === "week") {
+    const weekday = settings?.weeklyDay ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.weeklyDay;
+    return isoDateWeekday(date) === weekday;
+  }
+  const monthDay = settings?.monthlyDay ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.monthlyDay;
+  return isoDateDayOfMonth(date) === monthDay;
+}
+
+/** Which cadences are switched on in these settings. */
+export function enabledPortfolioCadences(
+  settings: Pick<PortfolioAlertSettings, "dailyEnabled" | "weeklyEnabled" | "monthlyEnabled">,
+): PortfolioCadence[] {
+  const cadences: PortfolioCadence[] = [];
+  if (settings.dailyEnabled) cadences.push("day");
+  if (settings.weeklyEnabled) cadences.push("week");
+  if (settings.monthlyEnabled) cadences.push("month");
+  return cadences;
+}
+
+/**
+ * Every run that is due right now — one per enabled cadence that falls on
+ * today and whose time has passed. Empty when the update is off, the time is
+ * blank, or today is not a scheduled day.
+ */
+export function duePortfolioRuns(
+  now: Date,
+  settings: PortfolioAlertSettings,
+  timeZone: string,
+): PortfolioRun[] {
+  if (!settings.enabled) return [];
+  const time = normaliseAlertTime(settings.time);
+  if (!time) return [];
+  return enabledPortfolioCadences(settings).flatMap((cadence) => {
+    const run = portfolioScheduleFor(now, time, timeZone, cadence, settings);
+    return run ? [run] : [];
+  });
+}
+
+const MAX_SCHEDULE_LOOKAHEAD_DAYS = 40;
+
+/**
+ * Next instant any enabled cadence is due (strictly after `now`), for the UI.
+ * `null` when the update is off or no cadence is enabled.
+ */
+export function nextPortfolioAlertAt(
+  now: Date,
+  time: string,
+  timeZone: string,
+  settings?: Pick<
+    PortfolioAlertSettings,
+    "dailyEnabled" | "weeklyEnabled" | "weeklyDay" | "monthlyEnabled" | "monthlyDay"
+  >,
+): Date | null {
   const minutes = parseAlertTimeMinutes(time);
   if (minutes === null) return null;
   const zone = resolveTimeZone(timeZone);
   const clock = zonedClock(now, zone);
-  const date = clock.minutes < minutes ? clock.date : shiftIsoDate(clock.date, 1);
-  return zonedTimeToUtc(date, minutes, zone);
+  const cadences = settings
+    ? enabledPortfolioCadences(settings)
+    : (["day"] as PortfolioCadence[]);
+  if (cadences.length === 0) return null;
+  for (let offset = 0; offset <= MAX_SCHEDULE_LOOKAHEAD_DAYS; offset += 1) {
+    const date = shiftIsoDate(clock.date, offset);
+    if (offset === 0 && clock.minutes >= minutes) continue;
+    if (!cadences.some((cadence) => cadenceFallsOnDate(cadence, date, settings))) continue;
+    return zonedTimeToUtc(date, minutes, zone);
+  }
+  return null;
 }
 
 export function parsePortfolioAlertSettings(
@@ -446,7 +645,20 @@ export function parsePortfolioAlertSettings(
       ? DEFAULT_PORTFOLIO_ALERT_SETTINGS.time
       : (parsedTime ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.time),
     timezone: String(values[SETTING_KEYS.portfolioTimezone] ?? "").trim(),
-    window: parseAlertWindow(values[SETTING_KEYS.portfolioWindow]) ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.window,
+    dailyEnabled: parseBooleanSetting(
+      values[SETTING_KEYS.portfolioDaily],
+      DEFAULT_PORTFOLIO_ALERT_SETTINGS.dailyEnabled,
+    ),
+    weeklyEnabled: parseBooleanSetting(
+      values[SETTING_KEYS.portfolioWeekly],
+      DEFAULT_PORTFOLIO_ALERT_SETTINGS.weeklyEnabled,
+    ),
+    weeklyDay: parseWeekday(values[SETTING_KEYS.portfolioWeeklyDay]) ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.weeklyDay,
+    monthlyEnabled: parseBooleanSetting(
+      values[SETTING_KEYS.portfolioMonthly],
+      DEFAULT_PORTFOLIO_ALERT_SETTINGS.monthlyEnabled,
+    ),
+    monthlyDay: parseMonthDay(values[SETTING_KEYS.portfolioMonthlyDay]) ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.monthlyDay,
     thresholdPct: parseOptionalThresholdPct(threshold)?.value ?? null,
     telegramTemplate: clampText(values[SETTING_KEYS.portfolioTelegramTemplate], MAX_PORTFOLIO_TEMPLATE_LENGTH),
     telegramNote: clampText(values[SETTING_KEYS.portfolioTelegramNote], MAX_PORTFOLIO_NOTE_LENGTH),
@@ -486,7 +698,11 @@ export function settingsToRows(settings: AlertSettings): Array<{ key: string; va
     { key: SETTING_KEYS.portfolioEnabled, value: settings.portfolio.enabled ? "true" : "false" },
     { key: SETTING_KEYS.portfolioTime, value: settings.portfolio.time },
     { key: SETTING_KEYS.portfolioTimezone, value: settings.portfolio.timezone },
-    { key: SETTING_KEYS.portfolioWindow, value: settings.portfolio.window },
+    { key: SETTING_KEYS.portfolioDaily, value: settings.portfolio.dailyEnabled ? "true" : "false" },
+    { key: SETTING_KEYS.portfolioWeekly, value: settings.portfolio.weeklyEnabled ? "true" : "false" },
+    { key: SETTING_KEYS.portfolioWeeklyDay, value: String(settings.portfolio.weeklyDay) },
+    { key: SETTING_KEYS.portfolioMonthly, value: settings.portfolio.monthlyEnabled ? "true" : "false" },
+    { key: SETTING_KEYS.portfolioMonthlyDay, value: String(settings.portfolio.monthlyDay) },
     {
       key: SETTING_KEYS.portfolioThresholdPct,
       value: settings.portfolio.thresholdPct === null ? "" : String(settings.portfolio.thresholdPct),
@@ -573,9 +789,14 @@ export function refreshFailureKey(date: string): string {
   return `refresh-failure:${date}`;
 }
 
-/** One portfolio update per local day and window, regardless of how often it runs. */
-export function portfolioAlertKey(date: string, window: AlertWindow = "day"): string {
-  return `portfolio:${date}:${window}`;
+/**
+ * One portfolio update per cadence period, regardless of how often the refresh
+ * runs: the daily key is per local day, the weekly per scheduled weekday, the
+ * monthly per calendar month. Two cadences never dedupe each other — a weekly
+ * recap landing on the same day as the daily one is intended.
+ */
+export function portfolioAlertKey(run: Pick<PortfolioRun, "cadence" | "periodKey">): string {
+  return `portfolio:${run.cadence}:${run.periodKey}`;
 }
 
 export type PortfolioMove = {

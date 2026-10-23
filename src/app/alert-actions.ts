@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { dispatchAlert, getAlertSettings, saveAlertSettings, sendTestAlert } from "@/lib/alerts";
 import {
+  DEFAULT_PORTFOLIO_ALERT_SETTINGS,
   MAX_PORTFOLIO_NOTE_LENGTH,
   MAX_PORTFOLIO_TEMPLATE_LENGTH,
   MAX_REFRESH_MINUTES,
@@ -12,15 +13,20 @@ import {
   PORTFOLIO_MESSAGE_PLACEHOLDERS,
   composePortfolioTelegramMessage,
   describePreviewDelivery,
+  enabledPortfolioCadences,
   describeTestDelivery,
   isValidTimeZone,
   normaliseAlertTime,
+  ordinal,
   parseAlertWindow,
+  parseMonthDay,
   parseChannels,
   parseOptionalThresholdPct,
   parseRefreshMinutes,
   parseThresholdPct,
+  parseWeekday,
   resolveTimeZone,
+  WEEKDAY_NAMES,
   unknownPortfolioPlaceholders,
   zonedClock,
   type AlertChannel,
@@ -113,9 +119,20 @@ export async function saveAlertSettingsAction(
         `Portfolio threshold must be blank (always send) or between ${MIN_THRESHOLD_PCT}% and ${MAX_THRESHOLD_PCT}%.`,
       );
     }
-    const portfolioWindow = parseAlertWindow(formData.get("portfolioWindow") ?? "day");
-    if (portfolioWindow === null) {
-      throw new Error("Portfolio comparison window must be a day or a month.");
+    // Cadences: each one is its own schedule and its own comparison horizon.
+    const dailyEnabled = formData.get("portfolioDaily") !== null;
+    const weeklyEnabled = formData.get("portfolioWeekly") !== null;
+    const monthlyEnabled = formData.get("portfolioMonthly") !== null;
+    if (portfolioEnabled && portfolioTime && !dailyEnabled && !weeklyEnabled && !monthlyEnabled) {
+      throw new Error("Pick at least one recap — daily, weekly or monthly — or turn the portfolio update off.");
+    }
+    const weeklyDay = parseWeekday(formData.get("portfolioWeeklyDay"));
+    if (weeklyEnabled && weeklyDay === null) {
+      throw new Error("Pick a day of the week for the weekly recap.");
+    }
+    const monthlyDay = parseMonthDay(formData.get("portfolioMonthlyDay"));
+    if (monthlyEnabled && monthlyDay === null) {
+      throw new Error("Monthly recap day must be between 1 and 28.");
     }
 
     // Custom Telegram wording. Unknown {tokens} are reported as a warning (not a
@@ -142,7 +159,11 @@ export async function saveAlertSettingsAction(
         enabled: portfolioEnabled,
         time: portfolioTime,
         timezone: portfolioTimezone,
-        window: portfolioWindow,
+        dailyEnabled,
+        weeklyEnabled,
+        weeklyDay: weeklyDay ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.weeklyDay,
+        monthlyEnabled,
+        monthlyDay: monthlyDay ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.monthlyDay,
         thresholdPct: portfolioThreshold.value,
         telegramTemplate,
         telegramNote,
@@ -154,8 +175,13 @@ export async function saveAlertSettingsAction(
     const holdingRule = enabled
       ? `holding alerts at ±${thresholdPct}% over ${describeWindow(window)}`
       : "holding alerts off";
+    const cadenceWords = [
+      dailyEnabled ? "daily" : "",
+      weeklyEnabled ? `weekly on ${WEEKDAY_NAMES[weeklyDay ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.weeklyDay]}` : "",
+      monthlyEnabled ? `monthly on the ${ordinal(monthlyDay ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.monthlyDay)}` : "",
+    ].filter(Boolean);
     const portfolioRule = portfolioEnabled && portfolioTime
-      ? `portfolio update at ${portfolioTime} (${portfolioTimezone})`
+      ? `portfolio recap ${cadenceWords.join(", ")} at ${portfolioTime} (${portfolioTimezone})`
       : "portfolio update off";
     const customWord = telegramTemplate
       ? " Custom Telegram message on."
@@ -236,8 +262,11 @@ export async function sendPortfolioUpdateNowAction(
     if (channels.length === 0) {
       return { error: "Turn on Browser push or Telegram below, then send the preview again." };
     }
+    // The preview picker on the form, falling back to the first enabled cadence.
     const window =
-      (fromSettingsForm ? parseAlertWindow(formData.get("portfolioWindow")) : null) ?? settings.portfolio.window;
+      (fromSettingsForm ? parseAlertWindow(formData.get("portfolioPreviewWindow")) : null) ??
+      enabledPortfolioCadences(settings.portfolio)[0] ??
+      "day";
     // Unsaved wording from the form, so the preview shows exactly what would be
     // sent after pressing Save.
     const telegramTemplate = fromSettingsForm
@@ -249,10 +278,10 @@ export async function sendPortfolioUpdateNowAction(
     const previewSettings: AlertSettings = {
       ...settings,
       channels,
-      portfolio: { ...settings.portfolio, window, telegramTemplate, telegramNote },
+      portfolio: { ...settings.portfolio, telegramTemplate, telegramNote },
     };
 
-    const update = await buildPortfolioUpdate(previewSettings, 0, { preview: true });
+    const update = await buildPortfolioUpdate(previewSettings, 0, { preview: true, window });
     if (!update) {
       return { error: "Add an asset with a value first — there is nothing to preview yet." };
     }
