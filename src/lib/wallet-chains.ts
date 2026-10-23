@@ -73,3 +73,14 @@ export function detectWalletAddressKind(rawAddress: string): WalletAddressKind |
 export function isValidWalletChain(value: unknown): value is WalletChain {
   return typeof value === "string" && (WALLET_CHAINS as readonly string[]).includes(value);
 }
+
+/**
+ * A wallet address trimmed to something a human can read — `0x1234…abcd` — and,
+ * because a folder name allows 28 characters, the default name for the folder a
+ * wallet import is filed into. Short addresses are returned untouched.
+ */
+export function shortWalletAddress(rawAddress: string): string {
+  const address = rawAddress.trim();
+  if (address.length <= 14) return address;
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}

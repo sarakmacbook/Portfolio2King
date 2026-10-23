@@ -233,6 +233,31 @@ export function removeFolder(
   return { folders: folders.filter((folder) => folder.id !== id), assignments: nextAssignments };
 }
 
+/**
+ * The folder a wallet import should be filed into: the existing folder with that
+ * name (compared case-insensitively, so importing the same wallet twice does not
+ * create "0x1234…abcd" twice), or a fresh one appended to the list.
+ *
+ * `folder` is `null` when the name is blank or there is no room for another
+ * folder (`MAX_FOLDERS`), in which case the caller imports the holdings without
+ * a folder rather than failing the whole import.
+ */
+export function folderForImport(
+  folders: readonly HoldingFolder[],
+  name: string,
+): { folders: HoldingFolder[]; folder: HoldingFolder | null } {
+  const wanted = name.trim().slice(0, MAX_FOLDER_NAME_LENGTH);
+  const list = folders.map((folder) => ({ ...folder }));
+  if (!wanted) return { folders: list, folder: null };
+
+  const existing = list.find((folder) => folder.name.toLowerCase() === wanted.toLowerCase());
+  if (existing) return { folders: list, folder: existing };
+
+  const folder = makeFolder({ name: wanted }, list);
+  if (!folder) return { folders: list, folder: null };
+  return { folders: [...list, folder], folder };
+}
+
 /** Files one holding into a folder (`null` = no folder). */
 export function assignHolding(
   assignments: FolderAssignments,

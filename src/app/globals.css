@@ -212,7 +212,7 @@ html.dark .border-emerald-100, html.dark .border-emerald-200 { border-color: rgb
 html.dark .border-rose-100, html.dark .border-rose-200, html.dark .border-rose-300 { border-color: rgb(244 63 94 / .28); }
 html.dark .border-rose-500, html.dark .focus\:border-rose-500:focus { border-color: #f43f5e; }
 html.dark .border-amber-200, html.dark .border-amber-300 { border-color: rgb(245 158 11 / .34); }
-html.dark .bg-white, html.dark .bg-white\/80, html.dark .hover\:bg-white:hover { background-color: #121625; }
+html.dark .bg-white, html.dark .bg-white\/70, html.dark .bg-white\/80, html.dark .hover\:bg-white:hover { background-color: #121625; }
 html.dark .crypto-logo-image { background-color: white; }
 html.dark .bg-slate-50, html.dark .bg-slate-50\/40, html.dark .bg-slate-50\/60, html.dark .hover\:bg-slate-50:hover, html.dark .hover\:bg-slate-50\/70:hover, html.dark .hover\:bg-slate-50\/80:hover { background-color: rgb(255 255 255 / .035); }
 html.dark .bg-slate-100, html.dark .hover\:bg-slate-100:hover { background-color: rgb(100 116 139 / .14); }

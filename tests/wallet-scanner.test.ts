@@ -8,6 +8,7 @@ import {
   encodeBalanceOfCall,
   formatUnitsFromHex,
   scanWalletAddress,
+  shortWalletAddress,
 } from "../src/lib/wallet-scanner";
 
 test("detectWalletAddressKind identifies EVM, Solana, Bitcoin, and Tron addresses", () => {
@@ -162,4 +163,31 @@ test("AddAssetDialog exposes Add via wallet address under Crypto", () => {
   assert.ok(dialogSource.includes("Add via wallet address"));
   assert.ok(dialogSource.includes("/api/wallet/scan"));
   assert.ok(dialogSource.includes("Scan wallet"));
+});
+
+test("shortWalletAddress trims an address for a folder name", () => {
+  assert.equal(shortWalletAddress("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"), "0xd8dA…6045");
+  // Short values are left alone, blank stays blank.
+  assert.equal(shortWalletAddress("0x1234"), "0x1234");
+  assert.equal(shortWalletAddress("   "), "");
+  // Always inside the 28-character folder-name limit.
+  assert.ok(shortWalletAddress("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045").length <= 28);
+});
+
+test("a wallet import is filed into a folder named after the wallet", () => {
+  const actions = readFileSync(resolve(__dirname, "../src/app/actions.ts"), "utf8");
+  const importBody = actions.slice(actions.indexOf("export async function importWalletBalances"));
+  assert.ok(importBody.includes("folderForImport("), "the import reuses or creates a folder");
+  assert.ok(importBody.includes("saveHoldingFolderAssignments("), "imported holdings are filed");
+  assert.ok(importBody.includes("shortWalletAddress(address)"), "the folder is named after the address");
+  assert.ok(importBody.includes("folderName !== null"), "a caller can still import without a folder");
+
+  const dialog = readFileSync(resolve(__dirname, "../src/components/AddAssetDialog.tsx"), "utf8");
+  assert.ok(dialog.includes("File into a folder"), "the dialog offers the folder");
+  assert.ok(dialog.includes("walletFolderName"), "the folder can be named");
+  assert.ok(dialog.includes("folderName: walletFileIntoFolder"), "the choice reaches the action");
+  assert.ok(
+    !dialog.includes("DeBank was unavailable"),
+    "the 404 notice is worded as a chain read, not a DeBank error",
+  );
 });

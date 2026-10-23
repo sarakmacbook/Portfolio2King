@@ -13,6 +13,7 @@ export {
   WALLET_CHAIN_LABELS,
   detectWalletAddressKind,
   isValidWalletChain,
+  shortWalletAddress,
 } from "@/lib/wallet-chains";
 export type { WalletAddressKind, WalletChain } from "@/lib/wallet-chains";
 
