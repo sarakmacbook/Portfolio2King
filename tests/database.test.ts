@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Pool } from "pg";
 import { connectionConfig, validateDatabaseUrl } from "../src/lib/database-connection";
+import { rejectUnauthorizedDatabaseRequest, sameOrigin } from "../src/lib/database-admin";
 import { recommendDatabase, type Requirements } from "../src/lib/database-options";
 import { GET, POST } from "../src/app/api/database/route";
 
@@ -108,3 +109,95 @@ test("setup endpoint protects secrets and persists only on allowed servers", asy
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("database export/import guard accepts same-origin GETs, proxied hosts, and sandboxed previews while rejecting cross-site calls", async () => {
+  const originalToken = process.env.DATABASE_SETUP_TOKEN;
+  try {
+    delete process.env.DATABASE_SETUP_TOKEN;
+
+    // Browser same-origin GET /api/database/export?download=1 omits Origin.
+    assert.equal(
+      rejectUnauthorizedDatabaseRequest(
+        new Request("http://app.test/api/database/export?download=1", {
+          method: "GET",
+          headers: { referer: "http://app.test/database", "sec-fetch-site": "same-origin" },
+        }),
+      ),
+      null,
+    );
+    assert.equal(
+      rejectUnauthorizedDatabaseRequest(
+        new Request("http://app.test/api/database/export?download=1", { method: "GET" }),
+      ),
+      null,
+    );
+
+    // Sandboxed iframe previews send Origin: "null" with Referer or X-Requested-With.
+    assert.equal(
+      rejectUnauthorizedDatabaseRequest(
+        new Request("http://app.test/api/database/import", {
+          method: "POST",
+          headers: { origin: "null", referer: "http://app.test/database" },
+        }),
+      ),
+      null,
+    );
+    assert.equal(
+      rejectUnauthorizedDatabaseRequest(
+        new Request("http://app.test/api/database/import", {
+          method: "POST",
+          headers: { origin: "null", "x-requested-with": "XMLHttpRequest" },
+        }),
+      ),
+      null,
+    );
+
+    // Comma-separated x-forwarded-host behind reverse proxies.
+    assert.equal(
+      sameOrigin(
+        new Request("http://internal:3000/api/database/import", {
+          method: "POST",
+          headers: {
+            origin: "https://ledgerly.example.com",
+            "x-forwarded-host": "ledgerly.example.com, proxy.internal",
+          },
+        }),
+      ),
+      true,
+    );
+
+    // Cross-site requests are still rejected with 403.
+    const crossOrigin = rejectUnauthorizedDatabaseRequest(
+      new Request("http://app.test/api/database/import", {
+        method: "POST",
+        headers: { origin: "https://evil.test", "x-requested-with": "XMLHttpRequest" },
+      }),
+    );
+    assert.equal(crossOrigin?.status, 403);
+
+    const crossSiteFetch = rejectUnauthorizedDatabaseRequest(
+      new Request("http://app.test/api/database/export?download=1", {
+        method: "GET",
+        headers: { "sec-fetch-site": "cross-site" },
+      }),
+    );
+    assert.equal(crossSiteFetch?.status, 403);
+
+    const crossReferer = rejectUnauthorizedDatabaseRequest(
+      new Request("http://app.test/api/database/export?download=1", {
+        method: "GET",
+        headers: { referer: "https://evil.test/attack" },
+      }),
+    );
+    assert.equal(crossReferer?.status, 403);
+
+    const barePost = rejectUnauthorizedDatabaseRequest(
+      new Request("http://app.test/api/database/import", { method: "POST" }),
+    );
+    assert.equal(barePost?.status, 403);
+  } finally {
+    if (originalToken === undefined) delete process.env.DATABASE_SETUP_TOKEN;
+    else process.env.DATABASE_SETUP_TOKEN = originalToken;
+  }
+});
+
