@@ -3,10 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { dispatchAlert, getAlertSettings, saveAlertSettings, sendTestAlert } from "@/lib/alerts";
 import {
+  MAX_PORTFOLIO_NOTE_LENGTH,
+  MAX_PORTFOLIO_TEMPLATE_LENGTH,
   MAX_REFRESH_MINUTES,
   MAX_THRESHOLD_PCT,
   MIN_REFRESH_MINUTES,
   MIN_THRESHOLD_PCT,
+  PORTFOLIO_MESSAGE_PLACEHOLDERS,
+  composePortfolioTelegramMessage,
   describePreviewDelivery,
   describeTestDelivery,
   isValidTimeZone,
@@ -17,6 +21,8 @@ import {
   parseRefreshMinutes,
   parseThresholdPct,
   resolveTimeZone,
+  unknownPortfolioPlaceholders,
+  zonedClock,
   type AlertChannel,
   type AlertSettings,
   type AlertWindow,
@@ -40,6 +46,8 @@ export type AlertActionState = {
   ts?: number;
   /** Non-fatal note, e.g. saved but Telegram could not be reached. */
   warning?: string;
+  /** Exact text Telegram receives (portfolio preview), for the page to show. */
+  sample?: string;
 };
 
 function describeWindow(window: AlertWindow): string {
@@ -110,6 +118,20 @@ export async function saveAlertSettingsAction(
       throw new Error("Portfolio comparison window must be a day or a month.");
     }
 
+    // Custom Telegram wording. Unknown {tokens} are reported as a warning (not a
+    // failure) because they are sent literally — never silently dropped.
+    const telegramTemplate = String(formData.get("portfolioTelegramTemplate") ?? "").replace(/\r\n/g, "\n").trim();
+    if (telegramTemplate.length > MAX_PORTFOLIO_TEMPLATE_LENGTH) {
+      throw new Error(`The custom Telegram message must be ${MAX_PORTFOLIO_TEMPLATE_LENGTH} characters or fewer.`);
+    }
+    const telegramNote = String(formData.get("portfolioTelegramNote") ?? "").replace(/\r\n/g, "\n").trim();
+    if (telegramNote.length > MAX_PORTFOLIO_NOTE_LENGTH) {
+      throw new Error(`The Telegram note must be ${MAX_PORTFOLIO_NOTE_LENGTH} characters or fewer.`);
+    }
+    const unknownTokens = [
+      ...new Set([...unknownPortfolioPlaceholders(telegramTemplate), ...unknownPortfolioPlaceholders(telegramNote)]),
+    ];
+
     await saveAlertSettings({
       enabled,
       thresholdPct,
@@ -122,6 +144,8 @@ export async function saveAlertSettingsAction(
         timezone: portfolioTimezone,
         window: portfolioWindow,
         thresholdPct: portfolioThreshold.value,
+        telegramTemplate,
+        telegramNote,
       },
     });
     revalidatePath("/alerts");
@@ -133,10 +157,22 @@ export async function saveAlertSettingsAction(
     const portfolioRule = portfolioEnabled && portfolioTime
       ? `portfolio update at ${portfolioTime} (${portfolioTimezone})`
       : "portfolio update off";
+    const customWord = telegramTemplate
+      ? " Custom Telegram message on."
+      : telegramNote
+        ? " Telegram note on."
+        : "";
     return {
       ok: true,
       ts: Date.now(),
-      message: `Saved. ${holdingRule.charAt(0).toUpperCase()}${holdingRule.slice(1)} · ${portfolioRule}.`,
+      message: `Saved. ${holdingRule.charAt(0).toUpperCase()}${holdingRule.slice(1)} · ${portfolioRule}.${customWord}`,
+      warning: unknownTokens.length
+        ? `Saved, but ${unknownTokens.map((token) => `{${token}}`).join(", ")} ${
+            unknownTokens.length === 1 ? "is not a placeholder" : "are not placeholders"
+          } and will be sent literally. Use ${PORTFOLIO_MESSAGE_PLACEHOLDERS.slice(0, 4)
+            .map((placeholder) => `{${placeholder.token}}`)
+            .join(", ")}, …`
+        : undefined,
     };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Could not save alert settings" };
@@ -202,10 +238,18 @@ export async function sendPortfolioUpdateNowAction(
     }
     const window =
       (fromSettingsForm ? parseAlertWindow(formData.get("portfolioWindow")) : null) ?? settings.portfolio.window;
+    // Unsaved wording from the form, so the preview shows exactly what would be
+    // sent after pressing Save.
+    const telegramTemplate = fromSettingsForm
+      ? String(formData.get("portfolioTelegramTemplate") ?? "").trim().slice(0, MAX_PORTFOLIO_TEMPLATE_LENGTH)
+      : settings.portfolio.telegramTemplate;
+    const telegramNote = fromSettingsForm
+      ? String(formData.get("portfolioTelegramNote") ?? "").trim().slice(0, MAX_PORTFOLIO_NOTE_LENGTH)
+      : settings.portfolio.telegramNote;
     const previewSettings: AlertSettings = {
       ...settings,
       channels,
-      portfolio: { ...settings.portfolio, window },
+      portfolio: { ...settings.portfolio, window, telegramTemplate, telegramNote },
     };
 
     const update = await buildPortfolioUpdate(previewSettings, 0, { preview: true });
@@ -213,12 +257,19 @@ export async function sendPortfolioUpdateNowAction(
       return { error: "Add an asset with a value first — there is nothing to preview yet." };
     }
 
+    const zone = resolveTimeZone(previewSettings.portfolio.timezone);
+    const telegramText = composePortfolioTelegramMessage(update, previewSettings.portfolio, {
+      date: zonedClock(new Date(), zone).date,
+      time: previewSettings.portfolio.time || "18:00",
+      window,
+    });
     const result = await dispatchAlert({
       dedupeKey: `portfolio-test:${Date.now()}`,
       kind: "portfolio_test",
       title: update.title,
       body: update.body,
       url: "/",
+      telegramText,
       settings: previewSettings,
       force: true,
     });
@@ -231,6 +282,7 @@ export async function sendPortfolioUpdateNowAction(
     return {
       ...described,
       message: described.message ? `${described.message}${historyNote}` : described.message,
+      sample: telegramText,
       ts: Date.now(),
     };
   } catch {

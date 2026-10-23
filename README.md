@@ -216,9 +216,73 @@ Your portfolio moved from $52,000.00 to $53,222.00 since yesterday’s close: +$
   portfolio with no earlier snapshot it still sends — the message compares
   against the newest snapshot (0.00 %) and says so, instead of refusing with
   “not enough history”.
+- **The Telegram copy can be reworded.** On `/alerts`, *Portfolio update → Custom
+  Telegram message* replaces the standard two lines with your own text and
+  placeholders, and *Extra note* appends one more line. Browser push always keeps
+  the structured title/body, so the notification itself never changes.
 - Test and preview results name only the channels that were used, e.g.
   `Preview sent — “Portfolio ▲ +2.94% (+$1,000.00)” · 1 browser notified.` A
   Telegram-only setup is never told “no browser subscribed”.
+
+### Custom Telegram message for the portfolio update
+
+The daily portfolio update is the one message people forward to a chat or pin in
+a group. On `/alerts`, under **Portfolio update**, the *Custom Telegram message*
+box replaces the standard wording; leave it blank to keep the default.
+
+```text
+📊 2026-10-22 · 1 day
+Portfolio ▲ +2.35% (+$1,222.00)
+Now $53,222.00 (+2.35% from $52,000.00)
+
+— sent from Ledgerly
+```
+
+That preview is produced by
+
+```text
+📊 {date} · {window}
+{title}
+Now {total} ({percent} from {from})
+```
+
+plus the note `— sent from Ledgerly`. A live preview under the box shows exactly
+what Telegram receives, and the buttons above it insert placeholders at the
+cursor.
+
+| Placeholder | Becomes |
+| --- | --- |
+| `{total}` | Portfolio value now — `$53,222.00` |
+| `{percent}` | Signed change — `+2.35%` |
+| `{amount}` | Signed money change — `+$1,222.00` |
+| `{from}` | Value it moved from — `$52,000.00` |
+| `{arrow}` | `▲`, `▼`, or `▬` |
+| `{direction}` | `up`, `down`, or `flat` |
+| `{baseline}` | What it is compared with — `yesterday's close` |
+| `{window}` | `1 day` or `30 days` |
+| `{date}` | Send date in the chosen zone — `2026-10-22` |
+| `{time}` | Scheduled time — `18:00` |
+| `{title}` | Standard title line |
+| `{body}` | Standard body line |
+
+- Placeholders are case- and space-insensitive (`{PERCENT}` works). Plain braces
+  such as `{}` or `{2fa}` are left alone.
+- **A typo is reported, never silently dropped.** Saving with `{btc}` shows
+  “Saved, but {btc} is not a placeholder and will be sent literally.” The token
+  is sent as typed, so nothing disappears from your message.
+- **The note** is appended as the last line after a blank line, with or without a
+  template.
+- Limits: the message is capped at 1,000 characters and the note at 500. A
+  rendered message longer than Telegram’s 4,096-character limit is cut with an
+  ellipsis instead of failing to send.
+- **Telegram only.** Web Push keeps the structured title and body (that is what
+  the notification shade and the web clip display), and the alert log on
+  `/alerts` keeps showing the standard text.
+- **Send portfolio update now** uses the wording currently in the form — even
+  before saving — and prints the exact Telegram text under the result, so a
+  message can be checked without touching the schedule.
+- Wording lives in `app_settings` (`alerts.portfolio.telegramTemplate`,
+  `alerts.portfolio.telegramNote`) and is included in exports/imports.
 
 ### Set up Web Push (browser / web clip)
 
@@ -287,6 +351,8 @@ Configure on `/alerts`; values live in the `app_settings` table.
 | Portfolio time zone | device zone | any IANA zone (e.g. `Asia/Phnom_Penh`) |
 | Portfolio threshold | blank (always send) | blank, or 0.5 – 50 % |
 | Portfolio comparison window | day | day (vs yesterday’s total) or month (vs 30 days ago) |
+| Portfolio Telegram message | blank (standard text) | up to 1,000 characters, placeholders like `{total}` |
+| Portfolio Telegram note | blank | up to 500 characters, appended as the last line |
 | Channels | push + telegram | any combination (used by both alert types) |
 | Background refresh | 15 min | off, or 5 – 720 min |
 

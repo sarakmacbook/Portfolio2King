@@ -7,11 +7,16 @@ import {
   baselineCutoffDate,
   daysBetweenIso,
   describeBaseline,
+  MAX_TELEGRAM_TEXT_LENGTH,
+  composePortfolioTelegramMessage,
   describeChannelNotes,
   describePortfolioMove,
   describePreviewBaseline,
   describePreviewDelivery,
   describeTestDelivery,
+  portfolioMessageValues,
+  renderPortfolioTemplate,
+  unknownPortfolioPlaceholders,
   detectPriceMoves,
   formatAlertText,
   formatMovePercent,
@@ -139,6 +144,8 @@ test("settings rows round-trip through the parser", () => {
       timezone: "Asia/Phnom_Penh",
       window: "month" as const,
       thresholdPct: null,
+      telegramTemplate: "Portfolio {arrow} {percent}",
+      telegramNote: "— sent from Ledgerly",
     },
   };
   const rows = settingsToRows({ ...settings, channels: [...settings.channels] });
@@ -155,6 +162,8 @@ test("settings rows round-trip through the parser", () => {
       timezone: "Asia/Phnom_Penh",
       window: "month",
       thresholdPct: null,
+      telegramTemplate: "Portfolio {arrow} {percent}",
+      telegramNote: "— sent from Ledgerly",
     },
   });
 });
@@ -386,6 +395,8 @@ test("portfolio update settings: time is what matters, threshold is optional", (
     timezone: "Asia/Phnom_Penh",
     window: "month",
     thresholdPct: 2.5,
+    telegramTemplate: "",
+    telegramNote: "",
   });
 
   // No stored rows → defaults; an explicitly blank time switches the schedule off.
@@ -556,4 +567,100 @@ test("a preview without earlier history still names the snapshot it used", () =>
   assert.equal(describePreviewBaseline("2026-10-19", "2026-10-22", "day"), "the close 3 days ago");
   // No snapshot at all falls back to the "last refresh" label.
   assert.equal(describePreviewBaseline(null, "2026-10-22", "day"), "the last refresh");
+});
+
+const sampleMove = describePortfolioMove(52_000, 53_222, "yesterday's close")!;
+const sampleMessage = { ...formatPortfolioMove(sampleMove), move: sampleMove };
+const sampleContext = { date: "2026-10-22", time: "18:00", window: "day" as const };
+
+test("the custom Telegram message fills placeholders, keeps the note, and falls back to the standard text", () => {
+  const values = portfolioMessageValues(sampleMessage, sampleContext);
+  assert.equal(values.total, "$53,222.00");
+  assert.equal(values.percent, "+2.35%");
+  assert.equal(values.amount, "+$1,222.00");
+  assert.equal(values.from, "$52,000.00");
+  assert.equal(values.arrow, "▲");
+  assert.equal(values.direction, "up");
+  assert.equal(values.baseline, "yesterday's close");
+  assert.equal(values.window, "1 day");
+  assert.equal(values.date, "2026-10-22");
+  assert.equal(values.time, "18:00");
+  assert.equal(values.title, "Portfolio ▲ +2.35% (+$1,222.00)");
+  assert.match(values.body, /^Your portfolio moved from \$52,000\.00/);
+
+  // Blank template = exactly what the app sent before this feature.
+  assert.equal(
+    composePortfolioTelegramMessage(sampleMessage, { telegramTemplate: "", telegramNote: "" }, sampleContext),
+    "Portfolio ▲ +2.35% (+$1,222.00)\nYour portfolio moved from $52,000.00 to $53,222.00 since yesterday's close: +$1,222.00 (+2.35%).",
+  );
+
+  // A template replaces both standard lines and can re-use them.
+  const custom = composePortfolioTelegramMessage(
+    sampleMessage,
+    { telegramTemplate: "📊 {date} {time}\n{title}\nValue now {total}", telegramNote: "— Ledgerly" },
+    sampleContext,
+  );
+  assert.equal(
+    custom,
+    "📊 2026-10-22 18:00\nPortfolio ▲ +2.35% (+$1,222.00)\nValue now $53,222.00\n\n— Ledgerly",
+  );
+
+  // Note on its own works with the standard message too.
+  assert.equal(
+    composePortfolioTelegramMessage(sampleMessage, { telegramTemplate: "", telegramNote: "Reminder: pay rent" }, sampleContext),
+    `${sampleMessage.title}\n${sampleMessage.body}\n\nReminder: pay rent`,
+  );
+
+  // Whitespace-only values count as blank.
+  assert.equal(
+    composePortfolioTelegramMessage(sampleMessage, { telegramTemplate: "   ", telegramNote: "  " }, sampleContext),
+    `${sampleMessage.title}\n${sampleMessage.body}`,
+  );
+});
+
+test("placeholders are case- and space-insensitive, and typos are reported instead of silently dropped", () => {
+  assert.equal(
+    renderPortfolioTemplate("{PERCENT} / { Percent } / {percent}", portfolioMessageValues(sampleMessage, sampleContext)),
+    "+2.35% / +2.35% / +2.35%",
+  );
+  // A token this app does not know stays exactly as typed.
+  assert.equal(
+    renderPortfolioTemplate("{btc} and {percent}", portfolioMessageValues(sampleMessage, sampleContext)),
+    "{btc} and +2.35%",
+  );
+  // Plain braces without a word are left alone too (JSON, code, emoji text).
+  assert.equal(renderPortfolioTemplate("{} { } {2fa}", portfolioMessageValues(sampleMessage, sampleContext)), "{} { } {2fa}");
+
+  assert.deepEqual(unknownPortfolioPlaceholders("{percent} {btc} {Total}"), ["btc"]);
+  assert.deepEqual(unknownPortfolioPlaceholders("{a} {b} {a}"), ["a", "b"]);
+  assert.deepEqual(unknownPortfolioPlaceholders("no placeholders here"), []);
+  assert.deepEqual(unknownPortfolioPlaceholders("{date} {time} {window}"), []);
+});
+
+test("a very long message is cut to Telegram's limit instead of being rejected", () => {
+  const template = "x".repeat(MAX_TELEGRAM_TEXT_LENGTH + 500);
+  const text = composePortfolioTelegramMessage(sampleMessage, { telegramTemplate: template, telegramNote: "" }, sampleContext);
+  assert.equal(text.length, MAX_TELEGRAM_TEXT_LENGTH);
+  assert.ok(text.endsWith("…"));
+});
+
+test("custom wording is trimmed, capped, and survives a settings round-trip", () => {
+  const parsed = parsePortfolioAlertSettings({
+    [SETTING_KEYS.portfolioTelegramTemplate]: "  Line one\r\n{total}  ",
+    [SETTING_KEYS.portfolioTelegramNote]: "  note  ",
+  });
+  assert.equal(parsed.telegramTemplate, "Line one\n{total}");
+  assert.equal(parsed.telegramNote, "note");
+
+  const long = parsePortfolioAlertSettings({
+    [SETTING_KEYS.portfolioTelegramTemplate]: "y".repeat(5_000),
+    [SETTING_KEYS.portfolioTelegramNote]: "z".repeat(5_000),
+  });
+  assert.equal(long.telegramTemplate.length, 1_000);
+  assert.equal(long.telegramNote.length, 500);
+
+  // Missing rows (older databases) default to the standard message.
+  const empty = parsePortfolioAlertSettings({});
+  assert.equal(empty.telegramTemplate, "");
+  assert.equal(empty.telegramNote, "");
 });

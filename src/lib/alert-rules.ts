@@ -30,6 +30,14 @@ export type PortfolioAlertSettings = {
   window: AlertWindow;
   /** Optional filter in percent. `null` sends every scheduled update. */
   thresholdPct: number | null;
+  /**
+   * Telegram-only message template, using `{total}`, `{percent}`, … tokens
+   * (see PORTFOLIO_MESSAGE_PLACEHOLDERS). Blank = the standard title + body.
+   * Browser push always keeps the structured title/body.
+   */
+  telegramTemplate: string;
+  /** Optional line appended to the Telegram message, after the template. */
+  telegramNote: string;
 };
 
 export type AlertSettings = {
@@ -57,7 +65,16 @@ export const DEFAULT_PORTFOLIO_ALERT_SETTINGS: PortfolioAlertSettings = {
   timezone: "",
   window: "day",
   thresholdPct: null,
+  telegramTemplate: "",
+  telegramNote: "",
 };
+
+/** Guards against pasting a wall of text into a chat app. */
+export const MAX_PORTFOLIO_TEMPLATE_LENGTH = 1_000;
+export const MAX_PORTFOLIO_NOTE_LENGTH = 500;
+
+/** Telegram's hard limit for one message, in UTF-16 code units. */
+export const MAX_TELEGRAM_TEXT_LENGTH = 4_096;
 
 export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
   enabled: true,
@@ -80,6 +97,8 @@ export const SETTING_KEYS = {
   portfolioTimezone: "alerts.portfolio.timezone",
   portfolioWindow: "alerts.portfolio.window",
   portfolioThresholdPct: "alerts.portfolio.thresholdPct",
+  portfolioTelegramTemplate: "alerts.portfolio.telegramTemplate",
+  portfolioTelegramNote: "alerts.portfolio.telegramNote",
 } as const;
 
 export function parseBooleanSetting(raw: string | null | undefined, fallback: boolean): boolean {
@@ -338,7 +357,14 @@ export function parsePortfolioAlertSettings(
     timezone: String(values[SETTING_KEYS.portfolioTimezone] ?? "").trim(),
     window: parseAlertWindow(values[SETTING_KEYS.portfolioWindow]) ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.window,
     thresholdPct: parseOptionalThresholdPct(threshold)?.value ?? null,
+    telegramTemplate: clampText(values[SETTING_KEYS.portfolioTelegramTemplate], MAX_PORTFOLIO_TEMPLATE_LENGTH),
+    telegramNote: clampText(values[SETTING_KEYS.portfolioTelegramNote], MAX_PORTFOLIO_NOTE_LENGTH),
   };
+}
+
+/** Trims selection noise but keeps the author's internal line breaks. */
+function clampText(raw: string | null | undefined, max: number): string {
+  return String(raw ?? "").replace(/\r\n/g, "\n").trim().slice(0, max);
 }
 
 export function parseAlertSettings(values: Record<string, string | null | undefined>): AlertSettings {
@@ -374,6 +400,8 @@ export function settingsToRows(settings: AlertSettings): Array<{ key: string; va
       key: SETTING_KEYS.portfolioThresholdPct,
       value: settings.portfolio.thresholdPct === null ? "" : String(settings.portfolio.thresholdPct),
     },
+    { key: SETTING_KEYS.portfolioTelegramTemplate, value: settings.portfolio.telegramTemplate },
+    { key: SETTING_KEYS.portfolioTelegramNote, value: settings.portfolio.telegramNote },
   ];
 }
 
@@ -545,6 +573,106 @@ export function formatPortfolioMove(move: PortfolioMove): { title: string; body:
     title,
     body: `Your portfolio moved from ${formatAmount(move.from)} to ${formatAmount(move.to)} since ${move.baseline}: ${amount} (${percent}).`,
   };
+}
+
+/**
+ * Placeholders accepted in the custom Telegram message, with the wording shown
+ * next to the editor. Keeping the list here means the UI, the parser and the
+ * tests can never drift apart.
+ */
+export const PORTFOLIO_MESSAGE_PLACEHOLDERS = [
+  { token: "total", description: "Portfolio value now", sample: "$53,222.00" },
+  { token: "percent", description: "Signed change", sample: "+2.35%" },
+  { token: "amount", description: "Signed money change", sample: "+$1,222.00" },
+  { token: "from", description: "Value it moved from", sample: "$52,000.00" },
+  { token: "arrow", description: "▲ ▼ or ▬", sample: "▲" },
+  { token: "direction", description: "up, down or flat", sample: "up" },
+  { token: "baseline", description: "What it is compared with", sample: "yesterday's close" },
+  { token: "window", description: "Comparison window", sample: "1 day" },
+  { token: "date", description: "Send date (YYYY-MM-DD, chosen zone)", sample: "2026-10-22" },
+  { token: "time", description: "Scheduled time (HH:MM)", sample: "18:00" },
+  { token: "title", description: "Standard title line", sample: "Portfolio ▲ +2.35% (+$1,222.00)" },
+  { token: "body", description: "Standard body line", sample: "Your portfolio moved from …" },
+] as const;
+
+export type PortfolioPlaceholderToken = (typeof PORTFOLIO_MESSAGE_PLACEHOLDERS)[number]["token"];
+
+export type PortfolioMessageValues = Record<PortfolioPlaceholderToken, string>;
+
+/** Context the scheduled send knows: when it runs and over which window. */
+export type PortfolioMessageContext = {
+  /** Local date of the send, `YYYY-MM-DD`. */
+  date: string;
+  /** Local scheduled time, `HH:MM`. */
+  time: string;
+  window: AlertWindow;
+};
+
+const PLACEHOLDER_PATTERN = /\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}/g;
+
+export function portfolioMessageValues(
+  update: { title: string; body: string; move: PortfolioMove },
+  context: PortfolioMessageContext,
+): PortfolioMessageValues {
+  const { move } = update;
+  return {
+    total: formatAmount(move.to),
+    percent: formatMovePercent(move.changePct),
+    amount: formatSignedAmount(move.changeMoney),
+    from: formatAmount(move.from),
+    arrow: move.direction === "up" ? "▲" : move.direction === "down" ? "▼" : "▬",
+    direction: move.direction,
+    baseline: move.baseline,
+    window: `${WINDOW_DAYS[context.window]} ${WINDOW_DAYS[context.window] === 1 ? "day" : "days"}`,
+    date: context.date,
+    time: context.time,
+    title: update.title,
+    body: update.body,
+  };
+}
+
+/** Fills `{total}`, `{ Percent }`, … Unknown tokens are left untouched. */
+export function renderPortfolioTemplate(template: string, values: PortfolioMessageValues): string {
+  return template.replace(PLACEHOLDER_PATTERN, (match, rawName: string) => {
+    const name = rawName.trim().toLowerCase();
+    return name in values ? values[name as PortfolioPlaceholderToken] : match;
+  });
+}
+
+/** Token names the template uses that this app does not know (typos, mostly). */
+export function unknownPortfolioPlaceholders(template: string): string[] {
+  const known = new Set<string>(PORTFOLIO_MESSAGE_PLACEHOLDERS.map((placeholder) => placeholder.token));
+  const unknown = new Set<string>();
+  for (const match of template.matchAll(PLACEHOLDER_PATTERN)) {
+    const name = match[1].trim().toLowerCase();
+    if (!known.has(name)) unknown.add(match[1].trim());
+  }
+  return [...unknown];
+}
+
+/**
+ * The exact text Telegram receives for the portfolio update.
+ *
+ * - No template → the standard two lines (title + body), as before.
+ * - A template replaces those two lines; `{title}` / `{body}` can still include
+ *   them, so a prefix like "Daily report · {date}" is a one-line change.
+ * - The optional note is appended on its own line, after either form.
+ * - Browser push never uses this: it keeps the structured title/body.
+ */
+export function composePortfolioTelegramMessage(
+  update: { title: string; body: string; move: PortfolioMove },
+  settings: Pick<PortfolioAlertSettings, "telegramTemplate" | "telegramNote">,
+  context: PortfolioMessageContext,
+): string {
+  const values = portfolioMessageValues(update, context);
+  const template = settings.telegramTemplate.trim();
+  const message = template ? renderPortfolioTemplate(template, values) : `${update.title}\n${update.body}`;
+  const note = settings.telegramNote.trim();
+  const text = note ? `${message}\n\n${note}` : message;
+  // Telegram rejects anything longer; cut instead of losing the whole message.
+  return text.length > MAX_TELEGRAM_TEXT_LENGTH
+    ? `${text.slice(0, MAX_TELEGRAM_TEXT_LENGTH - 1)}…`
+    : text;
 }
 
 export function formatPriceMove(move: PriceMove): { title: string; body: string } {

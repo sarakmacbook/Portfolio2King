@@ -12,6 +12,7 @@ import {
   daysBetweenIso,
   describeBaseline,
   describePortfolioMove,
+  composePortfolioTelegramMessage,
   describePreviewBaseline,
   detectPriceMoves,
   formatPortfolioMove,
@@ -438,12 +439,19 @@ async function dispatchPortfolioUpdate(input: {
   }
 
   const alert = formatPortfolioMove(move);
+  // Telegram may be formatted by the user; push keeps the structured message.
+  const telegramText = composePortfolioTelegramMessage({ ...alert, move }, portfolio, {
+    date: schedule.date,
+    time: portfolio.time,
+    window: portfolio.window,
+  });
   const result = await dispatchAlert({
     dedupeKey: portfolioAlertKey(schedule.date, portfolio.window),
     kind: "portfolio_move",
     title: alert.title,
     body: alert.body,
     url: "/",
+    telegramText,
     settings,
     // The portfolio update has its own switch, so the per-holding master
     // switch must not silence it. Channels are still respected.
