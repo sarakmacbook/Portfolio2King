@@ -4,6 +4,12 @@ export type CambodianBank = {
   color: string;
 };
 
+export const CUSTOM_BANK: CambodianBank = {
+  name: "Custom bank",
+  short: "🏦",
+  color: "#475569",
+};
+
 /** Common NBC-licensed commercial and specialised banks available to Cambodian customers. */
 export const CAMBODIAN_BANKS: CambodianBank[] = [
   { name: "ABA Bank", short: "ABA", color: "#005baa" },
@@ -15,6 +21,7 @@ export const CAMBODIAN_BANKS: CambodianBank[] = [
   { name: "Vattanac Bank", short: "V", color: "#7b1e2b" },
   { name: "Chip Mong Commercial Bank", short: "CM", color: "#e11d48" },
   { name: "KB PRASAC Bank", short: "KB", color: "#f58220" },
+  { name: "MB Bank", short: "MB", color: "#141ed2" },
   { name: "J Trust Royal Bank", short: "JTR", color: "#c8102e" },
   { name: "Phnom Penh Commercial Bank", short: "PPC", color: "#0068b5" },
   { name: "Cambodian Public Bank", short: "CPB", color: "#d71920" },

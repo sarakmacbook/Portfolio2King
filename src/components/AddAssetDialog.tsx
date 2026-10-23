@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useRef, useState } from "react";
 import { createAsset, type ActionState } from "@/app/actions";
 import { ASSET_TYPES, type AssetType } from "@/lib/constants";
 import {
@@ -11,7 +11,7 @@ import {
 import type { CryptoCategory } from "@/db/schema";
 import { TYPE_META, money } from "@/lib/format";
 import { playMoneyChimeFromGesture } from "@/lib/sounds";
-import { CAMBODIAN_BANKS, type CambodianBank } from "@/lib/cambodian-banks";
+import { CAMBODIAN_BANKS, CUSTOM_BANK, type CambodianBank } from "@/lib/cambodian-banks";
 import { ErrorNote, Modal, SubmitButton } from "./ui";
 import CryptoLogo from "./CryptoLogo";
 
@@ -90,9 +90,20 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
   const [discovering, setDiscovering] = useState(false);
   const [discoveryError, setDiscoveryError] = useState("");
   const [topSource, setTopSource] = useState("");
+  const [customBankSelected, setCustomBankSelected] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const isCash = type === "cash";
   const total = (Number(q) || 0) * (Number(cost) || 0) + (Number(fee) || 0);
   const selectedBank = CAMBODIAN_BANKS.find((bank) => bank.name === name);
+  const isCustomBank = !selectedBank && (customBankSelected || Boolean(name.trim()));
+  const activeBank = selectedBank ?? (isCustomBank ? CUSTOM_BANK : undefined);
+  const bankSummaryLabel = selectedBank
+    ? selectedBank.name
+    : isCustomBank
+      ? name.trim()
+        ? `${CUSTOM_BANK.name} · ${name.trim()}`
+        : CUSTOM_BANK.name
+      : "Choose a bank";
 
   async function discoverTopAssets(query = "") {
     setDiscovering(true);
@@ -358,29 +369,49 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
           <details className="bank-picker relative">
             <summary className="input flex cursor-pointer list-none items-center justify-between gap-3">
               <span className="flex min-w-0 items-center gap-2">
-                {selectedBank ? <BankLogo bank={selectedBank} small /> : <span className="grid h-7 w-7 place-items-center rounded-lg bg-slate-100 text-xs">🏦</span>}
-                <span className={selectedBank ? "truncate text-slate-900" : "text-slate-400"}>
-                  {selectedBank?.name || "Choose a bank"}
+                {activeBank ? <BankLogo bank={activeBank} small /> : <span className="grid h-7 w-7 place-items-center rounded-lg bg-slate-100 text-xs">🏦</span>}
+                <span className={activeBank ? "truncate text-slate-900" : "text-slate-400"}>
+                  {bankSummaryLabel}
                 </span>
               </span>
               <span className="text-xs text-slate-400">▼</span>
             </summary>
-            <div className="absolute z-30 mt-2 grid max-h-72 w-full grid-cols-1 gap-1 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-xl sm:grid-cols-2">
-              {CAMBODIAN_BANKS.map((bank) => (
+            <div className="absolute z-30 mt-2 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+              <div className="grid max-h-64 grid-cols-1 gap-1 overflow-y-auto sm:grid-cols-2">
+                {CAMBODIAN_BANKS.map((bank) => (
+                  <button
+                    key={bank.name}
+                    type="button"
+                    className={`flex items-center gap-2 rounded-xl p-2 text-left text-sm transition hover:bg-slate-50 ${!isCustomBank && name === bank.name ? "bg-indigo-50 font-semibold text-indigo-700" : "text-slate-700"}`}
+                    onClick={(event) => {
+                      setCustomBankSelected(false);
+                      setName(bank.name);
+                      setSymbol("USD");
+                      event.currentTarget.closest("details")?.removeAttribute("open");
+                    }}
+                  >
+                    <BankLogo bank={bank} small />
+                    <span>{bank.name}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="mt-1.5 border-t border-slate-100 pt-1.5">
                 <button
-                  key={bank.name}
                   type="button"
-                  className={`flex items-center gap-2 rounded-xl p-2 text-left text-sm transition hover:bg-slate-50 ${name === bank.name ? "bg-indigo-50 font-semibold text-indigo-700" : "text-slate-700"}`}
+                  className={`flex w-full items-center gap-2 rounded-xl p-2 text-left text-sm transition hover:bg-slate-50 ${isCustomBank ? "bg-indigo-50 font-semibold text-indigo-700" : "text-slate-700"}`}
                   onClick={(event) => {
-                    setName(bank.name);
-                    setSymbol("USD");
+                    setCustomBankSelected(true);
+                    if (selectedBank) setName("");
+                    if (!symbol) setSymbol("USD");
                     event.currentTarget.closest("details")?.removeAttribute("open");
+                    requestAnimationFrame(() => nameInputRef.current?.focus());
                   }}
                 >
-                  <BankLogo bank={bank} small />
-                  <span>{bank.name}</span>
+                  <BankLogo bank={CUSTOM_BANK} small />
+                  <span>{CUSTOM_BANK.name}</span>
+                  <span className="ml-auto text-xs font-normal text-slate-400">Type any bank name</span>
                 </button>
-              ))}
+              </div>
             </div>
           </details>
           <p className="mt-1 text-xs text-slate-400">Choose a bank or enter a custom account name below.</p>
@@ -390,7 +421,18 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label className="label">{isCash ? "Account name" : "Name"}</label>
-          <input name="name" className="input" placeholder={placeholders[type].name} value={name} onChange={(event) => setName(event.target.value)} autoFocus />
+          {isCash && isCustomBank && !name.trim() && (
+            <input type="hidden" name="name" value={CUSTOM_BANK.name} />
+          )}
+          <input
+            ref={nameInputRef}
+            name={isCash && isCustomBank && !name.trim() ? undefined : "name"}
+            className="input"
+            placeholder={isCash && isCustomBank ? "Enter custom bank or account name" : placeholders[type].name}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            autoFocus
+          />
         </div>
         <div>
           <label className="label">{isCash ? "Currency / tag" : "Symbol / ticker"}</label>
