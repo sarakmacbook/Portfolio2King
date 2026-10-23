@@ -237,7 +237,8 @@ export default function DashboardLayout({
             <p className="mr-auto text-xs font-medium text-indigo-700">
               Drag a card header to move it, use ▲ / ▼ or ◀ / ▶, shuffle the stat cards, the Holdings
               category tabs, folders and the holdings themselves, file a holding into a folder, and edit
-              any stat label. Nothing changes until you save.
+              any stat label. Nothing changes until you save — but outside this mode you can drag a
+              holding straight onto a folder and it is saved immediately.
             </p>
             <button type="button" className="btn-ghost" onClick={cancelArranging} disabled={saving}>
               Cancel
