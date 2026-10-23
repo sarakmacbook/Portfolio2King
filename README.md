@@ -23,6 +23,13 @@ the deployment before storing real portfolio data (see the
 - **Exchange balance import** from Binance, OKX and Bybit with read-only API
   keys: balances are fetched server-side, signed locally, and booked into the
   portfolio as deposits — re-syncing applies only what changed.
+- **Add via wallet address**: paste a public address and DeBank detects every
+  token on every EVM chain (prices and logos included) in one call, with a direct
+  on-chain read of public RPCs as the fallback — and Solana, Bitcoin and Tron
+  supported natively. Import one token or all of them at once.
+- **Holdings folders**: group positions ("Long term", "Binance", "Play money"),
+  give each folder an exchange logo or a custom emoji, colour and name, then drag
+  a holding onto a folder to file it. Folder headers show their own total.
 - Crypto asset search that falls back automatically between public data
   providers when one is rate-limited or down.
 - Daily per-asset price snapshots and portfolio snapshots, allocation donut and
@@ -35,7 +42,9 @@ the deployment before storing real portfolio data (see the
 - **One reporting currency: USD.** See below.
 
 **Contents:** [Supported currencies](#supported-currencies) ·
-[Arrange the dashboard](#arrange-the-dashboard) · [Mobile layout](#mobile-layout) ·
+[Add crypto from a wallet](#add-crypto-from-a-wallet) ·
+[Arrange the dashboard](#arrange-the-dashboard) ·
+[Holdings folders](#holdings-folders) · [Mobile layout](#mobile-layout) ·
 [Background refresh and alerts](#background-refresh-and-alerts) ·
 [Run locally](#run-locally) · [Self-host on your own server](#self-host-on-your-own-server) ·
 [Connect a database from the web UI](#connect-a-database-from-the-web-ui) ·
@@ -106,6 +115,48 @@ whose tags record the original currency.
 > currency on each account plus a dated FX-rate table, and every total/snapshot
 > would have to convert at capture time. That is a feature, not a setting.
 
+## Add crypto from a wallet
+
+**Add asset → Crypto → Add via wallet address** takes a public address and fills
+the form for you (or imports everything it finds):
+
+1. Paste the address — `0x…` for any EVM chain, a Solana base58 address, a
+   Bitcoin `bc1…` / `1…` address, or a Tron `T…` address — and pick a chain, or
+   leave **Auto-detect**.
+2. Click **Scan wallet**. Every non-zero balance comes back with its quantity,
+   USD price, value and logo.
+3. Click one token to fill the form below, or **Import all** to book them all as
+   holdings in one go.
+
+EVM addresses are read through **[DeBank](https://debank.com)**, which indexes
+every chain, so one call returns tokens from Ethereum, BNB Chain, Arbitrum, Base,
+Polygon, Optimism, Avalanche, zkSync, Linea, Scroll, Mantle, Blast, Fantom, Gnosis
+and Cronos together — with prices, so no per-token quote lookup is needed. The
+result says **via DeBank** so it is clear where the numbers came from.
+
+DeBank needs no key, but its public endpoints can rate-limit or block a server.
+Two things follow:
+
+- Add a free **`DEBANK_ACCESS_KEY`** (from <https://cloud.debank.com>) to use the
+  supported Open API and get the reliable path. See `.env.example`.
+- Without a key — or when DeBank is down, blocked or rate-limited — the same scan
+  falls back to reading balances straight from public RPCs and block explorers.
+  The dialog then says so ("DeBank was unavailable (…) — read the chains
+  directly instead"), and everything still works; the fallback simply covers
+  fewer tokens per chain.
+
+Notes:
+
+- Read-only: no keys, signatures or approvals. The address is only used for the
+  lookup and is written into the holding's note (`Wallet: 0x… (0x1234…abcd) ·
+  Chain: Arbitrum · Contract: 0x…`) so you can tell two identical tokens on
+  different chains apart.
+- USD-pegged tickers (`USDT`, `USDC`, `DAI`, `USDe`, …) are filed as
+  **Stablecoins** automatically; everything else is volatile crypto.
+- Unpriced airdrop spam that DeBank does not recognise is skipped, so the picker
+  stays readable. A token DeBank marks as verified but has no price for is still
+  listed.
+
 ## Arrange the dashboard
 
 The dashboard cards — **Portfolio stats** (the Cash / Invested / Unrealized /
@@ -171,6 +222,42 @@ Details:
   they are next to each other, and full-width cards start a new row. On phones the
   cards stack in the saved order.
 - Saving the layout does not touch any holdings, balances or snapshots.
+
+## Holdings folders
+
+Folders turn a long table into a few groups without changing any numbers:
+
+1. Click **⇅ Arrange layout**, then **＋ New folder** in the strip above the
+   table. Name it (28 characters), pick a colour, and choose an icon: the first
+   letter, an exchange logo (Binance, OKX, Bybit, Coinbase, Kraken, DexScreener)
+   or any emoji you type.
+2. File holdings in: drag a row onto a folder chip, or use the **Folder** dropdown
+   that appears on every row while arranging. A holding can be in one folder, and
+   **Unfiled** is the default.
+3. Drop the row back on **Unfiled** — or pick *Unfiled* in its dropdown — to pull
+   it out again.
+4. Click **Save layout**. **Reset to default** removes the folders; the holdings
+   themselves are never deleted, they just become unfiled again.
+
+Outside arrange mode the strip is a filter: **All**, one chip per folder with its
+count and value, and **Unfiled**. Clicking a chip narrows the table (and the
+category tab + search still apply on top). With folders in play the table groups
+rows under a header per folder — icon, name, number of holdings and the folder's
+own total — and each header collapses, which is handy on a phone where the groups
+become stacked cards.
+
+Details:
+
+- Folders and filing are stored in `app_settings` under `holdings.folders` and
+  `holdings.folderAssignments`, are normalised on read (unknown ids, duplicates
+  and nameless folders are dropped) and are saved by the same **Save layout**
+  click as the cards, the tabs and the row order.
+- A folder is a label, not a container: portfolio totals, weights, P/L and
+  snapshots are unchanged, and a holding is never counted twice.
+- Deleting a folder unfiles its holdings; renaming or recolouring it keeps them.
+- Crypto holdings that are priced from a specific exchange show that exchange's
+  mark next to the name, so Binance-priced BTC is distinguishable from an
+  OKX-priced one at a glance.
 
 ## Mobile layout
 

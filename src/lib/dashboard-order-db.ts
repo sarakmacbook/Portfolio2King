@@ -3,6 +3,12 @@ import { db } from "@/db";
 import { appSettings } from "@/db/schema";
 import { normaliseDashboardOrder, type DashboardBlockKey } from "@/lib/dashboard-layout";
 import { normaliseHoldingFilterOrder, type HoldingFilter } from "@/lib/holdings-filter";
+import {
+  normaliseAssignments,
+  normaliseFolders,
+  type FolderAssignments,
+  type HoldingFolder,
+} from "@/lib/holdings-folders";
 import { parseHoldingOrderIds } from "@/lib/holdings-order";
 import {
   normaliseDashboardStatLabels,
@@ -32,6 +38,12 @@ export const HOLDINGS_CATEGORIES_SETTING = "holdings.categoriesOrder";
 
 /** app_settings key holding the order of the asset rows inside the Holdings card. */
 export const HOLDINGS_ORDER_SETTING = "holdings.order";
+
+/** app_settings key holding the Holdings folders (JSON array). */
+export const HOLDINGS_FOLDERS_SETTING = "holdings.folders";
+
+/** app_settings key holding which folder each holding is filed in (JSON map). */
+export const HOLDINGS_FOLDER_ASSIGNMENTS_SETTING = "holdings.folderAssignments";
 
 async function readSetting(key: string): Promise<string | null> {
   const [row] = await db
@@ -161,4 +173,56 @@ export async function saveHoldingsOrder(order: readonly unknown[]): Promise<numb
 export async function clearHoldingsOrder(): Promise<void> {
   await ensureSchema();
   await db.delete(appSettings).where(eq(appSettings.key, HOLDINGS_ORDER_SETTING));
+}
+
+/** Folders shown above the Holdings table, in display order. */
+export async function loadHoldingsFolders(): Promise<HoldingFolder[]> {
+  await ensureSchema();
+  return normaliseFolders(await readSetting(HOLDINGS_FOLDERS_SETTING));
+}
+
+/** Stores the folders; an empty list clears them (back to one flat table). */
+export async function saveHoldingsFolders(folders: readonly unknown[]): Promise<HoldingFolder[]> {
+  await ensureSchema();
+  const normalised = normaliseFolders(folders);
+  if (normalised.length === 0) {
+    await clearHoldingsFolders();
+    return [];
+  }
+  await writeSetting(HOLDINGS_FOLDERS_SETTING, JSON.stringify(normalised));
+  return normalised;
+}
+
+/** Removes the folders and, with them, every filing (Reset to default). */
+export async function clearHoldingsFolders(): Promise<void> {
+  await ensureSchema();
+  await db.delete(appSettings).where(eq(appSettings.key, HOLDINGS_FOLDERS_SETTING));
+  await db.delete(appSettings).where(eq(appSettings.key, HOLDINGS_FOLDER_ASSIGNMENTS_SETTING));
+}
+
+/** Which folder each holding is filed in, ignoring deleted folders. */
+export async function loadHoldingFolderAssignments(
+  folders?: readonly HoldingFolder[],
+): Promise<FolderAssignments> {
+  await ensureSchema();
+  const list = folders ?? (await loadHoldingsFolders());
+  const folderIds = list.map((folder) => folder.id);
+  return normaliseAssignments(await readSetting(HOLDINGS_FOLDER_ASSIGNMENTS_SETTING), folderIds);
+}
+
+/** Stores the filing map; holdings that are unfiled are simply left out. */
+export async function saveHoldingFolderAssignments(
+  assignments: unknown,
+  folders?: readonly HoldingFolder[],
+): Promise<FolderAssignments> {
+  await ensureSchema();
+  const list = folders ?? (await loadHoldingsFolders());
+  const folderIds = list.map((folder) => folder.id);
+  const normalised = normaliseAssignments(assignments, folderIds);
+  if (Object.keys(normalised).length === 0) {
+    await db.delete(appSettings).where(eq(appSettings.key, HOLDINGS_FOLDER_ASSIGNMENTS_SETTING));
+    return {};
+  }
+  await writeSetting(HOLDINGS_FOLDER_ASSIGNMENTS_SETTING, JSON.stringify(normalised));
+  return normalised;
 }

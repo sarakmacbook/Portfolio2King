@@ -134,6 +134,8 @@ function AddAssetForm({
   const [scanningWallet, setScanningWallet] = useState(false);
   const [walletScanError, setWalletScanError] = useState("");
   const [walletScanDone, setWalletScanDone] = useState(false);
+  const [walletScanSource, setWalletScanSource] = useState<"debank" | "onchain" | null>(null);
+  const [walletScanNote, setWalletScanNote] = useState("");
   const [importingWallet, setImportingWallet] = useState(false);
   const [walletImportMessage, setWalletImportMessage] = useState("");
   const [customBankSelected, setCustomBankSelected] = useState(false);
@@ -257,6 +259,8 @@ function AddAssetForm({
       const data = (await response.json()) as {
         error?: string;
         balances?: ScannedWalletBalance[];
+        source?: "debank" | "onchain";
+        sourceNote?: string;
       };
       if (!response.ok) {
         throw new Error(data.error || "Could not scan that wallet address.");
@@ -264,6 +268,14 @@ function AddAssetForm({
       const list = data.balances || [];
       setWalletBalances(list);
       setWalletScanDone(true);
+      setWalletScanSource(data.source ?? null);
+      // Only mention DeBank when it was actually involved, so the picker stays
+      // quiet on a plain on-chain read for Solana / Bitcoin / Tron.
+      setWalletScanNote(
+        data.source === "onchain" && data.sourceNote
+          ? `DeBank was unavailable (${data.sourceNote}) — read the chains directly instead.`
+          : "",
+      );
       if (list.length === 0) {
         setWalletScanError("No non-zero balances found on that wallet address.");
       } else if (list.length === 1) {
@@ -681,7 +693,17 @@ function AddAssetForm({
               <div>
                 <p className="text-sm font-semibold text-slate-900">Add via wallet address</p>
                 <p className="text-xs text-slate-500">
-                  Paste your public wallet address (Ethereum / EVM 0x…, Solana, Bitcoin bc1…, or Tron T…) to scan on-chain balances.
+                  Paste your public wallet address (Ethereum / EVM 0x…, Solana, Bitcoin bc1…, or Tron T…). EVM
+                  wallets are detected with{" "}
+                  <a
+                    href="https://debank.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-indigo-600 hover:underline"
+                  >
+                    DeBank
+                  </a>{" "}
+                  — every chain, prices and logos in one call — and fall back to a direct on-chain read.
                 </p>
               </div>
               {walletBalances.length > 0 && (
@@ -740,6 +762,9 @@ function AddAssetForm({
             {walletScanError && (
               <p className="mt-2 text-xs text-rose-600">{walletScanError}</p>
             )}
+            {walletScanNote && (
+              <p className="mt-2 text-xs text-amber-700">{walletScanNote}</p>
+            )}
             {walletImportMessage && (
               <p className="mt-2 text-xs font-medium text-emerald-600">
                 {walletImportMessage}
@@ -748,7 +773,9 @@ function AddAssetForm({
             {walletScanDone && !walletScanError && walletBalances.length > 0 && (
               <div className="mt-3 space-y-2">
                 <p className="text-xs text-slate-500">
-                  Found {walletBalances.length} on-chain balance{walletBalances.length === 1 ? "" : "s"} · click a token to fill the form below, or click <strong>Import all</strong> above.
+                  Found {walletBalances.length} on-chain balance{walletBalances.length === 1 ? "" : "s"}
+                  {walletScanSource === "debank" ? " via DeBank" : ""} · click a token to fill the form
+                  below, or click <strong>Import all</strong> above.
                 </p>
                 <div className="flex gap-2 overflow-x-auto pb-1">
                   {walletBalances.map((item) => (
@@ -767,6 +794,7 @@ function AddAssetForm({
                           symbol={item.symbol}
                           name={item.name}
                           wallet={walletLogo}
+                          logo={item.logoUrl}
                           className="h-8 w-8 rounded-lg"
                         />
                         <span className="min-w-0">

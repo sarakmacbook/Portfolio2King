@@ -1,37 +1,20 @@
 import type { CryptoCategory } from "@/db/schema";
+import { fetchDebankBalances, type DebankBalance } from "@/lib/debank";
 import { fetchPreferredMarketPrice } from "@/lib/market-prices";
+import { STABLECOIN_SYMBOLS } from "@/lib/stablecoins";
+import { detectWalletAddressKind, type WalletAddressKind, type WalletChain } from "@/lib/wallet-chains";
 
-export const WALLET_CHAINS = [
-  "auto",
-  "ethereum",
-  "bsc",
-  "arbitrum",
-  "base",
-  "polygon",
-  "optimism",
-  "avalanche",
-  "solana",
-  "bitcoin",
-  "tron",
-] as const;
-
-export type WalletChain = (typeof WALLET_CHAINS)[number];
-
-export const WALLET_CHAIN_LABELS: Record<WalletChain, string> = {
-  auto: "Auto-detect",
-  ethereum: "Ethereum",
-  bsc: "BNB Chain",
-  arbitrum: "Arbitrum",
-  base: "Base",
-  polygon: "Polygon",
-  optimism: "Optimism",
-  avalanche: "Avalanche",
-  solana: "Solana",
-  bitcoin: "Bitcoin",
-  tron: "Tron",
-};
-
-export type WalletAddressKind = "evm" | "solana" | "bitcoin" | "tron";
+/**
+ * The chain vocabulary lives in `wallet-chains` so the DeBank client can share
+ * it; re-exported here because every caller imports it from the scanner.
+ */
+export {
+  WALLET_CHAINS,
+  WALLET_CHAIN_LABELS,
+  detectWalletAddressKind,
+  isValidWalletChain,
+} from "@/lib/wallet-chains";
+export type { WalletAddressKind, WalletChain } from "@/lib/wallet-chains";
 
 export type ScannedWalletBalance = {
   id: string;
@@ -44,6 +27,8 @@ export type ScannedWalletBalance = {
   valueUsd: number;
   category: CryptoCategory;
   contract: string | null;
+  /** Token artwork, when the indexer returned one (DeBank does). */
+  logoUrl?: string;
 };
 
 export type WalletScanResult = {
@@ -51,21 +36,17 @@ export type WalletScanResult = {
   addressKind: WalletAddressKind;
   chain: WalletChain;
   balances: ScannedWalletBalance[];
+  /**
+   * Where the balances came from: DeBank (one call, all EVM chains, prices
+   * included) or a direct read of the public RPCs / explorers. The dialog shows
+   * this so it is obvious when DeBank was unavailable.
+   */
+  source: "debank" | "onchain";
+  /** Why DeBank was not used, when it was tried and failed. */
+  sourceNote?: string;
 };
 
 const REQUEST_TIMEOUT_MS = 7000;
-
-const STABLECOIN_SYMBOLS = new Set([
-  "USDT",
-  "USDC",
-  "DAI",
-  "FDUSD",
-  "TUSD",
-  "USDE",
-  "PYUSD",
-  "USDD",
-  "FRAX",
-]);
 
 /** Fallback reference USD prices when live exchange APIs are unreachable. */
 const FALLBACK_PRICES_USD: Record<string, number> = {
@@ -223,26 +204,6 @@ const SOLANA_MINTS: Record<string, { symbol: string; name: string }> = {
   mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So: { symbol: "MSOL", name: "Marinade Staked SOL" },
   J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn: { symbol: "JITOSOL", name: "Jito Staked SOL" },
 };
-
-export function detectWalletAddressKind(rawAddress: string): WalletAddressKind | null {
-  const addr = rawAddress.trim();
-  if (!addr) return null;
-  if (/^0x[a-fA-F0-9]{40}$/.test(addr)) return "evm";
-  if (/^(bc1[a-zA-HJ-NP-Z0-9]{25,87}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$/.test(addr)) {
-    return "bitcoin";
-  }
-  if (/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(addr)) {
-    return "tron";
-  }
-  if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr)) {
-    return "solana";
-  }
-  return null;
-}
-
-export function isValidWalletChain(value: unknown): value is WalletChain {
-  return typeof value === "string" && (WALLET_CHAINS as readonly string[]).includes(value);
-}
 
 export function formatUnitsFromHex(hexValue: unknown, decimals: number): number {
   if (typeof hexValue !== "string" || !hexValue.startsWith("0x")) return 0;
@@ -567,6 +528,23 @@ async function scanTronWallet(
   }
 }
 
+/** DeBank returns prices; only the unpriced leftovers need a lookup. */
+function fromDebank(balance: DebankBalance): ScannedWalletBalance {
+  return {
+    id: balance.id,
+    symbol: balance.symbol,
+    name: balance.name,
+    chain: balance.chain,
+    chainLabel: balance.chainLabel,
+    quantity: balance.quantity,
+    price: balance.price,
+    valueUsd: balance.valueUsd,
+    category: balance.category,
+    contract: balance.contract,
+    ...(balance.logoUrl ? { logoUrl: balance.logoUrl } : {}),
+  };
+}
+
 async function resolveSymbolPriceUsd(symbol: string): Promise<number> {
   const upper = symbol.trim().toUpperCase();
   if (STABLECOIN_SYMBOLS.has(upper)) return 1;
@@ -603,6 +581,30 @@ export async function scanWalletAddress(
   }
 
   let rawBalances: Array<Omit<ScannedWalletBalance, "price" | "valueUsd">> = [];
+  let debankBalances: DebankBalance[] = [];
+  let sourceNote: string | undefined;
+
+  // DeBank indexes every EVM chain in one call and already knows USD prices, so
+  // it is asked first. When it is unavailable (no key, rate limit, outage) the
+  // same scan continues against the public RPCs below.
+  if (addressKind === "evm") {
+    const debank = await fetchDebankBalances(address, requestedChain);
+    if (debank.ok && debank.balances.length > 0) {
+      debankBalances = debank.balances;
+    } else {
+      sourceNote = debank.error ?? undefined;
+    }
+  }
+
+  if (debankBalances.length > 0) {
+    return {
+      address,
+      addressKind,
+      chain: requestedChain,
+      balances: debankBalances.map(fromDebank),
+      source: "debank",
+    };
+  }
 
   if (addressKind === "evm") {
     const chainsToScan =
@@ -646,5 +648,7 @@ export async function scanWalletAddress(
     addressKind,
     chain: requestedChain,
     balances,
+    source: "onchain",
+    ...(sourceNote ? { sourceNote } : {}),
   };
 }

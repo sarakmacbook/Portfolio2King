@@ -16,6 +16,7 @@ import {
   type DashboardStatKey,
 } from "@/lib/dashboard-stats";
 import { DEFAULT_HOLDING_FILTER_ORDER, type HoldingFilter } from "@/lib/holdings-filter";
+import type { FolderAssignments, HoldingFolder } from "@/lib/holdings-folders";
 import GripIcon from "./GripIcon";
 import { HoldingsArrangeProvider } from "./holdings-arrange";
 import StatsGrid, { type StatCardData } from "./StatsGrid";
@@ -45,6 +46,8 @@ export default function DashboardLayout({
   initialStatsLabels = DEFAULT_DASHBOARD_STAT_LABELS,
   initialCategoryOrder = DEFAULT_HOLDING_FILTER_ORDER,
   initialAssetOrder = [],
+  initialFolders = [],
+  initialAssignments = {},
 }: {
   blocks: Record<Exclude<DashboardBlockKey, "stats">, ReactNode>;
   /** Values and hints for the four stat cards, keyed by stat id. */
@@ -56,12 +59,18 @@ export default function DashboardLayout({
   initialCategoryOrder?: HoldingFilter[];
   /** Saved top-to-bottom order of the holdings, as asset ids (empty = default). */
   initialAssetOrder?: number[];
+  /** Saved Holdings folders. */
+  initialFolders?: HoldingFolder[];
+  /** Saved folder filing, `assetId → folderId`. */
+  initialAssignments?: FolderAssignments;
 }) {
   const [order, setOrder] = useState<DashboardBlockKey[]>(initialOrder);
   const [statsOrder, setStatsOrder] = useState<DashboardStatKey[]>(initialStatsOrder);
   const [statsLabels, setStatsLabels] = useState<Record<DashboardStatKey, string>>(initialStatsLabels);
   const [categoryOrder, setCategoryOrder] = useState<HoldingFilter[]>(initialCategoryOrder);
   const [assetOrder, setAssetOrder] = useState<number[]>(initialAssetOrder);
+  const [folders, setFolders] = useState<HoldingFolder[]>(initialFolders);
+  const [assignments, setAssignments] = useState<FolderAssignments>(initialAssignments);
   const [arranging, setArranging] = useState(false);
   const [dragging, setDragging] = useState<DashboardBlockKey | null>(null);
   const [drop, setDrop] = useState<{ key: DashboardBlockKey; after: boolean } | null>(null);
@@ -73,6 +82,8 @@ export default function DashboardLayout({
   const savedStatsLabels = useRef<Record<DashboardStatKey, string>>(initialStatsLabels);
   const savedCategoryOrder = useRef<HoldingFilter[]>(initialCategoryOrder);
   const savedAssetOrder = useRef<number[]>(initialAssetOrder);
+  const savedFolders = useRef<HoldingFolder[]>(initialFolders);
+  const savedAssignments = useRef<FolderAssignments>(initialAssignments);
 
   const holdingsArrange = useMemo(
     () => ({
@@ -81,8 +92,12 @@ export default function DashboardLayout({
       onCategoryOrderChange: setCategoryOrder,
       assetOrder,
       onAssetOrderChange: setAssetOrder,
+      folders,
+      onFoldersChange: setFolders,
+      assignments,
+      onAssignmentsChange: setAssignments,
     }),
-    [arranging, categoryOrder, assetOrder],
+    [arranging, categoryOrder, assetOrder, folders, assignments],
   );
 
   function clearDrag() {
@@ -96,6 +111,8 @@ export default function DashboardLayout({
     savedStatsLabels.current = statsLabels;
     savedCategoryOrder.current = categoryOrder;
     savedAssetOrder.current = assetOrder;
+    savedFolders.current = folders;
+    savedAssignments.current = assignments;
     setNotice(null);
     setArranging(true);
   }
@@ -106,6 +123,8 @@ export default function DashboardLayout({
     setStatsLabels(savedStatsLabels.current);
     setCategoryOrder(savedCategoryOrder.current);
     setAssetOrder(savedAssetOrder.current);
+    setFolders(savedFolders.current);
+    setAssignments(savedAssignments.current);
     clearDrag();
     setArranging(false);
   }
@@ -143,6 +162,8 @@ export default function DashboardLayout({
       fd.set("statsLabels", JSON.stringify(normalisedLabels));
       fd.set("holdingCategories", JSON.stringify(categoryOrder));
       fd.set("holdingOrder", JSON.stringify(assetOrder));
+      fd.set("holdingFolders", JSON.stringify(folders));
+      fd.set("holdingFolderAssignments", JSON.stringify(assignments));
       const result: ActionState = await saveDashboardLayout({}, fd);
       if (result.error) {
         setNotice({ kind: "error", text: result.error });
@@ -154,6 +175,8 @@ export default function DashboardLayout({
       savedStatsLabels.current = normalisedLabels;
       savedCategoryOrder.current = categoryOrder;
       savedAssetOrder.current = assetOrder;
+      savedFolders.current = folders;
+      savedAssignments.current = assignments;
       setArranging(false);
       setNotice({ kind: "ok", text: result.message ?? "Dashboard layout saved." });
     });
@@ -171,11 +194,15 @@ export default function DashboardLayout({
       setStatsLabels(DEFAULT_DASHBOARD_STAT_LABELS);
       setCategoryOrder(DEFAULT_HOLDING_FILTER_ORDER);
       setAssetOrder([]);
+      setFolders([]);
+      setAssignments({});
       savedOrder.current = DEFAULT_DASHBOARD_ORDER;
       savedStatsOrder.current = DEFAULT_DASHBOARD_STAT_ORDER;
       savedStatsLabels.current = DEFAULT_DASHBOARD_STAT_LABELS;
       savedCategoryOrder.current = DEFAULT_HOLDING_FILTER_ORDER;
       savedAssetOrder.current = [];
+      savedFolders.current = [];
+      savedAssignments.current = {};
       clearDrag();
       setArranging(false);
       setNotice({ kind: "ok", text: result.message ?? "Dashboard layout reset to the default." });
@@ -209,8 +236,8 @@ export default function DashboardLayout({
           <>
             <p className="mr-auto text-xs font-medium text-indigo-700">
               Drag a card header to move it, use ▲ / ▼ or ◀ / ▶, shuffle the stat cards, the Holdings
-              category tabs and the holdings themselves, and edit any stat label. Nothing changes until
-              you save.
+              category tabs, folders and the holdings themselves, file a holding into a folder, and edit
+              any stat label. Nothing changes until you save.
             </p>
             <button type="button" className="btn-ghost" onClick={cancelArranging} disabled={saving}>
               Cancel

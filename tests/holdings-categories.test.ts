@@ -142,8 +142,11 @@ test("the arranged order is saved and reset with the rest of the dashboard layou
 
   const actions = read("src/app/actions.ts");
   assert.ok(actions.includes('"holdingCategories"'), "save action reads the holdingCategories field");
-  assert.ok(actions.includes("saveHoldingsCategoryOrder("), "save action stores the category order");
-  assert.ok(actions.includes("clearHoldingsCategoryOrder("), "reset action clears the category order");
+  assert.ok(actions.includes("persistDashboardLayout("), "save action stores the layout");
+
+  const save = read("src/lib/dashboard-layout-save.ts");
+  assert.ok(save.includes("saveHoldingsCategoryOrder("), "the layout save stores the category order");
+  assert.ok(save.includes("clearHoldingsCategoryOrder("), "the layout reset clears the category order");
 
   const layout = read("src/components/DashboardLayout.tsx");
   assert.ok(layout.includes("HoldingsArrangeProvider"), "layout shares the pending order with the table");

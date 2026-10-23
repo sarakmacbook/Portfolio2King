@@ -12,7 +12,9 @@ import {
   loadDashboardOrder,
   loadDashboardStatLabels,
   loadDashboardStatOrder,
+  loadHoldingFolderAssignments,
   loadHoldingsCategoryOrder,
+  loadHoldingsFolders,
   loadHoldingsOrder,
 } from "@/lib/dashboard-order-db";
 import { loadAssetWalletLogos } from "@/lib/web3-wallets-db";
@@ -44,6 +46,7 @@ export default async function Dashboard() {
     statLabels,
     categoryOrder,
     holdingOrder,
+    holdingsFolders,
     walletLogos,
   ] = await Promise.all([
     getSnapshots(),
@@ -54,8 +57,10 @@ export default async function Dashboard() {
     loadDashboardStatLabels(),
     loadHoldingsCategoryOrder(),
     loadHoldingsOrder(),
+    loadHoldingsFolders(),
     loadAssetWalletLogos(),
   ]);
+  const holdingAssignments = await loadHoldingFolderAssignments(holdingsFolders);
   const totals = computeTotals(list);
   const t = today();
   const stalePrices = list.some(
@@ -86,6 +91,7 @@ export default async function Dashboard() {
       symbol: a.symbol,
       cryptoCategory: a.cryptoCategory,
       wallet: walletLogos[a.id],
+      priceSource: a.priceSource,
       quantity: a.quantity,
       avgCost: a.avgCost,
       currentPrice: a.currentPrice,
@@ -162,6 +168,8 @@ export default async function Dashboard() {
         initialStatsLabels={statLabels}
         initialCategoryOrder={categoryOrder}
         initialAssetOrder={holdingOrder}
+        initialFolders={holdingsFolders}
+        initialAssignments={holdingAssignments}
         statsCards={{
           cash: {
             value: money(totals.cashValue),
