@@ -182,6 +182,15 @@ html.dark .ring-slate-200 { --tw-ring-color: rgb(100 116 139 / .24); }
 html.dark .ring-emerald-200 { --tw-ring-color: rgb(16 185 129 / .22); }
 html.dark .ring-rose-200, html.dark .focus\:ring-rose-100:focus { --tw-ring-color: rgb(244 63 94 / .24); }
 html.dark footer { color: #626b80; }
+html.privacy-hidden .allocation-chart svg circle:not(.donut-track),
+html.privacy-hidden main svg path {
+  filter: blur(8px);
+  opacity: 0.35;
+  transition: filter .2s ease, opacity .2s ease;
+}
+html.privacy-hidden main input[inputmode="decimal"]:not(:focus) {
+  filter: blur(6px);
+}
 
 /* Allocation chart adapts to the card itself, not only the viewport. */
 .allocation-chart { container-type: inline-size; }
