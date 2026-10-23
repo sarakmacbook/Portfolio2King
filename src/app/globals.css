@@ -204,6 +204,7 @@ html.dark .text-orange-700 { color: #fbad72; }
 html.dark .text-sky-700 { color: #70d3f7; }
 html.dark .border-slate-100, html.dark .divide-slate-100 > :not(:last-child) { border-color: rgb(100 116 139 / .18); }
 html.dark .border-slate-200, html.dark .border-slate-300, html.dark .hover\:border-slate-300:hover, html.dark .hover\:border-slate-400:hover { border-color: rgb(100 116 139 / .32); }
+html.dark .border-slate-900 { border-color: #eeeef5; }
 html.dark .border-indigo-100, html.dark .border-indigo-200, html.dark .border-indigo-300, html.dark .hover\:border-indigo-300:hover { border-color: rgb(139 92 246 / .32); }
 html.dark .border-indigo-500, html.dark .border-indigo-600 { border-color: #8b5cf6; }
 html.dark .border-emerald-100, html.dark .border-emerald-200 { border-color: rgb(16 185 129 / .22); }

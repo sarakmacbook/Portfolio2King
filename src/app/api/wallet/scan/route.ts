@@ -10,9 +10,11 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/wallet/scan?address=0x...&chain=auto
  *
- * Scans public blockchain RPCs / explorers for native and token balances held by
- * the given wallet address (EVM, Solana, Bitcoin, or Tron). Read-only — no keys
- * or signatures required.
+ * Returns the tokens a wallet holds. EVM addresses are read through DeBank
+ * (every chain, prices included) when available, and through the public RPCs and
+ * block explorers otherwise; Solana, Bitcoin and Tron always use the direct
+ * read. The response carries `source: "debank" | "onchain"` so the dialog can
+ * say where the numbers came from. Read-only — no keys or signatures.
  */
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;

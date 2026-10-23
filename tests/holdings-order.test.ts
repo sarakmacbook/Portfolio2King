@@ -92,8 +92,11 @@ test("the arrangement is saved and reset with the rest of the dashboard layout",
 
   const actions = read("src/app/actions.ts");
   assert.ok(actions.includes('"holdingOrder"'), "the save action reads the holdingOrder field");
-  assert.ok(actions.includes("saveHoldingsOrder("), "the save action stores the holding order");
-  assert.ok(actions.includes("clearHoldingsOrder("), "the reset action clears the holding order");
+  assert.ok(actions.includes("persistDashboardLayout("), "the save action stores the layout");
+
+  const save = read("src/lib/dashboard-layout-save.ts");
+  assert.ok(save.includes("saveHoldingsOrder("), "the layout save stores the holding order");
+  assert.ok(save.includes("clearHoldingsOrder("), "the layout reset clears the holding order");
 
   const db = read("src/lib/dashboard-order-db.ts");
   assert.ok(db.includes('"holdings.order"'), "the order lives under holdings.order");

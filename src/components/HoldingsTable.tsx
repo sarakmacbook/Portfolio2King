@@ -1,7 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type DragEvent,
+} from "react";
 import type { AssetType } from "@/lib/constants";
 import { TYPE_META, money, pct, pnlColor, qty } from "@/lib/format";
 import {
@@ -22,8 +30,19 @@ import {
   moveHoldingTo,
   normaliseHoldingOrder,
 } from "@/lib/holdings-order";
+import {
+  countInFolder,
+  groupByFolder,
+  matchesFolderFilter,
+  type FolderAssignments,
+  type FolderFilter,
+  type HoldingFolder,
+} from "@/lib/holdings-folders";
+import { PROVIDER_LABELS, type PriceProvider } from "@/lib/market-prices";
 import CryptoLogo from "./CryptoLogo";
+import ExchangeIcon, { EXCHANGE_BRAND_COLORS } from "./ExchangeIcon";
 import GripIcon from "./GripIcon";
+import HoldingsFolders from "./HoldingsFolders";
 import { useHoldingsArrange } from "./holdings-arrange";
 
 export type HoldingRow = {
@@ -33,6 +52,8 @@ export type HoldingRow = {
   symbol: string;
   cryptoCategory: "stablecoin" | "volatile";
   wallet?: string;
+  /** Exchange a crypto holding is priced from, shown as a small badge. */
+  priceSource?: PriceProvider | "";
   quantity: number;
   avgCost: number;
   currentPrice: number;
@@ -91,11 +112,17 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
   const [localCategoryOrder, setLocalCategoryOrder] =
     useState<HoldingFilter[]>(DEFAULT_HOLDING_FILTER_ORDER);
   const [localAssetOrder, setLocalAssetOrder] = useState<number[]>([]);
+  const [localFolders, setLocalFolders] = useState<HoldingFolder[]>([]);
+  const [localAssignments, setLocalAssignments] = useState<FolderAssignments>({});
   const arranging = arrange?.arranging ?? false;
   const categoryOrder = arrange?.categoryOrder ?? localCategoryOrder;
   const setCategoryOrder = arrange?.onCategoryOrderChange ?? setLocalCategoryOrder;
   const assetOrder = arrange?.assetOrder ?? localAssetOrder;
   const setAssetOrder = arrange?.onAssetOrderChange ?? setLocalAssetOrder;
+  const folders = arrange?.folders ?? localFolders;
+  const setFolders = arrange?.onFoldersChange ?? setLocalFolders;
+  const assignments = arrange?.assignments ?? localAssignments;
+  const setAssignments = arrange?.onAssignmentsChange ?? setLocalAssignments;
 
   const [query, setQuery] = useState("");
   // A saved arrangement is what the table shows until a column is sorted on.
@@ -106,6 +133,11 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
   const [drop, setDrop] = useState<{ key: HoldingFilter; after: boolean } | null>(null);
   const [rowDragging, setRowDragging] = useState<number | null>(null);
   const [rowDrop, setRowDrop] = useState<{ id: number; after: boolean } | null>(null);
+  const [folderFilter, setFolderFilter] = useState<FolderFilter>("all");
+  /** Collapsed groups — a view preference, not part of the saved layout. */
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
+    () => new Set(folders.filter((folder) => folder.collapsed).map((folder) => folder.id)),
+  );
   const [announcement, setAnnouncement] = useState("");
 
   useEffect(() => {
@@ -320,6 +352,138 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
     setSort((current) => (current.key === "custom" ? { key: "value", dir: -1 } : current));
   }, [arranging, assetOrder.length]);
 
+  const hasFolders = folders.length > 0;
+  /** Order + Asset + Folder + Quantity + Avg cost + Price + Value + P/L + Weight. */
+  const columnCount = 7 + (arranging ? 1 : 0) + (hasFolders ? 1 : 0);
+  const folderIds = useMemo(() => folders.map((folder) => folder.id), [folders]);
+
+  /** Counts and value per folder, for the chips and the group headers. */
+  const folderStats = useMemo(() => {
+    const counts: Record<string, number> = {};
+    const totals: Record<string, number> = {};
+    for (const folder of folders) {
+      counts[folder.id] = countInFolder(assignments, folder.id);
+      totals[folder.id] = 0;
+    }
+    let unfiledCount = 0;
+    for (const row of rows) {
+      const folderId = assignments[row.id];
+      if (!folderId || !(folderId in counts)) {
+        unfiledCount += 1;
+        continue;
+      }
+      totals[folderId] += row.value;
+    }
+    return { counts, totals, unfiledCount };
+  }, [folders, assignments, rows]);
+
+  /** The rows the folder filter keeps (category tabs and search apply too). */
+  const folderRows = useMemo(
+    () => shown.filter((row) => matchesFolderFilter(folderFilter, row.id, assignments, folderIds)),
+    [shown, folderFilter, assignments, folderIds],
+  );
+
+  /**
+   * Rows split into folder groups. Without folders (or while searching, where a
+   * group header would only repeat the query) the table stays one flat list and
+   * looks exactly as it did before folders existed.
+   */
+  const groups = useMemo(() => {
+    if (!hasFolders) return [{ folder: null, rows: folderRows, totalValue: 0 }];
+    return groupByFolder(folderRows, folders, assignments);
+  }, [hasFolders, folderRows, folders, assignments]);
+
+  function toggleGroup(key: string) {
+    setCollapsedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function setFolderFor(row: HoldingRow, folderId: string) {
+    const next = { ...assignments };
+    if (!folderId) delete next[row.id];
+    else next[row.id] = folderId;
+    setAssignments(next);
+    const name = folders.find((folder) => folder.id === folderId)?.name;
+    setAnnouncement(`${row.symbol || row.name} moved to ${name ?? "Unfiled"}.`);
+  }
+
+  /** The small folder badge/selector shown with each holding. */
+  function folderControl(row: HoldingRow) {
+    const folder = folders.find((item) => item.id === assignments[row.id]);
+    if (arranging) {
+      return (
+        <select
+          className="input w-full min-w-0 py-1 text-xs"
+          value={folder?.id ?? ""}
+          onChange={(event) => setFolderFor(row, event.target.value)}
+          aria-label={`Folder for ${row.name}`}
+        >
+          <option value="">Unfiled</option>
+          {folders.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name}
+            </option>
+          ))}
+        </select>
+      );
+    }
+    if (!folder) return <span className="text-xs text-slate-400">—</span>;
+    return (
+      <span className="inline-flex max-w-full items-center gap-1 rounded-lg bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
+        <ExchangeIcon
+          provider={folder.icon === "exchange" ? (folder.glyph as PriceProvider) : undefined}
+          glyph={folder.icon === "emoji" ? folder.glyph : undefined}
+          label={folder.name.slice(0, 1)}
+          color={folder.color}
+          className="h-3.5 w-3.5 rounded"
+        />
+        <span className="truncate">{folder.name}</span>
+      </span>
+    );
+  }
+
+  /** Group heading shared by the table and the phone list. */
+  function groupHeader(group: { folder: HoldingFolder | null; rows: HoldingRow[]; totalValue: number }) {
+    const key = group.folder?.id ?? "unfiled";
+    const isCollapsed = collapsedGroups.has(key);
+    return (
+      <button
+        type="button"
+        onClick={() => toggleGroup(key)}
+        className="flex w-full items-center gap-2 text-left"
+        aria-expanded={!isCollapsed}
+      >
+        <span className="w-3 text-[10px] text-slate-400">{isCollapsed ? "▶" : "▼"}</span>
+        {group.folder ? (
+          <ExchangeIcon
+            provider={group.folder.icon === "exchange" ? (group.folder.glyph as PriceProvider) : undefined}
+            glyph={group.folder.icon === "emoji" ? group.folder.glyph : undefined}
+            label={group.folder.name.slice(0, 1)}
+            color={group.folder.color}
+            className="h-4 w-4 rounded"
+          />
+        ) : (
+          <span className="grid h-4 w-4 place-items-center rounded bg-slate-100 text-[9px] font-bold text-slate-500">
+            ?
+          </span>
+        )}
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+          {group.folder?.name ?? "Unfiled"}
+        </span>
+        <span className="text-[11px] font-normal normal-case text-slate-400">
+          {group.rows.length} holding{group.rows.length === 1 ? "" : "s"}
+        </span>
+        <span className="ml-auto text-xs font-medium tabular-nums text-slate-500">
+          {money(group.totalValue)}
+        </span>
+      </button>
+    );
+  }
+
   const th = (key: SortKey, label: string, align = "text-right") => (
     <th className={`px-4 py-3 font-medium ${align}`}>
       {/* While arranging, the column headers would only re-order the rows
@@ -464,6 +628,22 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
         </div>
       </div>
 
+      {(hasFolders || arranging) && (
+        <HoldingsFolders
+          folders={folders}
+          assignments={assignments}
+          counts={folderStats.counts}
+          totals={folderStats.totals}
+          unfiledCount={folderStats.unfiledCount}
+          totalRows={rows.length}
+          selected={folderFilter}
+          onSelect={setFolderFilter}
+          arranging={arranging}
+          onFoldersChange={setFolders}
+          onAssignmentsChange={setAssignments}
+        />
+      )}
+
       <div className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[760px] text-sm">
           <thead className="text-left text-xs uppercase tracking-wide text-slate-500">
@@ -474,6 +654,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                 </th>
               )}
               {th("name", "Asset", "text-left")}
+              {hasFolders && <th className="px-4 py-3 text-left font-medium">Folder</th>}
               <th className="px-4 py-3 text-right font-medium">Quantity</th>
               <th className="px-4 py-3 text-right font-medium">Avg cost</th>
               <th className="px-4 py-3 text-right font-medium">Price</th>
@@ -483,7 +664,19 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {shown.map((r) => {
+            {groups.map((group) => {
+              const groupKey = group.folder?.id ?? "unfiled";
+              const isCollapsed = collapsedGroups.has(groupKey);
+              return (
+                <Fragment key={groupKey}>
+                  {hasFolders && (
+                    <tr className="bg-slate-50/60">
+                      <th colSpan={columnCount} className="px-4 py-2 font-normal" scope="colgroup">
+                        {groupHeader(group)}
+                      </th>
+                    </tr>
+                  )}
+                  {!isCollapsed && group.rows.map((r) => {
               const isCash = r.type === "cash";
               const isDragging = rowDragging === r.id;
               const isDropTarget = rowDrop?.id === r.id && !isDragging;
@@ -515,16 +708,30 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                         </span>
                       )}
                       <span className="min-w-0">
-                        <span className="block truncate font-medium text-slate-900 group-hover:text-indigo-600">
-                          {r.name}
+                        <span className="flex items-center gap-1.5">
+                          <span className="truncate font-medium text-slate-900 group-hover:text-indigo-600">
+                            {r.name}
+                          </span>
+                          {r.priceSource && (
+                            <ExchangeIcon
+                              provider={r.priceSource}
+                              color={EXCHANGE_BRAND_COLORS[r.priceSource]}
+                              className="h-3.5 w-3.5 rounded"
+                              title={`Priced from ${PROVIDER_LABELS[r.priceSource]}`}
+                            />
+                          )}
                         </span>
                         <span className="block text-xs text-slate-500">
                           {r.symbol && r.symbol !== r.name ? `${r.symbol} · ` : ""}
                           {r.type === "crypto" ? (r.cryptoCategory === "stablecoin" ? "Crypto · Stablecoin" : "Crypto · Volatile") : TYPE_META[r.type].label}
+                          {r.priceSource ? ` · ${PROVIDER_LABELS[r.priceSource]}` : ""}
                         </span>
                       </span>
                     </Link>
                   </td>
+                  {hasFolders && (
+                    <td className="px-4 py-3 align-middle">{folderControl(r)}</td>
+                  )}
                   <td className="px-4 py-3 text-right tabular-nums text-slate-700">{isCash ? "—" : qty(r.quantity)}</td>
                   <td className="px-4 py-3 text-right tabular-nums text-slate-500">{isCash ? "—" : money(r.avgCost)}</td>
                   <td className="px-4 py-3 text-right tabular-nums text-slate-700">
@@ -563,10 +770,13 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                   </td>
                 </tr>
               );
+                  })}
+                </Fragment>
+              );
             })}
-            {shown.length === 0 && (
+            {folderRows.length === 0 && (
               <tr>
-                <td colSpan={arranging ? 8 : 7} className="px-4 py-12 text-center text-sm text-slate-400">
+                <td colSpan={columnCount} className="px-4 py-12 text-center text-sm text-slate-400">
                   No holdings match.
                 </td>
               </tr>
@@ -577,7 +787,15 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
 
       {/* Phones: one card per holding instead of a 760px-wide table. */}
       <ul className="divide-y divide-slate-100 md:hidden">
-        {shown.map((r) => {
+        {groups.map((group) => {
+          const groupKey = group.folder?.id ?? "unfiled";
+          const isCollapsed = collapsedGroups.has(groupKey);
+          return (
+            <Fragment key={groupKey}>
+              {hasFolders && (
+                <li className="bg-slate-50/60 px-4 py-2">{groupHeader(group)}</li>
+              )}
+              {!isCollapsed && group.rows.map((r) => {
           const isCash = r.type === "cash";
           const subtitle = r.type === "crypto"
             ? r.cryptoCategory === "stablecoin"
@@ -614,7 +832,17 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                   </span>
                 )}
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium text-slate-900">{r.name}</span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="truncate font-medium text-slate-900">{r.name}</span>
+                    {r.priceSource && (
+                      <ExchangeIcon
+                        provider={r.priceSource}
+                        color={EXCHANGE_BRAND_COLORS[r.priceSource]}
+                        className="h-3.5 w-3.5 rounded"
+                        title={`Priced from ${PROVIDER_LABELS[r.priceSource]}`}
+                      />
+                    )}
+                  </span>
                   <span className="block truncate text-xs text-slate-500">
                     {r.symbol && r.symbol !== r.name ? `${r.symbol} · ` : ""}
                     {subtitle}
@@ -627,6 +855,12 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                   </span>
                 </span>
               </Link>
+              {hasFolders && (
+                <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+                  <span className="w-12 shrink-0 text-slate-400">Folder</span>
+                  {folderControl(r)}
+                </div>
+              )}
               <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
                 <span className="min-w-0 truncate tabular-nums">
                   {isCash ? (
@@ -652,8 +886,13 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
               </div>
             </li>
           );
+              })}
+            </Fragment>
+          );
         })}
-        {shown.length === 0 && <li className="px-4 py-12 text-center text-sm text-slate-400">No holdings match.</li>}
+        {folderRows.length === 0 && (
+          <li className="px-4 py-12 text-center text-sm text-slate-400">No holdings match.</li>
+        )}
       </ul>
     </div>
   );

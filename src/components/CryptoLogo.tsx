@@ -11,6 +11,8 @@ type Props = {
   symbol: string;
   name?: string;
   wallet?: Web3WalletId | string;
+  /** Token artwork from an indexer (DeBank). Falls back to CoinCap by ticker. */
+  logo?: string;
   className?: string;
 };
 
@@ -163,6 +165,7 @@ export default function CryptoLogo({
   symbol,
   name,
   wallet,
+  logo,
   className = "h-9 w-9",
 }: Props) {
   const [failed, setFailed] = useState(false);
@@ -179,6 +182,9 @@ export default function CryptoLogo({
 
   const ticker = symbol.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   const initials = (symbol || name || "?").slice(0, 4).toUpperCase();
+  // DeBank's artwork already matches the token the scanner saw; CoinCap is the
+  // ticker-based fallback.
+  const imageUrl = logo || (ticker ? `https://assets.coincap.io/assets/icons/${ticker}@2x.png` : "");
 
   return (
     <span
@@ -186,11 +192,11 @@ export default function CryptoLogo({
       title={name || symbol}
     >
       {initials}
-      {ticker && !failed && (
-        // CoinCap exposes public symbol-based icons and does not require an API key.
+      {imageUrl && !failed && (
+        // DeBank and CoinCap both expose public token icons; no API key is needed.
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={`https://assets.coincap.io/assets/icons/${ticker}@2x.png`}
+          src={imageUrl}
           alt={`${name || symbol} logo`}
           className="crypto-logo-image absolute inset-0 h-full w-full bg-white object-cover"
           loading="lazy"

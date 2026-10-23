@@ -26,26 +26,7 @@ import { parsePriceSource } from "@/lib/market-prices";
 import { getWeb3Wallet, parseWeb3WalletId } from "@/lib/web3-wallets";
 import { saveAssetWalletLogo } from "@/lib/web3-wallets-db";
 import { refreshPricesWithAlerts } from "@/lib/price-refresh";
-import {
-  clearDashboardOrder,
-  clearDashboardStatLabels,
-  clearDashboardStatOrder,
-  clearHoldingsCategoryOrder,
-  clearHoldingsOrder,
-  saveDashboardOrder,
-  saveDashboardStatLabels,
-  saveDashboardStatOrder,
-  saveHoldingsCategoryOrder,
-  saveHoldingsOrder,
-} from "@/lib/dashboard-order-db";
-import { isDashboardBlockKey } from "@/lib/dashboard-layout";
-import {
-  isDashboardStatKey,
-  MAX_DASHBOARD_STAT_LABEL_LENGTH,
-  normaliseDashboardStatLabels,
-  type DashboardStatKey,
-} from "@/lib/dashboard-stats";
-import { isHoldingFilter } from "@/lib/holdings-filter";
+import { clearDashboardLayout, persistDashboardLayout } from "@/lib/dashboard-layout-save";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -356,117 +337,22 @@ export async function deleteAsset(fd: FormData) {
   redirect("/");
 }
 
-function parseDashboardOrder(raw: string): string[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error("Could not read the dashboard layout. Reload the page and try again.");
-  }
-  if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("The dashboard layout is empty.");
-  if (parsed.length > 32) throw new Error("Too many dashboard sections.");
-  const keys = parsed.map((value) => (typeof value === "string" ? value.trim() : ""));
-  if (keys.some((key) => !isDashboardBlockKey(key))) {
-    throw new Error("The dashboard layout contains an unknown section.");
-  }
-  return keys;
-}
-
-function parseDashboardStatOrder(raw: string): string[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error("Could not read the stat card order. Reload the page and try again.");
-  }
-  if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("The stat card order is empty.");
-  if (parsed.length > 16) throw new Error("Too many stat cards.");
-  const keys = parsed.map((value) => (typeof value === "string" ? value.trim() : ""));
-  if (keys.some((key) => !isDashboardStatKey(key))) {
-    throw new Error("The stat card order contains an unknown card.");
-  }
-  return keys;
-}
-
-function parseHoldingCategoryOrder(raw: string): string[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error("Could not read the holdings categories. Reload the page and try again.");
-  }
-  if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("The holdings categories are empty.");
-  if (parsed.length > 16) throw new Error("Too many holdings categories.");
-  const keys = parsed.map((value) => (typeof value === "string" ? value.trim() : ""));
-  if (keys.some((key) => !isHoldingFilter(key))) {
-    throw new Error("The holdings categories contain an unknown category.");
-  }
-  return keys;
-}
-
-/**
- * The row order of the Holdings card: a JSON array of asset ids. An empty array
- * means "no custom order" and clears the saved one.
- */
-function parseHoldingOrder(raw: string): number[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error("Could not read the holdings order. Reload the page and try again.");
-  }
-  if (!Array.isArray(parsed)) throw new Error("Could not read the holdings order.");
-  if (parsed.length > 5000) throw new Error("Too many holdings to arrange.");
-  const ids = parsed.map((value) => (typeof value === "number" ? value : Number(value)));
-  if (ids.some((id) => !Number.isInteger(id) || id <= 0)) {
-    throw new Error("The holdings order contains an unknown asset.");
-  }
-  return ids;
-}
-
-function parseDashboardStatLabels(raw: string): Record<DashboardStatKey, string> {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error("Could not read the stat card labels. Reload the page and try again.");
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Could not read the stat card labels.");
-  }
-  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-    if (!isDashboardStatKey(key)) {
-      throw new Error("The stat card labels contain an unknown card.");
-    }
-    if (typeof value === "string" && value.trim().length > MAX_DASHBOARD_STAT_LABEL_LENGTH) {
-      throw new Error(`Stat card labels must be ${MAX_DASHBOARD_STAT_LABEL_LENGTH} characters or fewer.`);
-    }
-  }
-  return normaliseDashboardStatLabels(parsed);
-}
-
-/** Saves the dashboard card order from the "Arrange layout" mode. */
 export async function saveDashboardLayout(_prev: ActionState, fd: FormData): Promise<ActionState> {
   try {
     await ensureSchema();
-    await saveDashboardOrder(parseDashboardOrder(str(fd, "order")));
-    // The four stat cards are a small list of their own; an older client (or a
-    // form without the field) simply leaves the saved order untouched.
-    const statsOrder = str(fd, "statsOrder");
-    if (statsOrder) await saveDashboardStatOrder(parseDashboardStatOrder(statsOrder));
-    const statsLabels = str(fd, "statsLabels");
-    if (statsLabels) await saveDashboardStatLabels(parseDashboardStatLabels(statsLabels));
-    // The Holdings category tabs are arranged in the same mode; a form without
-    // the field leaves the saved order untouched.
-    const holdingCategories = str(fd, "holdingCategories");
-    if (holdingCategories) {
-      await saveHoldingsCategoryOrder(parseHoldingCategoryOrder(holdingCategories));
-    }
-    // The holdings themselves are arranged in the same mode: a form without the
-    // field (or an empty list) leaves the default order in place.
-    if (fd.has("holdingOrder")) {
-      await saveHoldingsOrder(parseHoldingOrder(str(fd, "holdingOrder")));
-    }
+    await persistDashboardLayout({
+      order: str(fd, "order"),
+      statsOrder: str(fd, "statsOrder") || undefined,
+      statsLabels: str(fd, "statsLabels") || undefined,
+      holdingCategories: str(fd, "holdingCategories") || undefined,
+      // The holdings themselves, their folders and the filing are all optional:
+      // a form without them leaves what is stored untouched.
+      holdingOrder: fd.has("holdingOrder") ? str(fd, "holdingOrder") : undefined,
+      holdingFolders: fd.has("holdingFolders") ? str(fd, "holdingFolders") : undefined,
+      holdingFolderAssignments: fd.has("holdingFolders")
+        ? str(fd, "holdingFolderAssignments") || "{}"
+        : undefined,
+    });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save the dashboard layout" };
   }
@@ -474,14 +360,10 @@ export async function saveDashboardLayout(_prev: ActionState, fd: FormData): Pro
   return { ok: true, message: "Dashboard layout saved.", ts: Date.now() };
 }
 
-/** Restores the default dashboard card order. */
+/** Restores the default dashboard card order, stat cards, tabs and folders. */
 export async function resetDashboardLayout(_prev: ActionState, _fd: FormData): Promise<ActionState> {
   try {
-    await clearDashboardOrder();
-    await clearDashboardStatOrder();
-    await clearDashboardStatLabels();
-    await clearHoldingsCategoryOrder();
-    await clearHoldingsOrder();
+    await clearDashboardLayout();
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not reset the dashboard layout" };
   }
