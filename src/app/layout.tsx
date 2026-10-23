@@ -42,8 +42,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <head><script dangerouslySetInnerHTML={{ __html: themeScript }} /></head>
       <body className="min-h-screen bg-slate-50 text-slate-900 antialiased">
         <PrivacyProvider
-          key={`${privacy.hasPin}-${privacy.locked}-${privacy.hidden}`}
+          key={`${privacy.hasPin}-${privacy.hasPasskey}-${privacy.locked}-${privacy.hidden}`}
           initialHasPin={privacy.hasPin}
+          initialHasPasskey={privacy.hasPasskey}
+          initialPasskeys={privacy.passkeys}
           initialLocked={privacy.locked}
           initialHidden={privacy.hidden}
         >

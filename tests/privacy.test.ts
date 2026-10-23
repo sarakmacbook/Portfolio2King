@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { test } from "node:test";
 import { GET as exportGET } from "../src/app/api/database/export/route";
 import {
@@ -10,12 +11,17 @@ import {
   MASKED_VALUE,
   PRIVACY_COOKIE_NAME,
   PRIVACY_STORAGE_KEY,
+  createPasskeyChallenge,
+  createPasskeyOnlyPrivacyConfig,
   createPrivacyConfig,
   createSessionToken,
+  extractP256SpkiFromAuthData,
   maskSensitiveText,
   parsePrivacyConfig,
   privacyBootScript,
   validatePin,
+  verifyPasskeyAssertion,
+  verifyPasskeyRegistration,
   verifyPin,
   verifySessionToken,
 } from "../src/lib/privacy";
@@ -73,7 +79,122 @@ test("privacyBootScript applies privacy-hidden class before first paint when sto
   assert.equal(classes.has("privacy-hidden"), true);
 });
 
-test("privacy API enforces PIN lock, reveal protection, export guard, and brute-force rate limit", async () => {
+test("WebAuthn Passkey & iPhone Face ID helpers verify P-256 registration, CBOR fallback, and assertions", () => {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", {
+    namedCurve: "P-256",
+  });
+  const spkiDer = publicKey.export({ type: "spki", format: "der" });
+  const spkiBase64url = spkiDer.toString("base64url");
+
+  // Also test CBOR COSE key extraction from authenticatorData (32-byte X and Y at end of 91-byte SPKI)
+  const x = spkiDer.subarray(27, 59);
+  const y = spkiDer.subarray(59, 91);
+  const coseKey = Buffer.concat([
+    Buffer.from([
+      0xa5, // map(5)
+      0x01, 0x02, // 1: 2 (EC2)
+      0x03, 0x26, // 3: -7 (ES256)
+      0x20, 0x01, // -1: 1 (P-256)
+      0x21, 0x58, 0x20, // -2: bstr(32) X
+    ]),
+    x,
+    Buffer.from([0x22, 0x58, 0x20]), // -3: bstr(32) Y
+    y,
+  ]);
+  const rpIdHash = crypto.createHash("sha256").update("app.test").digest();
+  const flagsWithAttestedCred = Buffer.from([0x45]); // UP (0x01) + UV (0x04) + AT (0x40)
+  const signCount = Buffer.alloc(4);
+  const aaguid = Buffer.alloc(16);
+  const credIdBytes = Buffer.from("iphone-faceid-cred-1");
+  const credIdLen = Buffer.alloc(2);
+  credIdLen.writeUInt16BE(credIdBytes.length, 0);
+  const fullAttestedAuthData = Buffer.concat([
+    rpIdHash,
+    flagsWithAttestedCred,
+    signCount,
+    aaguid,
+    credIdLen,
+    credIdBytes,
+    coseKey,
+  ]);
+  assert.equal(
+    extractP256SpkiFromAuthData(fullAttestedAuthData.toString("base64url")),
+    spkiBase64url,
+  );
+
+  // Register passkey via verifyPasskeyRegistration
+  const config = createPasskeyOnlyPrivacyConfig();
+  const regChallenge = createPasskeyChallenge(config.sessionSecret);
+  const regClientData = Buffer.from(
+    JSON.stringify({
+      type: "webauthn.create",
+      challenge: regChallenge.challenge,
+      origin: "https://app.test",
+    }),
+  ).toString("base64url");
+
+  const storedCred = verifyPasskeyRegistration({
+    credentialId: credIdBytes.toString("base64url"),
+    clientDataJSON: regClientData,
+    authenticatorData: fullAttestedAuthData.toString("base64url"),
+    challengeToken: regChallenge.challengeToken,
+    secret: config.sessionSecret,
+    label: "iPhone Face ID / Passkey",
+  });
+  assert.equal(storedCred.publicKeySpki, spkiBase64url);
+  assert.equal(storedCred.label, "iPhone Face ID / Passkey");
+
+  config.passkeys = [storedCred];
+
+  // Create & verify assertion
+  const authChallenge = createPasskeyChallenge(config.sessionSecret);
+  const getClientDataBuf = Buffer.from(
+    JSON.stringify({
+      type: "webauthn.get",
+      challenge: authChallenge.challenge,
+      origin: "https://app.test",
+    }),
+  );
+  const assertionAuthData = Buffer.concat([
+    rpIdHash,
+    Buffer.from([0x05]), // UP + UV
+    Buffer.alloc(4),
+  ]);
+  const clientDataHash = crypto.createHash("sha256").update(getClientDataBuf).digest();
+  const signedPayload = Buffer.concat([assertionAuthData, clientDataHash]);
+  const signature = crypto.sign("sha256", signedPayload, privateKey);
+
+  assert.equal(
+    verifyPasskeyAssertion({
+      credentialId: storedCred.id,
+      clientDataJSON: getClientDataBuf.toString("base64url"),
+      authenticatorData: assertionAuthData.toString("base64url"),
+      signature: signature.toString("base64url"),
+      challengeToken: authChallenge.challengeToken,
+      config,
+      expectedRpId: "app.test",
+    }),
+    true,
+  );
+
+  // Tampered signature must fail
+  const badSig = Buffer.from(signature);
+  badSig[badSig.length - 1] ^= 0xff;
+  assert.equal(
+    verifyPasskeyAssertion({
+      credentialId: storedCred.id,
+      clientDataJSON: getClientDataBuf.toString("base64url"),
+      authenticatorData: assertionAuthData.toString("base64url"),
+      signature: badSig.toString("base64url"),
+      challengeToken: authChallenge.challengeToken,
+      config,
+      expectedRpId: "app.test",
+    }),
+    false,
+  );
+});
+
+test("privacy API enforces PIN lock, Face ID / Passkey lock, reveal protection, export guard, and rate limit", async () => {
   const originalDbUrl = process.env.DATABASE_URL;
   const originalPgUrl = process.env.POSTGRES_URL;
   try {
@@ -95,15 +216,119 @@ test("privacy API enforces PIN lock, reveal protection, export guard, and brute-
       });
     }
 
-    // Initial state has no PIN and is unlocked.
+    // Initial state has no PIN or Passkey and is unlocked.
     const initialRes = await privacyGET(new Request("http://app.test/api/privacy"));
     const initial = await initialRes.json();
     assert.equal(initial.hasPin, false);
+    assert.equal(initial.hasPasskey, false);
     assert.equal(initial.locked, false);
 
     // Cross-origin POST is rejected with 403.
     const crossOrigin = await privacyPOST(req({ action: "hide" }, "", "https://evil.test"));
     assert.equal(crossOrigin.status, 403);
+
+    // Register an iPhone Face ID / Passkey (without needing a PIN) and lock immediately.
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", {
+      namedCurve: "P-256",
+    });
+    const spkiBase64url = publicKey.export({ type: "spki", format: "der" }).toString("base64url");
+    const credentialId = Buffer.from("iphone-face-id-credential").toString("base64url");
+
+    const regOptRes = await privacyPOST(req({ action: "passkeyRegisterOptions" }));
+    assert.equal(regOptRes.status, 200);
+    const regOpt = await regOptRes.json();
+    assert.ok(regOpt.challenge);
+    assert.ok(regOpt.challengeToken);
+
+    const regClientData = Buffer.from(
+      JSON.stringify({
+        type: "webauthn.create",
+        challenge: regOpt.challenge,
+        origin: "http://app.test",
+      }),
+    ).toString("base64url");
+
+    const regRes = await privacyPOST(
+      req({
+        action: "passkeyRegister",
+        credentialId,
+        clientDataJSON: regClientData,
+        publicKeySpki: spkiBase64url,
+        alg: -7,
+        label: "iPhone Face ID / Passkey",
+        challengeToken: regOpt.challengeToken,
+        lockNow: true,
+      }),
+    );
+    assert.equal(regRes.status, 200);
+    const regJson = await regRes.json();
+    assert.equal(regJson.hasPasskey, true);
+    assert.equal(regJson.hasPin, false);
+    assert.equal(regJson.locked, true);
+    assert.equal(regJson.passkeys.length, 1);
+
+    // Unauthenticated visitor sees locked=true when Passkey-only lock is active.
+    const passkeyStranger = await (
+      await privacyGET(new Request("http://app.test/api/privacy"))
+    ).json();
+    assert.equal(passkeyStranger.hasPasskey, true);
+    assert.equal(passkeyStranger.locked, true);
+
+    // Stranger cannot register another passkey while locked.
+    const blockedReg = await privacyPOST(req({ action: "passkeyRegisterOptions" }));
+    assert.equal(blockedReg.status, 401);
+
+    // Unlock using Face ID / Passkey assertion (`passkeyAuthOptions` -> `unlockPasskey`).
+    const authOptRes = await privacyPOST(req({ action: "passkeyAuthOptions" }));
+    assert.equal(authOptRes.status, 200);
+    const authOpt = await authOptRes.json();
+    assert.deepEqual(authOpt.credentialIds, [credentialId]);
+
+    const getClientDataBuf = Buffer.from(
+      JSON.stringify({
+        type: "webauthn.get",
+        challenge: authOpt.challenge,
+        origin: "http://app.test",
+      }),
+    );
+    const authDataBuf = Buffer.concat([
+      crypto.createHash("sha256").update("app.test").digest(),
+      Buffer.from([0x05]),
+      Buffer.alloc(4),
+    ]);
+    const sigBuf = crypto.sign(
+      "sha256",
+      Buffer.concat([
+        authDataBuf,
+        crypto.createHash("sha256").update(getClientDataBuf).digest(),
+      ]),
+      privateKey,
+    );
+
+    const passkeyUnlockRes = await privacyPOST(
+      req({
+        action: "unlockPasskey",
+        credentialId,
+        clientDataJSON: getClientDataBuf.toString("base64url"),
+        authenticatorData: authDataBuf.toString("base64url"),
+        signature: sigBuf.toString("base64url"),
+        challengeToken: authOpt.challengeToken,
+      }),
+    );
+    assert.equal(passkeyUnlockRes.status, 200);
+    const pkCookieHeader = passkeyUnlockRes.headers.get("set-cookie") ?? "";
+    const pkMatch = new RegExp(`${PRIVACY_COOKIE_NAME}=([^;]+)`).exec(pkCookieHeader);
+    assert.ok(pkMatch, "Expected session cookie after Face ID / Passkey unlock");
+    const pkSessionCookie = `${PRIVACY_COOKIE_NAME}=${pkMatch[1]}`;
+
+    // Remove the passkey while unlocked.
+    const removePkRes = await privacyPOST(
+      req({ action: "removePasskey", credentialId }, pkSessionCookie),
+    );
+    assert.equal(removePkRes.status, 200);
+    const removePkJson = await removePkRes.json();
+    assert.equal(removePkJson.hasPasskey, false);
+    assert.equal(removePkJson.locked, false);
 
     // Set a PIN and lock immediately.
     const setRes = await privacyPOST(

@@ -2,9 +2,16 @@ import { sameOrigin } from "@/lib/database-admin";
 import {
   PRIVACY_COOKIE_NAME,
   PRIVACY_HIDDEN_COOKIE_NAME,
+  createPasskeyChallenge,
+  createPasskeyOnlyPrivacyConfig,
   createPrivacyConfig,
   createSessionToken,
+  hasAnyLockConfigured,
+  hasPasskeyConfigured,
+  hasPinConfigured,
   validatePin,
+  verifyPasskeyAssertion,
+  verifyPasskeyRegistration,
   verifyPin,
 } from "@/lib/privacy";
 import {
@@ -19,6 +26,7 @@ export const dynamic = "force-dynamic";
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_WINDOW_MS = 60_000;
+const FALLBACK_REGISTRATION_SECRET = "ledgerly-passkey-registration-bootstrap-secret-v1";
 let failedAttempts: number[] = [];
 
 function isRateLimited(now = Date.now()): boolean {
@@ -103,6 +111,14 @@ export async function POST(request: Request): Promise<Response> {
     currentPin?: unknown;
     lockNow?: unknown;
     keepHidden?: unknown;
+    credentialId?: unknown;
+    clientDataJSON?: unknown;
+    publicKeySpki?: unknown;
+    authenticatorData?: unknown;
+    signature?: unknown;
+    alg?: unknown;
+    label?: unknown;
+    challengeToken?: unknown;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -124,8 +140,7 @@ export async function POST(request: Request): Promise<Response> {
     return buildPrivacyResponse(
       {
         ok: true,
-        hasPin: currentStatus.hasPin,
-        locked: currentStatus.locked,
+        ...currentStatus,
         hidden: true,
       },
       [formatCookie(PRIVACY_HIDDEN_COOKIE_NAME, "1", { maxAge: 60 * 60 * 24 * 365 })],
@@ -133,15 +148,20 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   if (action === "lock") {
-    if (!existingConfig) {
+    if (!existingConfig || !hasAnyLockConfigured(existingConfig)) {
       return buildPrivacyResponse(
-        { error: "Set a PIN or passcode first to lock your portfolio." },
+        { error: "Set a PIN or Face ID / Passkey first to lock your portfolio." },
         [],
         400,
       );
     }
     return buildPrivacyResponse(
-      { ok: true, hasPin: true, locked: true, hidden: true },
+      {
+        ok: true,
+        ...currentStatus,
+        locked: true,
+        hidden: true,
+      },
       [
         formatCookie(PRIVACY_COOKIE_NAME, "", { maxAge: 0, httpOnly: true }),
         formatCookie(PRIVACY_HIDDEN_COOKIE_NAME, "1", { maxAge: 60 * 60 * 24 * 365 }),
@@ -149,8 +169,238 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  if (action === "passkeyRegisterOptions") {
+    if (existingConfig && currentStatus.locked) {
+      if (!hasPinConfigured(existingConfig) || !verifyPin(body.currentPin, existingConfig)) {
+        return buildPrivacyResponse(
+          { error: "Unlock your portfolio or enter your current PIN before adding a passkey." },
+          [],
+          401,
+        );
+      }
+    }
+    const secret = existingConfig?.sessionSecret ?? FALLBACK_REGISTRATION_SECRET;
+    const { challenge, challengeToken } = createPasskeyChallenge(secret);
+    return buildPrivacyResponse(
+      {
+        ok: true,
+        challenge,
+        challengeToken,
+        rpName: "Ledgerly",
+        user: {
+          id: Buffer.from("ledgerly-portfolio-owner").toString("base64url"),
+          name: "owner@ledgerly",
+          displayName: "Ledgerly Portfolio Owner",
+        },
+      },
+      [],
+    );
+  }
+
+  if (action === "passkeyRegister") {
+    if (existingConfig && currentStatus.locked) {
+      if (!hasPinConfigured(existingConfig) || !verifyPin(body.currentPin, existingConfig)) {
+        return buildPrivacyResponse(
+          { error: "Unlock your portfolio or enter your current PIN before adding a passkey." },
+          [],
+          401,
+        );
+      }
+    }
+    const secret = existingConfig?.sessionSecret ?? FALLBACK_REGISTRATION_SECRET;
+    let credential;
+    try {
+      credential = verifyPasskeyRegistration({
+        credentialId: body.credentialId,
+        clientDataJSON: body.clientDataJSON,
+        publicKeySpki: body.publicKeySpki,
+        authenticatorData: body.authenticatorData,
+        alg: body.alg,
+        label: body.label,
+        challengeToken: body.challengeToken,
+        secret,
+      });
+    } catch (error) {
+      return buildPrivacyResponse(
+        { error: error instanceof Error ? error.message : "Could not register passkey." },
+        [],
+        400,
+      );
+    }
+
+    const baseConfig = existingConfig ?? createPasskeyOnlyPrivacyConfig();
+    const existingList = (baseConfig.passkeys ?? []).filter((pk) => pk.id !== credential.id);
+    const updatedConfig = {
+      ...baseConfig,
+      passkeys: [...existingList, credential],
+      updatedAt: new Date().toISOString(),
+    };
+    await savePrivacyConfig(updatedConfig);
+
+    const lockNow = body.lockNow === true;
+    const token = createSessionToken(updatedConfig);
+    const nextStatus = evaluateRequestPrivacyStatus(
+      updatedConfig,
+      lockNow ? null : token,
+      lockNow ? "1" : hiddenCookie,
+    );
+
+    return buildPrivacyResponse(
+      {
+        ok: true,
+        ...nextStatus,
+        message: "Face ID / Passkey enabled.",
+      },
+      lockNow
+        ? [
+            formatCookie(PRIVACY_COOKIE_NAME, "", { maxAge: 0, httpOnly: true }),
+            formatCookie(PRIVACY_HIDDEN_COOKIE_NAME, "1", { maxAge: 60 * 60 * 24 * 365 }),
+          ]
+        : [
+            formatCookie(PRIVACY_COOKIE_NAME, token, {
+              maxAge: 60 * 60 * 24 * 30,
+              httpOnly: true,
+            }),
+          ],
+    );
+  }
+
+  if (action === "passkeyAuthOptions") {
+    if (!existingConfig || !hasPasskeyConfigured(existingConfig)) {
+      return buildPrivacyResponse(
+        { error: "No Face ID or Passkey is registered yet." },
+        [],
+        400,
+      );
+    }
+    const { challenge, challengeToken } = createPasskeyChallenge(existingConfig.sessionSecret);
+    return buildPrivacyResponse(
+      {
+        ok: true,
+        challenge,
+        challengeToken,
+        credentialIds: (existingConfig.passkeys ?? []).map((pk) => pk.id),
+      },
+      [],
+    );
+  }
+
+  if (action === "unlockPasskey" || action === "revealPasskey") {
+    if (!existingConfig || !hasPasskeyConfigured(existingConfig)) {
+      return buildPrivacyResponse(
+        { error: "No Face ID or Passkey is registered." },
+        [],
+        400,
+      );
+    }
+    if (isRateLimited()) {
+      return buildPrivacyResponse(
+        { error: "Too many failed attempts. Please wait a minute and try again." },
+        [],
+        429,
+      );
+    }
+    const valid = verifyPasskeyAssertion({
+      credentialId: body.credentialId,
+      clientDataJSON: body.clientDataJSON,
+      authenticatorData: body.authenticatorData,
+      signature: body.signature,
+      challengeToken: body.challengeToken,
+      config: existingConfig,
+    });
+    if (!valid) {
+      recordFailedAttempt();
+      return buildPrivacyResponse(
+        { error: "Face ID / Passkey verification failed. Please try again." },
+        [],
+        401,
+      );
+    }
+    clearFailedAttempts();
+    const token = createSessionToken(existingConfig);
+    const keepHidden = action === "unlockPasskey" && body.keepHidden === true;
+    const nextStatus = evaluateRequestPrivacyStatus(
+      existingConfig,
+      token,
+      keepHidden ? "1" : "",
+    );
+    return buildPrivacyResponse(
+      { ok: true, ...nextStatus },
+      [
+        formatCookie(PRIVACY_COOKIE_NAME, token, {
+          maxAge: 60 * 60 * 24 * 30,
+          httpOnly: true,
+        }),
+        formatCookie(PRIVACY_HIDDEN_COOKIE_NAME, keepHidden ? "1" : "", {
+          maxAge: keepHidden ? 60 * 60 * 24 * 365 : 0,
+        }),
+      ],
+    );
+  }
+
+  if (action === "removePasskey") {
+    if (!existingConfig) {
+      return buildPrivacyResponse(
+        { ok: true, hasPin: false, hasPasskey: false, passkeys: [], locked: false, hidden: false },
+        [],
+      );
+    }
+    if (currentStatus.locked) {
+      if (!hasPinConfigured(existingConfig) || !verifyPin(body.currentPin, existingConfig)) {
+        return buildPrivacyResponse(
+          { error: "Unlock your portfolio or enter your current PIN to remove a passkey." },
+          [],
+          401,
+        );
+      }
+    }
+    const targetId = typeof body.credentialId === "string" ? body.credentialId.trim() : "";
+    const remaining = targetId
+      ? (existingConfig.passkeys ?? []).filter((pk) => pk.id !== targetId)
+      : [];
+    const updatedConfig = {
+      ...existingConfig,
+      passkeys: remaining,
+      updatedAt: new Date().toISOString(),
+    };
+    if (!hasAnyLockConfigured(updatedConfig)) {
+      await clearPrivacyConfig();
+      return buildPrivacyResponse(
+        {
+          ok: true,
+          hasPin: false,
+          hasPasskey: false,
+          passkeys: [],
+          locked: false,
+          hidden: false,
+          message: "Face ID / Passkey removed.",
+        },
+        [
+          formatCookie(PRIVACY_COOKIE_NAME, "", { maxAge: 0, httpOnly: true }),
+          formatCookie(PRIVACY_HIDDEN_COOKIE_NAME, "", { maxAge: 0 }),
+        ],
+      );
+    }
+    await savePrivacyConfig(updatedConfig);
+    const token = createSessionToken(updatedConfig);
+    const nextStatus = evaluateRequestPrivacyStatus(updatedConfig, token, hiddenCookie);
+    return buildPrivacyResponse(
+      {
+        ok: true,
+        ...nextStatus,
+        message: "Face ID / Passkey removed.",
+      },
+      [
+        formatCookie(PRIVACY_COOKIE_NAME, token, {
+          maxAge: 60 * 60 * 24 * 30,
+          httpOnly: true,
+        }),
+      ],
+    );
+  }
+
   if (action === "reveal") {
-    if (existingConfig) {
+    if (existingConfig && hasAnyLockConfigured(existingConfig)) {
       if (isRateLimited()) {
         return buildPrivacyResponse(
           { error: "Too many incorrect PIN attempts. Please wait a minute and try again." },
@@ -161,15 +411,16 @@ export async function POST(request: Request): Promise<Response> {
       if (!verifyPin(body.pin, existingConfig)) {
         recordFailedAttempt();
         return buildPrivacyResponse(
-          { error: "Enter your PIN to reveal hidden balances." },
+          { error: "Enter your PIN or use Face ID / Passkey to reveal hidden balances." },
           [],
           401,
         );
       }
       clearFailedAttempts();
       const token = createSessionToken(existingConfig);
+      const nextStatus = evaluateRequestPrivacyStatus(existingConfig, token, "");
       return buildPrivacyResponse(
-        { ok: true, hasPin: true, locked: false, hidden: false },
+        { ok: true, ...nextStatus },
         [
           formatCookie(PRIVACY_COOKIE_NAME, token, {
             maxAge: 60 * 60 * 24 * 30,
@@ -180,15 +431,15 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
     return buildPrivacyResponse(
-      { ok: true, hasPin: false, locked: false, hidden: false },
+      { ok: true, hasPin: false, hasPasskey: false, passkeys: [], locked: false, hidden: false },
       [formatCookie(PRIVACY_HIDDEN_COOKIE_NAME, "", { maxAge: 0 })],
     );
   }
 
   if (action === "unlock") {
-    if (!existingConfig) {
+    if (!existingConfig || !hasAnyLockConfigured(existingConfig)) {
       return buildPrivacyResponse(
-        { ok: true, hasPin: false, locked: false, hidden: false },
+        { ok: true, hasPin: false, hasPasskey: false, passkeys: [], locked: false, hidden: false },
         [formatCookie(PRIVACY_HIDDEN_COOKIE_NAME, "", { maxAge: 0 })],
       );
     }
@@ -210,8 +461,13 @@ export async function POST(request: Request): Promise<Response> {
     clearFailedAttempts();
     const token = createSessionToken(existingConfig);
     const keepHidden = body.keepHidden === true;
+    const nextStatus = evaluateRequestPrivacyStatus(
+      existingConfig,
+      token,
+      keepHidden ? "1" : "",
+    );
     return buildPrivacyResponse(
-      { ok: true, hasPin: true, locked: false, hidden: keepHidden },
+      { ok: true, ...nextStatus },
       [
         formatCookie(PRIVACY_COOKIE_NAME, token, {
           maxAge: 60 * 60 * 24 * 30,
@@ -225,7 +481,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   if (action === "setPin") {
-    if (existingConfig) {
+    if (existingConfig && hasPinConfigured(existingConfig)) {
       if (isRateLimited()) {
         return buildPrivacyResponse(
           { error: "Too many incorrect PIN attempts. Please wait a minute and try again." },
@@ -255,17 +511,22 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    const newConfig = createPrivacyConfig(validPin);
+    const newConfig = createPrivacyConfig(validPin, new Date(), existingConfig);
     await savePrivacyConfig(newConfig);
 
     const lockNow = body.lockNow === true;
+    const token = createSessionToken(newConfig);
+    const nextStatus = evaluateRequestPrivacyStatus(
+      newConfig,
+      lockNow ? null : token,
+      lockNow ? "1" : hiddenCookie,
+    );
+
     if (lockNow) {
       return buildPrivacyResponse(
         {
           ok: true,
-          hasPin: true,
-          locked: true,
-          hidden: true,
+          ...nextStatus,
           message: "PIN saved and portfolio locked.",
         },
         [
@@ -275,13 +536,10 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    const token = createSessionToken(newConfig);
     return buildPrivacyResponse(
       {
         ok: true,
-        hasPin: true,
-        locked: false,
-        hidden: currentStatus.hidden,
+        ...nextStatus,
         message: "PIN saved. You can lock your portfolio anytime from the top bar.",
       },
       [
@@ -296,38 +554,65 @@ export async function POST(request: Request): Promise<Response> {
   if (action === "removePin") {
     if (!existingConfig) {
       return buildPrivacyResponse(
-        { ok: true, hasPin: false, locked: false, hidden: false },
+        { ok: true, hasPin: false, hasPasskey: false, passkeys: [], locked: false, hidden: false },
         [],
       );
     }
-    if (isRateLimited()) {
+    if (hasPinConfigured(existingConfig)) {
+      if (isRateLimited()) {
+        return buildPrivacyResponse(
+          { error: "Too many incorrect PIN attempts. Please wait a minute and try again." },
+          [],
+          429,
+        );
+      }
+      if (!verifyPin(body.currentPin, existingConfig)) {
+        recordFailedAttempt();
+        return buildPrivacyResponse(
+          { error: "Current PIN or passcode is incorrect." },
+          [],
+          401,
+        );
+      }
+      clearFailedAttempts();
+    }
+    const updatedConfig = {
+      ...existingConfig,
+      pinEnabled: false,
+      updatedAt: new Date().toISOString(),
+    };
+    if (!hasAnyLockConfigured(updatedConfig)) {
+      await clearPrivacyConfig();
       return buildPrivacyResponse(
-        { error: "Too many incorrect PIN attempts. Please wait a minute and try again." },
-        [],
-        429,
+        {
+          ok: true,
+          hasPin: false,
+          hasPasskey: false,
+          passkeys: [],
+          locked: false,
+          hidden: false,
+          message: "PIN lock removed.",
+        },
+        [
+          formatCookie(PRIVACY_COOKIE_NAME, "", { maxAge: 0, httpOnly: true }),
+          formatCookie(PRIVACY_HIDDEN_COOKIE_NAME, "", { maxAge: 0 }),
+        ],
       );
     }
-    if (!verifyPin(body.currentPin, existingConfig)) {
-      recordFailedAttempt();
-      return buildPrivacyResponse(
-        { error: "Current PIN or passcode is incorrect." },
-        [],
-        401,
-      );
-    }
-    clearFailedAttempts();
-    await clearPrivacyConfig();
+    await savePrivacyConfig(updatedConfig);
+    const token = createSessionToken(updatedConfig);
+    const nextStatus = evaluateRequestPrivacyStatus(updatedConfig, token, hiddenCookie);
     return buildPrivacyResponse(
       {
         ok: true,
-        hasPin: false,
-        locked: false,
-        hidden: false,
-        message: "PIN lock removed.",
+        ...nextStatus,
+        message: "PIN removed. Face ID / Passkey lock remains active.",
       },
       [
-        formatCookie(PRIVACY_COOKIE_NAME, "", { maxAge: 0, httpOnly: true }),
-        formatCookie(PRIVACY_HIDDEN_COOKIE_NAME, "", { maxAge: 0 }),
+        formatCookie(PRIVACY_COOKIE_NAME, token, {
+          maxAge: 60 * 60 * 24 * 30,
+          httpOnly: true,
+        }),
       ],
     );
   }
