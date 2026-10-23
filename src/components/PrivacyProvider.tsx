@@ -17,6 +17,14 @@ import {
   maskSensitiveText,
 } from "@/lib/privacy";
 import type { PasskeySummary } from "@/lib/privacy-db";
+import {
+  forgetRememberedDevice,
+  markLockedOnPurpose,
+  rememberDevice,
+  useRememberedDevice,
+  wasLockedOnPurpose,
+  type RememberedDevice,
+} from "@/lib/device-memory";
 import { Modal } from "./ui";
 
 type DialogMode = "setPin" | "managePin" | "revealPin" | null;
@@ -27,15 +35,22 @@ type PrivacyContextValue = {
   passkeys: PasskeySummary[];
   locked: boolean;
   hidden: boolean;
+  /** Cached record of the last successful unlock on this browser, if any. */
+  rememberedDevice: RememberedDevice | null;
+  /** Caches this browser after a successful Face ID / PIN unlock. */
+  rememberThisDevice: (info?: { credentialId?: string | null; label?: string }) => void;
+  /** Locks the portfolio *and* clears the remembered device. */
+  lockPortfolio: () => Promise<void>;
+  /** Drops the remembered unlock so the next visit is a new device. */
+  forgetDevice: () => Promise<void>;
   openDialog: (mode: Exclude<DialogMode, null>) => void;
   hideBalances: () => Promise<void>;
   requestRevealBalances: () => Promise<void>;
-  lockPortfolio: () => Promise<void>;
 };
 
 const PrivacyContext = createContext<PrivacyContextValue | null>(null);
 
-function usePrivacy() {
+export function usePrivacy() {
   const ctx = useContext(PrivacyContext);
   if (!ctx) throw new Error("usePrivacy must be used within PrivacyProvider");
   return ctx;
@@ -239,6 +254,7 @@ export function PrivacyProvider({
     }
     return false;
   });
+  const rememberedDevice = useRememberedDevice();
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [pinInput, setPinInput] = useState("");
   const [confirmPinInput, setConfirmPinInput] = useState("");
@@ -248,6 +264,14 @@ export function PrivacyProvider({
   const [error, setError] = useState("");
 
   const hasLock = hasPin || hasPasskey;
+
+  /** Caches this browser after any successful Face ID / Passkey / PIN unlock. */
+  const rememberThisDevice = useCallback(
+    (info?: { credentialId?: string | null; label?: string }) => {
+      rememberDevice(info);
+    },
+    [],
+  );
 
   useEffect(() => {
     syncHtmlPrivacyClass(hidden || locked);
@@ -337,6 +361,10 @@ export function PrivacyProvider({
       setLocked(false);
       setHidden(false);
       syncHtmlPrivacyClass(false);
+      rememberThisDevice({
+        credentialId: assertion.credentialId,
+        label: detectPasskeyDeviceLabel(),
+      });
       setDialogMode(null);
       router.refresh();
     } catch (err) {
@@ -350,7 +378,7 @@ export function PrivacyProvider({
     } finally {
       setBusy(false);
     }
-  }, [router]);
+  }, [router, rememberThisDevice]);
 
   const requestRevealBalances = useCallback(async () => {
     if (hasLock) {
@@ -378,6 +406,10 @@ export function PrivacyProvider({
       openDialog("setPin");
       return;
     }
+    // "Remembered until you lock" — an explicit lock forgets this browser and
+    // must not be undone by an automatic Face ID prompt on the lock screen.
+    forgetRememberedDevice();
+    markLockedOnPurpose();
     setLocked(true);
     setHidden(true);
     syncHtmlPrivacyClass(true);
@@ -395,6 +427,27 @@ export function PrivacyProvider({
       // Local lock state is already active.
     }
   }, [hasLock, router]);
+
+  const forgetDevice = useCallback(async () => {
+    forgetRememberedDevice();
+    markLockedOnPurpose();
+    setHidden(true);
+    setLocked(true);
+    syncHtmlPrivacyClass(true);
+    try {
+      await fetch("/api/privacy", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        body: JSON.stringify({ action: "forgetDevice" }),
+      });
+    } catch {
+      // Local forget already applied.
+    }
+    router.refresh();
+  }, [router]);
 
   async function handleRegisterPasskey() {
     setError("");
@@ -460,6 +513,8 @@ export function PrivacyProvider({
       setLocked(Boolean(regData.locked));
       setHidden(Boolean(regData.hidden));
       syncHtmlPrivacyClass(Boolean(regData.hidden || regData.locked));
+      if (regData.locked) forgetRememberedDevice();
+      else rememberThisDevice({ credentialId: registration.credentialId, label: registration.label });
       setDialogMode(null);
       router.refresh();
     } catch (err) {
@@ -642,6 +697,7 @@ export function PrivacyProvider({
       setLocked(false);
       setHidden(false);
       syncHtmlPrivacyClass(false);
+      rememberThisDevice({ label: "PIN / passcode on this device" });
       setDialogMode(null);
       router.refresh();
     } catch (err) {
@@ -659,10 +715,13 @@ export function PrivacyProvider({
         passkeys,
         locked,
         hidden,
+        rememberedDevice,
+        rememberThisDevice,
+        lockPortfolio,
+        forgetDevice,
         openDialog,
         hideBalances,
         requestRevealBalances,
-        lockPortfolio,
       }}
     >
       {children}
@@ -909,98 +968,24 @@ export function PrivacyProvider({
   );
 }
 
-export function PrivacyHeaderControl() {
+function PrivacyLockScreen() {
+  const router = useRouter();
   const {
     hasPin,
     hasPasskey,
-    locked,
-    hidden,
-    openDialog,
-    hideBalances,
-    requestRevealBalances,
-    lockPortfolio,
+    rememberedDevice,
+    rememberThisDevice,
   } = usePrivacy();
-  const hasLock = hasPin || hasPasskey;
-
-  if (locked) {
-    return (
-      <span
-        className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-white/15 px-3 text-xs font-semibold text-white ring-1 ring-white/20"
-        title="Portfolio is locked"
-      >
-        <span aria-hidden="true">🔒</span>
-        <span>Locked</span>
-      </span>
-    );
-  }
-
-  return (
-    <div className="flex items-center gap-1.5">
-      <button
-        type="button"
-        onClick={() => void (hidden ? requestRevealBalances() : hideBalances())}
-        className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-white/15 px-2.5 text-xs font-semibold text-white ring-1 ring-white/20 transition hover:bg-white/10"
-        aria-pressed={hidden}
-        aria-label={hidden ? "Reveal hidden balances" : "Hide portfolio balances"}
-        title={
-          hidden
-            ? hasLock
-              ? "Reveal balances (Face ID / Passkey or PIN required)"
-              : "Show portfolio balances"
-            : "Hide all balances (••••••)"
-        }
-      >
-        <span aria-hidden="true">{hidden ? "🙈" : "👁"}</span>
-        <span className="hidden sm:inline">{hidden ? "Hidden" : "Hide"}</span>
-      </button>
-
-      {hasLock ? (
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => void lockPortfolio()}
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-white/15 px-2.5 text-xs font-semibold text-white ring-1 ring-white/20 transition hover:bg-white/10"
-            aria-label="Lock portfolio now"
-            title="Lock portfolio now (requires Face ID, Passkey, or PIN to view)"
-          >
-            <span aria-hidden="true">🔒</span>
-            <span className="hidden sm:inline">Lock</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => openDialog("managePin")}
-            className="grid h-9 w-9 place-items-center rounded-xl bg-white/15 text-xs text-white ring-1 ring-white/20 transition hover:bg-white/10"
-            aria-label="Manage privacy lock"
-            title="Manage Face ID / Passkey or PIN lock"
-          >
-            {hasPasskey ? "🪪" : "🔑"}
-          </button>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => openDialog("setPin")}
-          className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-white/15 px-2.5 text-xs font-semibold text-white ring-1 ring-white/20 transition hover:bg-white/10"
-          aria-label="Set privacy lock"
-          title="Set Face ID, Passkey, or PIN lock for your portfolio"
-        >
-          <span aria-hidden="true">🔒</span>
-          <span className="hidden sm:inline">Lock setup</span>
-        </button>
-      )}
-    </div>
-  );
-}
-
-function PrivacyLockScreen() {
-  const router = useRouter();
-  const { hasPin, hasPasskey } = usePrivacy();
   const [pin, setPin] = useState("");
   const [keepHidden, setKeepHidden] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /** True once the visitor asks for the PIN fallback instead of Face ID. */
+  const [usePinInstead, setUsePinInstead] = useState(!hasPasskey);
+  const autoPrompted = useRef(false);
+  const passkeyRef = useRef<HTMLButtonElement>(null);
 
-  async function handleUnlockWithPasskey() {
+  async function handleUnlockWithPasskey(options: { silent?: boolean } = {}) {
     setError("");
     setBusy(true);
     try {
@@ -1048,19 +1033,56 @@ function PrivacyLockScreen() {
       }
 
       syncHtmlPrivacyClass(keepHidden);
+      // Remembered in this browser's cache until "Lock now" or "Forget".
+      rememberThisDevice({
+        credentialId: assertion.credentialId,
+        label: detectPasskeyDeviceLabel(),
+      });
       router.refresh();
     } catch (err) {
-      const msg =
-        err instanceof Error && err.name === "NotAllowedError"
-          ? "Face ID / Passkey unlock was cancelled."
-          : err instanceof Error
-            ? err.message
-            : "Face ID / Passkey verification failed.";
-      setError(msg);
+      const notAllowed = err instanceof Error && err.name === "NotAllowedError";
+      if (options.silent) {
+        // Safari refuses a WebAuthn prompt that did not come from a tap, so the
+        // automatic first-visit attempt hands over to the focused button.
+        setError("Tap Unlock with Face ID to continue on this device.");
+      } else if (notAllowed) {
+        setUsePinInstead(Boolean(hasPin));
+        setError(
+          hasPin
+            ? "Face ID was cancelled. Try again, or unlock with your PIN below."
+            : "Face ID was cancelled. Tap the button to try again.",
+        );
+      } else {
+        setError(
+          err instanceof Error ? err.message : "Face ID / Passkey verification failed.",
+        );
+      }
+      passkeyRef.current?.focus();
     } finally {
       setBusy(false);
     }
   }
+
+  /**
+   * First visit on this browser (nothing cached) → ask for Face ID straight
+   * away. Browsers refuse a WebAuthn prompt without a gesture, so the fallback
+   * is a single focused button: Enter or Space unlocks.
+   */
+  useEffect(() => {
+    if (!hasPasskey || rememberedDevice || autoPrompted.current) return;
+    // Tapping "Lock now" or "Forget this device" must not pop Face ID again.
+    if (wasLockedOnPurpose()) {
+      autoPrompted.current = true;
+      return;
+    }
+    autoPrompted.current = true;
+    const id = window.setTimeout(() => {
+      passkeyRef.current?.focus();
+      void handleUnlockWithPasskey({ silent: true });
+    }, 250);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasPasskey, rememberedDevice]);
 
   async function submitUnlock(event: React.FormEvent, unlockHidden: boolean) {
     event.preventDefault();
@@ -1088,6 +1110,7 @@ function PrivacyLockScreen() {
         throw new Error(data.error || "Incorrect PIN or passcode.");
       }
       syncHtmlPrivacyClass(unlockHidden);
+      rememberThisDevice({ label: "PIN / passcode on this device" });
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Incorrect PIN or passcode.");
@@ -1102,21 +1125,20 @@ function PrivacyLockScreen() {
         {hasPasskey ? "🪪" : "🔒"}
       </div>
       <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-        Portfolio is locked
+        {rememberedDevice ? "Welcome back" : "Portfolio is locked"}
       </h1>
       <p className="mt-2 text-sm text-slate-500">
-        Private mode is active. Authenticate with{" "}
-        {hasPasskey && hasPin
-          ? "Face ID / Passkey or your PIN"
+        {rememberedDevice
+          ? `This device was unlocked before (${rememberedDevice.label}). Balances stay remembered in this browser until you tap Lock now or Forget this device.`
           : hasPasskey
-            ? "Face ID or your Passkey"
-            : "your PIN or passcode"}{" "}
-        to view your portfolio.
+            ? "This is a new device, so unlock once with Face ID. This browser remembers you afterwards."
+            : "Private mode is active. Enter your PIN or passcode to view your portfolio."}
       </p>
 
       <div className="mt-6 space-y-4 text-left">
         {hasPasskey && (
           <button
+            ref={passkeyRef}
             type="button"
             onClick={() => void handleUnlockWithPasskey()}
             disabled={busy}
@@ -1126,18 +1148,29 @@ function PrivacyLockScreen() {
           </button>
         )}
 
-        {(hasPin || !hasPasskey) && (
+        {hasPasskey && hasPin && !usePinInstead && (
+          <button
+            type="button"
+            onClick={() => setUsePinInstead(true)}
+            className="w-full text-center text-xs font-medium text-slate-500 underline decoration-slate-300 underline-offset-2 hover:text-slate-700"
+          >
+            Use PIN instead
+          </button>
+        )}
+
+        {(usePinInstead || hasPin || !hasPasskey) && (
           <form
             onSubmit={(e) => void submitUnlock(e, keepHidden)}
             className="space-y-4"
           >
             <div>
               <label className="label" htmlFor="unlock-portfolio-pin">
-                {hasPasskey ? "Or unlock with PIN / passcode" : "PIN / passcode"}
+                {hasPasskey ? "PIN / passcode fallback" : "PIN / passcode"}
               </label>
               <input
                 id="unlock-portfolio-pin"
                 type="password"
+                inputMode="numeric"
                 autoComplete="current-password"
                 className="input text-center text-base tracking-widest"
                 placeholder="••••••"
@@ -1176,22 +1209,19 @@ function PrivacyLockScreen() {
             {error}
           </p>
         )}
+
+        <p className="text-center text-[11px] text-slate-400">
+          {hasPasskey
+            ? "Face ID, Touch ID and Passkeys never leave your device. The unlock is remembered in this browser's cache only."
+            : "The unlock is remembered in this browser's cache until you lock the portfolio."}
+        </p>
       </div>
     </div>
   );
 }
 
 export function PrivacyGate({ children }: { children: ReactNode }) {
-  const {
-    hasPin,
-    hasPasskey,
-    locked,
-    hidden,
-    requestRevealBalances,
-    lockPortfolio,
-    openDialog,
-  } = usePrivacy();
-  const hasLock = hasPin || hasPasskey;
+  const { locked, hidden } = usePrivacy();
   const containerRef = useRef<HTMLDivElement>(null);
   const originalsRef = useRef<WeakMap<Text, string>>(new WeakMap());
 
@@ -1266,15 +1296,26 @@ export function PrivacyGate({ children }: { children: ReactNode }) {
     applyMasking();
     if (!hidden) return;
 
-    const observer = new MutationObserver(() => {
-      applyMasking();
-    });
+    // Coalesce bursts of DOM changes (typing, a menu opening, a refresh) into a
+    // single pass per frame so hidden mode stays smooth on an iPhone.
+    let frame = 0;
+    const schedule = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        applyMasking();
+      });
+    };
+    const observer = new MutationObserver(schedule);
     observer.observe(root, {
       childList: true,
       subtree: true,
       characterData: true,
     });
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (frame) window.cancelAnimationFrame(frame);
+    };
   }, [hidden, locked, children]);
 
   if (locked) {
@@ -1284,44 +1325,14 @@ export function PrivacyGate({ children }: { children: ReactNode }) {
   return (
     <div ref={containerRef}>
       {hidden && (
-        <div className="privacy-exempt mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-indigo-200 bg-indigo-50/60 px-4 py-2.5 text-xs text-slate-700 sm:text-sm">
-          <span className="flex items-center gap-2 font-medium text-indigo-900">
-            <span aria-hidden="true">🙈</span>
-            <span>
-              Hidden mode is on — all balances and quantities are masked (••••••).
-            </span>
+        <p className="privacy-exempt mb-5 flex items-center gap-2 rounded-2xl border border-indigo-200 bg-indigo-50/60 px-4 py-2.5 text-xs font-medium text-indigo-900 sm:text-sm">
+          <span aria-hidden="true">🙈</span>
+          <span>
+            Balances are hidden (••••••). Reveal them from the{" "}
+            <span className="md:hidden">☰ menu</span>
+            <span className="hidden md:inline">Privacy menu</span> in the header.
           </span>
-          <span className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void requestRevealBalances()}
-              className="btn-ghost px-3 py-1 text-xs"
-            >
-              {hasPasskey
-                ? "🪪 Reveal with Face ID / Passkey"
-                : hasPin
-                  ? "🔑 Enter PIN to reveal"
-                  : "👁 Reveal numbers"}
-            </button>
-            {hasLock ? (
-              <button
-                type="button"
-                onClick={() => void lockPortfolio()}
-                className="btn-primary px-3 py-1 text-xs"
-              >
-                🔒 Lock portfolio
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => openDialog("setPin")}
-                className="btn-primary px-3 py-1 text-xs"
-              >
-                🔒 Set Face ID / PIN lock
-              </button>
-            )}
-          </span>
-        </div>
+        </p>
       )}
       {children}
     </div>

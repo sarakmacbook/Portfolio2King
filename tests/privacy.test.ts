@@ -10,6 +10,7 @@ import {
 import {
   MASKED_VALUE,
   PRIVACY_COOKIE_NAME,
+  PRIVACY_DEVICE_MAX_AGE,
   PRIVACY_STORAGE_KEY,
   createPasskeyChallenge,
   createPasskeyOnlyPrivacyConfig,
@@ -380,6 +381,39 @@ test("privacy API enforces PIN lock, Face ID / Passkey lock, reveal protection, 
     ).json();
     assert.equal(unlockedStatus.locked, false);
 
+    // "Remembered until you lock": the unlock cookie outlives a 30-day session
+    // and the response tells the client to cache the device.
+    assert.match(setCookieHeader, new RegExp("Max-Age=" + PRIVACY_DEVICE_MAX_AGE));
+    assert.equal((await unlockRes.clone().json()).remembered, true);
+
+    // Forgetting the device clears the remembered unlock, so the next visit is
+    // treated like a brand-new device and must pass Face ID / PIN again.
+    const forgetRes = await privacyPOST(req({ action: "forgetDevice" }, sessionCookie));
+    assert.equal(forgetRes.status, 200);
+    const forgetJson = await forgetRes.json();
+    assert.equal(forgetJson.remembered, false);
+    assert.equal(forgetJson.locked, true);
+    const forgetCookies = forgetRes.headers.get("set-cookie") ?? "";
+    assert.match(forgetCookies, new RegExp(`${PRIVACY_COOKIE_NAME}=;`));
+    assert.match(forgetCookies, /Max-Age=0/);
+
+    // The browser no longer holds a session cookie, so it looks like a new
+    // device again (the forgotten token itself is not resubmitted).
+    const forgottenStatus = await (
+      await privacyGET(new Request("http://app.test/api/privacy"))
+    ).json();
+    assert.equal(forgottenStatus.locked, true);
+
+    // Re-unlocking issues a fresh remembered session for the rest of the test.
+    resetPrivacyRateLimitForTests();
+    const reUnlock = await privacyPOST(req({ action: "unlock", pin: "9876" }));
+    assert.equal(reUnlock.status, 200);
+    const reMatch = new RegExp(`${PRIVACY_COOKIE_NAME}=([^;]+)`).exec(
+      reUnlock.headers.get("set-cookie") ?? "",
+    );
+    assert.ok(reMatch);
+    const activeSessionCookie = `${PRIVACY_COOKIE_NAME}=${reMatch[1]}`;
+
     // Brute-force wrong PIN attempts trigger HTTP 429 rate limiting.
     resetPrivacyRateLimitForTests();
     for (let i = 0; i < 5; i++) {
@@ -392,13 +426,13 @@ test("privacy API enforces PIN lock, Face ID / Passkey lock, reveal protection, 
     // Removing the PIN requires the current PIN.
     resetPrivacyRateLimitForTests();
     const removeBad = await privacyPOST(
-      req({ action: "removePin", currentPin: "wrong" }, sessionCookie),
+      req({ action: "removePin", currentPin: "wrong" }, activeSessionCookie),
     );
     assert.equal(removeBad.status, 401);
 
     resetPrivacyRateLimitForTests();
     const removeOk = await privacyPOST(
-      req({ action: "removePin", currentPin: "9876" }, sessionCookie),
+      req({ action: "removePin", currentPin: "9876" }, activeSessionCookie),
     );
     assert.equal(removeOk.status, 200);
     const afterRemove = await removeOk.json();

@@ -126,6 +126,15 @@ to its default heading), so Cash can sit last or be renamed to "Dry powder"
 without moving the whole row. Both orders and any custom labels are saved by the
 same **Save layout** click and restored by **Reset to default**.
 
+The **Holdings** category tabs — **All**, **Cash**, **Stocks**, **Stablecoins**,
+**Volatile crypto** and **Other** — are arranged in the same mode. Each tab turns
+into a dashed pill with a grip and **◀ / ▶** buttons (dragging works too) and the
+row wraps instead of scrolling, so every tab stays reachable on a phone. Put
+**Stablecoins** or **Volatile crypto** first if that is what you check every
+morning; the saved order is the order the tabs read in from then on. Arranging
+only changes the order — clicking a tab still filters the table and the total
+above it, and the counts on the tabs still update as holdings change.
+
 Details:
 
 - The layout is stored in `app_settings` under `dashboard.order` as a
@@ -136,6 +145,11 @@ Details:
 - The stat-card order lives beside it under `dashboard.statsOrder`
   (`cash,invested,unrealized,realized` by default), and custom headings live
   under `dashboard.statsLabels` as a JSON map of `{ cash, invested, unrealized, realized }`.
+- The Holdings category order lives beside them under `holdings.categoriesOrder`
+  (`all,cash,stock,stablecoin,volatile,other` by default) and is normalised the
+  same way, so an unknown or half-written setting still renders all six tabs.
+  **Save layout** stores it with the card and stat orders; **Reset to default**
+  clears all three.
 - The two charts stay side by side (Value history 3/5, Allocation 2/5) whenever
   they are next to each other, and full-width cards start a new row. On phones the
   cards stack in the saved order.
@@ -148,8 +162,11 @@ Every screen is built to work on a phone as well as a desktop:
 - **Navigation** keeps **Dashboard** and **Activity** directly in the top bar and
   groups **Exchanges**, **Refresh prices**, **Alerts** and **Database** inside a
   **Settings** submenu (which highlights whenever any of those pages is open);
-  below 768 px the bar collapses into a mobile menu button with an expandable
-  **Settings** section.
+  below 768 px the bar collapses into a single ☰ menu with an expandable
+  **Settings** section. Only one menu is open at a time, it closes on a route
+  change, an outside tap, **Escape**, or when the phone is rotated back to the
+  desktop layout, and it scrolls inside itself instead of running off the
+  screen.
 - **Holdings** switches from a seven-column table to one card per holding below
   768 px, with value, P/L, quantity × price and the weight bar. Sorting moves to a
   **Sort** dropdown because the table header is not visible there.
@@ -160,6 +177,63 @@ Every screen is built to work on a phone as well as a desktop:
 - **Charts** scale to the container width and support touch scrubbing.
 - Long names, notes and totals truncate or wrap instead of pushing the layout
   sideways; inputs use a 16 px font on small screens so iOS does not zoom.
+- **Tap targets** are at least 44 px (menu button, theme toggle, menu rows), taps
+  skip Safari's 300 ms delay, and the sticky header + menu respect the notch and
+  home indicator through `env(safe-area-inset-*)`.
+
+### Hiding and revealing balances
+
+There is exactly **one** control that hides or reveals money, and it lives in the
+navigation menu: **☰ → Privacy** on a phone and **Privacy ▾** in the header on
+desktop (`src/components/PrivacyMenu.tsx`). The header itself has no eye button,
+and the “balances are hidden” notice is informational only — it never offers a
+second toggle that could fall out of sync. The same menu holds **Lock now**,
+**Forget this device** and **Manage Face ID / PIN**; the lock screen still owns
+unlocking, because that is a gate rather than a toggle.
+
+#### First visit: Face ID once, then remembered
+
+When a Face ID / Passkey lock is set up:
+
+1. **A new device** (nothing in its cache) gets the lock screen with an automatic
+   Face ID / Passkey attempt. Safari only shows a WebAuthn prompt after a tap, so
+   the sheet also focuses the **Unlock with Face ID / Passkey** button — one tap
+   or press of Enter unlocks.
+2. A successful unlock is written to two places: an `HttpOnly` session cookie on
+   the server (`ledgerly_privacy_session`, `PRIVACY_DEVICE_MAX_AGE` = 400 days,
+   the longest lifetime browsers accept) **and** a small device record in the
+   browser cache (`ledgerly-privacy-device` in `localStorage`, via
+   `src/lib/device-memory.ts`). The record holds only a credential id, a label
+   and a timestamp — never a PIN hash, token or signature.
+3. Later launches on that device go straight to the dashboard; the lock screen is
+   only shown again after **Lock now** or **Forget this device**, or when the
+   server cookie is gone (cache cleared, private window, other browser).
+4. **PIN fallback:** if the passkey prompt is cancelled or unavailable, “Use PIN
+   instead” reveals the PIN form, so a device without a passkey can still get in.
+   If no PIN is set and Face ID keeps failing, the portfolio stays locked — set a
+   PIN when you enable Face ID if you want a way back in.
+
+5. **Locking does not re-prompt:** tapping **Lock now** or **Forget this device**
+   also sets a tab-scoped lock intent (`sessionStorage`), so the lock screen does
+   not immediately pop Face ID and undo the lock. The first successful unlock
+   clears it again.
+
+Remembering a device is a *convenience* layer, not a second security boundary:
+the server still decides whether a request is unlocked, and `/api/privacy`
+supports `forgetDevice` so the browser can drop it on request.
+
+### Install as an iPhone web clip
+
+Add Ledgerly to the Home Screen from Safari, then open it from the icon:
+
+- `display: "standalone"` + `statusBarStyle: "black-translucent"` with
+  `viewport-fit=cover`, so the header gradient runs under the status bar and the
+  controls are padded down by `env(safe-area-inset-top)`.
+- A sticky header and a fixed-height phone menu (`100dvh` minus the header) keep
+  navigation reachable and scrollable while the page behind it is frozen.
+- The menu surface is opaque in both themes and animates on mount instead of
+  keeping `will-change`/`backface-visibility` alive, which is what used to make
+  Safari paint menu rows outside their own panel.
 
 ## Background refresh and alerts
 

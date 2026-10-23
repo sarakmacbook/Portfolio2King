@@ -5,14 +5,20 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { AssetType } from "@/lib/constants";
 import { TYPE_META, money, pct, pnlColor, qty } from "@/lib/format";
 import {
-  HOLDING_FILTERS,
+  DEFAULT_HOLDING_FILTER_ORDER,
+  categoryFilterLabel,
   getSelectedHoldingFilter,
   matchesHoldingFilter,
+  moveHoldingFilterBy,
+  moveHoldingFilterTo,
+  orderHoldingFilters,
   setSelectedHoldingFilter,
   subscribeHoldingFilter,
   type HoldingFilter,
 } from "@/lib/holdings-filter";
 import CryptoLogo from "./CryptoLogo";
+import GripIcon from "./GripIcon";
+import { useHoldingsArrange } from "./holdings-arrange";
 
 export type HoldingRow = {
   id: number;
@@ -55,11 +61,33 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "value", dir: -1 });
 
+  /**
+   * Inside the dashboard the "Arrange layout" mode owns the category order and
+   * saves it with everything else; on its own the table keeps the default
+   * order and the tabs are simply clickable.
+   */
+  const arrange = useHoldingsArrange();
+  const [localCategoryOrder, setLocalCategoryOrder] =
+    useState<HoldingFilter[]>(DEFAULT_HOLDING_FILTER_ORDER);
+  const arranging = arrange?.arranging ?? false;
+  const categoryOrder = arrange?.categoryOrder ?? localCategoryOrder;
+  const setCategoryOrder = arrange?.onCategoryOrderChange ?? setLocalCategoryOrder;
+  const [dragging, setDragging] = useState<HoldingFilter | null>(null);
+  const [drop, setDrop] = useState<{ key: HoldingFilter; after: boolean } | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+
   useEffect(() => {
     return () => {
       setSelectedHoldingFilter("all");
     };
   }, []);
+
+  // Leaving arrange mode mid-drag must not leave a highlighted drop target.
+  useEffect(() => {
+    if (arranging) return;
+    setDragging(null);
+    setDrop(null);
+  }, [arranging]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: rows.length, stablecoin: 0, volatile: 0 };
@@ -69,6 +97,37 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
     }
     return c;
   }, [rows]);
+
+  /** The category tabs in the arranged order (the default when never moved). */
+  const categories = useMemo(() => orderHoldingFilters(categoryOrder), [categoryOrder]);
+
+  function clearDrag() {
+    setDragging(null);
+    setDrop(null);
+  }
+
+  function moveCategory(key: HoldingFilter, delta: number) {
+    const from = categoryOrder.indexOf(key);
+    const to = Math.max(0, Math.min(categoryOrder.length - 1, from + delta));
+    if (from < 0 || to === from) return;
+    setCategoryOrder(moveHoldingFilterBy(categoryOrder, key, delta));
+    setAnnouncement(
+      `${categoryFilterLabel(key)} tab moved to position ${to + 1} of ${categoryOrder.length}.`,
+    );
+  }
+
+  function handleCategoryDrop() {
+    if (!dragging || !drop || dragging === drop.key) {
+      clearDrag();
+      return;
+    }
+    const next = moveHoldingFilterTo(categoryOrder, dragging, drop.key, drop.after);
+    setCategoryOrder(next);
+    setAnnouncement(
+      `${categoryFilterLabel(dragging)} tab moved to position ${next.indexOf(dragging) + 1} of ${next.length}.`,
+    );
+    clearDrag();
+  }
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -99,24 +158,98 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
 
   return (
     <div>
+      <p aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
       <div className="flex flex-col gap-3 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex gap-1 overflow-x-auto">
-          {HOLDING_FILTERS.map(({ value, label }) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setSelectedHoldingFilter(value)}
-              className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                filter === value ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
-              }`}
-            >
-              {label}
-              <span className={`ml-1.5 text-xs ${filter === value ? "opacity-70" : "text-slate-400"}`}>
-                {counts[value] ?? 0}
-              </span>
-            </button>
-          ))}
-        </div>
+        {arranging ? (
+          /* Arrange mode: every category becomes a draggable pill with ◀ / ▶
+             buttons, wrapping instead of scrolling so each one stays reachable. */
+          <div className="flex flex-wrap items-center gap-1.5">
+            {categories.map(({ value, label }, position) => {
+              const isDragging = dragging === value;
+              const isDropTarget = drop?.key === value && !isDragging;
+              return (
+                <div
+                  key={value}
+                  onDragOver={(event) => {
+                    if (!dragging || dragging === value) return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const after = event.clientX - rect.left > rect.width / 2;
+                    setDrop((current) =>
+                      current?.key === value && current.after === after ? current : { key: value, after },
+                    );
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    handleCategoryDrop();
+                  }}
+                  className={`flex items-center gap-1 rounded-lg border border-dashed border-indigo-300 bg-indigo-50/80 px-2 py-1 ${
+                    isDragging ? "opacity-50" : ""
+                  } ${
+                    isDropTarget ? "ring-2 ring-indigo-400 ring-offset-2 ring-offset-slate-50" : ""
+                  }`}
+                >
+                  <span
+                    draggable
+                    onDragStart={(event) => {
+                      setDragging(value);
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", value);
+                    }}
+                    onDragEnd={clearDrag}
+                    className="flex cursor-grab items-center gap-1.5 whitespace-nowrap text-xs font-medium text-indigo-900 active:cursor-grabbing"
+                    title="Drag to move this category"
+                  >
+                    <GripIcon className="h-3 w-2" />
+                    {label}
+                    <span className="text-[10px] tabular-nums text-indigo-700/70">{counts[value] ?? 0}</span>
+                  </span>
+                  <span className="flex">
+                    <button
+                      type="button"
+                      className="grid h-5 w-5 place-items-center rounded text-[10px] text-indigo-700 hover:bg-white disabled:opacity-30"
+                      onClick={() => moveCategory(value, -1)}
+                      disabled={position === 0}
+                      aria-label={`Move ${label} left`}
+                    >
+                      ◀
+                    </button>
+                    <button
+                      type="button"
+                      className="grid h-5 w-5 place-items-center rounded text-[10px] text-indigo-700 hover:bg-white disabled:opacity-30"
+                      onClick={() => moveCategory(value, 1)}
+                      disabled={position === categories.length - 1}
+                      aria-label={`Move ${label} right`}
+                    >
+                      ▶
+                    </button>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="tab-strip -mx-1 flex gap-1 overflow-x-auto px-1">
+            {categories.map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setSelectedHoldingFilter(value)}
+                className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                  filter === value ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                {label}
+                <span className={`ml-1.5 text-xs ${filter === value ? "opacity-70" : "text-slate-400"}`}>
+                  {counts[value] ?? 0}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <input
             className="input min-w-0 sm:max-w-56"
