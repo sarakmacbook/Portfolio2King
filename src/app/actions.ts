@@ -460,3 +460,93 @@ export async function resetDashboardLayout(_prev: ActionState, _fd: FormData): P
   refresh();
   return { ok: true, message: "Dashboard layout reset to the default.", ts: Date.now() };
 }
+
+export async function importWalletBalances(input: {
+  address: string;
+  walletLogo?: string;
+  priceSource?: string;
+  balances: Array<{
+    symbol: string;
+    name: string;
+    chainLabel: string;
+    quantity: number;
+    price: number;
+    category: CryptoCategory;
+    contract: string | null;
+  }>;
+}): Promise<{ ok: boolean; importedCount: number; error?: string }> {
+  try {
+    await ensureSchema();
+    const address = String(input.address ?? "").trim();
+    if (!address) throw new Error("Wallet address is required.");
+    const items = Array.isArray(input.balances) ? input.balances : [];
+    if (items.length === 0) {
+      throw new Error("No wallet balances selected to import.");
+    }
+
+    const walletLogo = parseWeb3WalletId(input.walletLogo ?? "");
+    const priceSource = parsePriceSource(input.priceSource ?? "");
+    const d = today();
+    const shortAddr =
+      address.length > 14 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
+    let importedCount = 0;
+
+    for (const item of items.slice(0, 50)) {
+      const symbol = String(item.symbol ?? "").trim().toUpperCase();
+      const name = String(item.name ?? symbol).trim();
+      const quantity = Number(item.quantity);
+      const price = Number(item.price);
+      if (!symbol || !Number.isFinite(quantity) || quantity <= 0) continue;
+      const safePrice = Number.isFinite(price) && price > 0 ? price : 1;
+      const cryptoCategory: CryptoCategory =
+        CRYPTO_CATEGORIES.includes(item.category) ? item.category : "volatile";
+      const notes = `Wallet: ${address} (${shortAddr}) · Chain: ${item.chainLabel}${
+        item.contract ? ` · Contract: ${item.contract}` : ""
+      }`;
+
+      const [row] = await db
+        .insert(assets)
+        .values({
+          type: "crypto",
+          name: name || symbol,
+          symbol,
+          cryptoCategory,
+          priceSource,
+          currentPrice: safePrice,
+          notes,
+        })
+        .returning({ id: assets.id });
+
+      await db.insert(transactions).values({
+        assetId: row.id,
+        kind: "buy",
+        quantity,
+        price: safePrice,
+        fee: 0,
+        date: d,
+        note: `Imported from wallet ${shortAddr} (${item.chainLabel})`,
+      });
+      await recomputeAsset(row.id);
+      await recordAssetPriceSnapshot(row.id, d, safePrice, false);
+      if (walletLogo) {
+        await saveAssetWalletLogo(row.id, walletLogo);
+      }
+      importedCount += 1;
+    }
+
+    if (importedCount === 0) {
+      throw new Error("No non-zero balances could be imported from that wallet.");
+    }
+
+    await recordSnapshot();
+    refresh();
+    return { ok: true, importedCount };
+  } catch (e) {
+    return {
+      ok: false,
+      importedCount: 0,
+      error: e instanceof Error ? e.message : "Could not import wallet balances",
+    };
+  }
+}
+
