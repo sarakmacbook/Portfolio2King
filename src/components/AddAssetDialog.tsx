@@ -12,6 +12,7 @@ import type { CryptoCategory } from "@/db/schema";
 import { TYPE_META, money } from "@/lib/format";
 import { playMoneyChimeFromGesture } from "@/lib/sounds";
 import { CAMBODIAN_BANKS, CUSTOM_BANK, type CambodianBank } from "@/lib/cambodian-banks";
+import type { DiscoveredStock } from "@/lib/stock-search";
 import {
   WEB3_WALLETS,
   getWeb3Wallet,
@@ -96,6 +97,15 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
   const [discovering, setDiscovering] = useState(false);
   const [discoveryError, setDiscoveryError] = useState("");
   const [topSource, setTopSource] = useState("");
+  const [stockQuery, setStockQuery] = useState("");
+  const [stockResults, setStockResults] = useState<DiscoveredStock[]>([]);
+  const [scanningStocks, setScanningStocks] = useState(false);
+  const [stockScanError, setStockScanError] = useState("");
+  const [stockSource, setStockSource] = useState("");
+  const [stockQuoteState, setStockQuoteState] = useState<{
+    status: "idle" | "loading" | "ok" | "error";
+    message: string;
+  }>({ status: "idle", message: "" });
   const [customBankSelected, setCustomBankSelected] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const isCash = type === "cash";
@@ -125,6 +135,79 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
       setDiscoveryError(error instanceof Error ? error.message : "Could not search crypto assets");
     } finally {
       setDiscovering(false);
+    }
+  }
+
+  async function discoverStocks(query = "") {
+    setScanningStocks(true);
+    setStockScanError("");
+    try {
+      const response = await fetch(
+        `/api/prices/stocks${query.trim() ? `?q=${encodeURIComponent(query.trim())}` : ""}`,
+      );
+      const data = (await response.json()) as {
+        error?: string;
+        assets?: DiscoveredStock[];
+        source?: string;
+      };
+      if (!response.ok) throw new Error(data.error || "Could not scan stock assets");
+      setStockResults(data.assets || []);
+      setStockSource(data.source || "");
+      if (query.trim() && !data.assets?.length) {
+        setStockScanError("No matching stock or ETF found. Try a ticker like AAPL, NVDA, VOO, or 7203.T.");
+      }
+    } catch (error) {
+      setStockScanError(error instanceof Error ? error.message : "Could not scan stock assets");
+    } finally {
+      setScanningStocks(false);
+    }
+  }
+
+  async function fetchSingleStockQuote(symbolOverride?: string) {
+    const ticker = (symbolOverride ?? symbol).trim();
+    if (!ticker) {
+      setStockQuoteState({ status: "error", message: "Type or pick a stock symbol first, e.g. AAPL." });
+      return;
+    }
+    setStockQuoteState({ status: "loading", message: "" });
+    try {
+      const response = await fetch(
+        `/api/prices/stocks?symbol=${encodeURIComponent(ticker)}`,
+      );
+      const data = (await response.json()) as {
+        price?: number;
+        exchange?: string;
+        currency?: string;
+        error?: string;
+      };
+      if (!response.ok || typeof data.price !== "number") {
+        throw new Error(data.error || "Could not fetch a live quote");
+      }
+      setCurrentPrice(String(data.price));
+      setStockQuoteState({
+        status: "ok",
+        message: `Yahoo Finance${data.exchange ? ` · ${data.exchange}` : ""} · USD · ${money(data.price)}`,
+      });
+    } catch (error) {
+      setStockQuoteState({
+        status: "error",
+        message: error instanceof Error ? error.message : "Could not fetch a live stock quote",
+      });
+    }
+  }
+
+  function chooseStock(stock: DiscoveredStock) {
+    setName(stock.name);
+    setSymbol(stock.symbol);
+    if (stock.price !== null && stock.price > 0) {
+      setCurrentPrice(String(stock.price));
+      setStockQuoteState({
+        status: "ok",
+        message: `${stock.exchange || "Yahoo Finance"} · USD · ${money(stock.price)}`,
+      });
+    } else {
+      setStockQuoteState({ status: "idle", message: "" });
+      void fetchSingleStockQuote(stock.symbol);
     }
   }
 
@@ -237,6 +320,131 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
           </button>
         ))}
       </div>
+
+      {type === "stock" && (
+        <div className="space-y-3">
+          <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Find any stock or ETF</p>
+                <p className="text-xs text-slate-500">
+                  Scan by company name or ticker across US &amp; international markets (e.g. Apple, AAPL, NVDA, VOO, 7203.T).
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn-ghost text-xs"
+                onClick={() => void fetchSingleStockQuote()}
+                disabled={stockQuoteState.status === "loading"}
+              >
+                {stockQuoteState.status === "loading" ? "Fetching…" : "Fetch live quote"}
+              </button>
+            </div>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <div className="relative min-w-0 flex-1">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                >
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="m20 20-4-4" />
+                </svg>
+                <input
+                  className="input pl-9"
+                  value={stockQuery}
+                  onChange={(event) => setStockQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void discoverStocks(stockQuery);
+                    }
+                  }}
+                  placeholder="Apple, AAPL, NVDA, S&P 500, VOO, 7203.T…"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </div>
+              <button
+                type="button"
+                className="btn-primary shrink-0"
+                onClick={() => void discoverStocks(stockQuery)}
+                disabled={scanningStocks || !stockQuery.trim()}
+              >
+                {scanningStocks ? "Scanning…" : "Scan"}
+              </button>
+              <button
+                type="button"
+                className="btn-ghost shrink-0"
+                onClick={() => {
+                  setStockQuery("");
+                  void discoverStocks("");
+                }}
+                disabled={scanningStocks}
+              >
+                Top stocks
+              </button>
+            </div>
+            {stockScanError && <p className="mt-2 text-xs text-rose-600">{stockScanError}</p>}
+            {stockSource && !stockScanError && (
+              <p className="mt-2 text-xs text-slate-400">
+                {stockSource === "yahoo"
+                  ? "Live quotes via Yahoo Finance · converted to USD automatically"
+                  : "Matched from built-in stock & ETF directory · select an asset to load its quote"}
+              </p>
+            )}
+            {stockQuoteState.status === "error" && (
+              <p className="mt-2 text-xs font-medium text-rose-600">{stockQuoteState.message}</p>
+            )}
+            {stockQuoteState.status === "ok" && (
+              <p className="mt-2 text-xs font-medium text-emerald-600">{stockQuoteState.message}</p>
+            )}
+            {stockResults.length > 0 && (
+              <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                {stockResults.map((stock) => (
+                  <button
+                    key={stock.symbol}
+                    type="button"
+                    onClick={() => chooseStock(stock)}
+                    className={`min-w-32 rounded-xl border px-3 py-2 text-left transition ${
+                      symbol === stock.symbol
+                        ? "border-indigo-500 bg-white ring-2 ring-indigo-100"
+                        : "border-slate-200 bg-white hover:border-indigo-300"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <span
+                        className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[10px] font-bold text-white"
+                        style={{ background: TYPE_META.stock.color }}
+                      >
+                        {stock.symbol.slice(0, 4)}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[10px] text-slate-400">
+                          {stock.kind}
+                          {stock.exchange ? ` · ${stock.exchange}` : ""}
+                        </span>
+                        <span className="block truncate font-semibold text-slate-900">
+                          {stock.symbol}
+                        </span>
+                      </span>
+                    </span>
+                    <span className="mt-1 block max-w-36 truncate text-xs text-slate-600">
+                      {stock.name}
+                    </span>
+                    <span className="mt-0.5 block text-xs font-medium text-slate-500">
+                      {stock.price !== null ? money(stock.price) : "Tap to quote"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {type === "crypto" && (
         <div className="space-y-3">
