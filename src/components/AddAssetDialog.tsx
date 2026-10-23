@@ -1,7 +1,8 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useActionState, useRef, useState } from "react";
-import { createAsset, type ActionState } from "@/app/actions";
+import { createAsset, importWalletBalances, type ActionState } from "@/app/actions";
 import { ASSET_TYPES, type AssetType } from "@/lib/constants";
 import {
   CEX_PROVIDERS,
@@ -9,10 +10,16 @@ import {
   type PriceProvider,
 } from "@/lib/market-prices";
 import type { CryptoCategory } from "@/db/schema";
-import { TYPE_META, money } from "@/lib/format";
+import { TYPE_META, money, qty } from "@/lib/format";
 import { playMoneyChimeFromGesture } from "@/lib/sounds";
 import { CAMBODIAN_BANKS, CUSTOM_BANK, type CambodianBank } from "@/lib/cambodian-banks";
 import type { DiscoveredStock } from "@/lib/stock-search";
+import {
+  WALLET_CHAINS,
+  WALLET_CHAIN_LABELS,
+  type ScannedWalletBalance,
+  type WalletChain,
+} from "@/lib/wallet-scanner";
 import {
   WEB3_WALLETS,
   getWeb3Wallet,
@@ -66,13 +73,28 @@ export default function AddAssetDialog({
         {label}
       </button>
       <Modal open={open} onClose={() => setOpen(false)} title="Add holding" wide>
-        {open && <AddAssetForm cashAccounts={cashAccounts} defaultType={defaultType} />}
+        {open && (
+          <AddAssetForm
+            cashAccounts={cashAccounts}
+            defaultType={defaultType}
+            onDone={() => setOpen(false)}
+          />
+        )}
       </Modal>
     </>
   );
 }
 
-function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount[]; defaultType: AssetType }) {
+function AddAssetForm({
+  cashAccounts,
+  defaultType,
+  onDone,
+}: {
+  cashAccounts: CashAccount[];
+  defaultType: AssetType;
+  onDone?: () => void;
+}) {
+  const router = useRouter();
   const [state, action] = useActionState<ActionState, FormData>(createAsset, {});
   const [type, setType] = useState<AssetType>(defaultType);
   const [cryptoCategory, setCryptoCategory] = useState<CryptoCategory>("volatile");
@@ -106,6 +128,14 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
     status: "idle" | "loading" | "ok" | "error";
     message: string;
   }>({ status: "idle", message: "" });
+  const [walletAddress, setWalletAddress] = useState("");
+  const [walletChain, setWalletChain] = useState<WalletChain>("auto");
+  const [walletBalances, setWalletBalances] = useState<ScannedWalletBalance[]>([]);
+  const [scanningWallet, setScanningWallet] = useState(false);
+  const [walletScanError, setWalletScanError] = useState("");
+  const [walletScanDone, setWalletScanDone] = useState(false);
+  const [importingWallet, setImportingWallet] = useState(false);
+  const [walletImportMessage, setWalletImportMessage] = useState("");
   const [customBankSelected, setCustomBankSelected] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const isCash = type === "cash";
@@ -208,6 +238,91 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
     } else {
       setStockQuoteState({ status: "idle", message: "" });
       void fetchSingleStockQuote(stock.symbol);
+    }
+  }
+
+  async function scanWallet() {
+    const trimmed = walletAddress.trim();
+    if (!trimmed) {
+      setWalletScanError("Paste a wallet address first (0x…, Solana, bc1…, or T…).");
+      return;
+    }
+    setScanningWallet(true);
+    setWalletScanError("");
+    setWalletImportMessage("");
+    setWalletScanDone(false);
+    try {
+      const params = new URLSearchParams({ address: trimmed, chain: walletChain });
+      const response = await fetch(`/api/wallet/scan?${params.toString()}`);
+      const data = (await response.json()) as {
+        error?: string;
+        balances?: ScannedWalletBalance[];
+      };
+      if (!response.ok) {
+        throw new Error(data.error || "Could not scan that wallet address.");
+      }
+      const list = data.balances || [];
+      setWalletBalances(list);
+      setWalletScanDone(true);
+      if (list.length === 0) {
+        setWalletScanError("No non-zero balances found on that wallet address.");
+      } else if (list.length === 1) {
+        chooseWalletBalance(list[0], trimmed);
+      }
+    } catch (error) {
+      setWalletScanError(
+        error instanceof Error ? error.message : "Could not scan that wallet address.",
+      );
+    } finally {
+      setScanningWallet(false);
+    }
+  }
+
+  function chooseWalletBalance(item: ScannedWalletBalance, addrOverride?: string) {
+    const addr = (addrOverride ?? walletAddress).trim();
+    const shortAddr = addr.length > 14 ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : addr;
+    setName(item.name);
+    setSymbol(item.symbol);
+    setQ(String(item.quantity));
+    if (item.price > 0) {
+      setCurrentPrice(String(item.price));
+      setCost(String(item.price));
+    }
+    setCryptoCategory(item.category);
+    setNotes(
+      `Wallet: ${addr}${shortAddr ? ` (${shortAddr})` : ""} · Chain: ${item.chainLabel}${
+        item.contract ? ` · Contract: ${item.contract}` : ""
+      }`,
+    );
+  }
+
+  async function handleImportAllWalletBalances() {
+    if (walletBalances.length === 0) return;
+    setImportingWallet(true);
+    setWalletScanError("");
+    setWalletImportMessage("");
+    try {
+      const result = await importWalletBalances({
+        address: walletAddress.trim(),
+        walletLogo,
+        priceSource,
+        balances: walletBalances,
+      });
+      if (!result.ok) {
+        throw new Error(result.error || "Could not import wallet balances.");
+      }
+      playMoneyChimeFromGesture();
+      setWalletImportMessage(
+        `Imported ${result.importedCount} holding${result.importedCount === 1 ? "" : "s"} from wallet.`,
+      );
+      router.refresh();
+      onDone?.();
+    } catch (error) {
+      setWalletScanError(
+        error instanceof Error ? error.message : "Could not import wallet balances.",
+      );
+    } finally {
+      setImportingWallet(false);
     }
   }
 
@@ -560,6 +675,122 @@ function AddAssetForm({ cashAccounts, defaultType }: { cashAccounts: CashAccount
               Use the coin&apos;s own logo or pick a Web3 wallet logo like MetaMask, Phantom, or OKX Web3.
             </p>
           </div>
+
+          <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Add via wallet address</p>
+                <p className="text-xs text-slate-500">
+                  Paste your public wallet address (Ethereum / EVM 0x…, Solana, Bitcoin bc1…, or Tron T…) to scan on-chain balances.
+                </p>
+              </div>
+              {walletBalances.length > 0 && (
+                <button
+                  type="button"
+                  className="btn-primary text-xs"
+                  onClick={() => void handleImportAllWalletBalances()}
+                  disabled={importingWallet}
+                >
+                  {importingWallet
+                    ? "Importing…"
+                    : `Import all (${walletBalances.length}) to portfolio`}
+                </button>
+              )}
+            </div>
+
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <div className="min-w-0 flex-1">
+                <input
+                  className="input"
+                  value={walletAddress}
+                  onChange={(event) => setWalletAddress(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void scanWallet();
+                    }
+                  }}
+                  placeholder="0x… (Ethereum, BNB, Base, Arbitrum, Polygon), Solana, bc1…, or T…"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </div>
+              <select
+                className="input sm:w-36"
+                value={walletChain}
+                onChange={(event) => setWalletChain(event.target.value as WalletChain)}
+                aria-label="Wallet blockchain"
+              >
+                {WALLET_CHAINS.map((c) => (
+                  <option key={c} value={c}>
+                    {WALLET_CHAIN_LABELS[c]}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn-primary shrink-0"
+                onClick={() => void scanWallet()}
+                disabled={scanningWallet || !walletAddress.trim()}
+              >
+                {scanningWallet ? "Scanning…" : "Scan wallet"}
+              </button>
+            </div>
+
+            {walletScanError && (
+              <p className="mt-2 text-xs text-rose-600">{walletScanError}</p>
+            )}
+            {walletImportMessage && (
+              <p className="mt-2 text-xs font-medium text-emerald-600">
+                {walletImportMessage}
+              </p>
+            )}
+            {walletScanDone && !walletScanError && walletBalances.length > 0 && (
+              <div className="mt-3 space-y-2">
+                <p className="text-xs text-slate-500">
+                  Found {walletBalances.length} on-chain balance{walletBalances.length === 1 ? "" : "s"} · click a token to fill the form below, or click <strong>Import all</strong> above.
+                </p>
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {walletBalances.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => chooseWalletBalance(item)}
+                      className={`min-w-36 rounded-xl border px-3 py-2 text-left transition ${
+                        symbol === item.symbol && q === String(item.quantity)
+                          ? "border-indigo-500 bg-white ring-2 ring-indigo-100"
+                          : "border-slate-200 bg-white hover:border-indigo-300"
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <CryptoLogo
+                          symbol={item.symbol}
+                          name={item.name}
+                          wallet={walletLogo}
+                          className="h-8 w-8 rounded-lg"
+                        />
+                        <span className="min-w-0">
+                          <span className="block text-[10px] text-slate-400">
+                            {item.chainLabel}
+                          </span>
+                          <span className="block truncate font-semibold text-slate-900">
+                            {item.symbol}
+                          </span>
+                        </span>
+                      </span>
+                      <span className="mt-1 block text-xs font-medium tabular-nums text-slate-700">
+                        {qty(item.quantity)} {item.symbol}
+                      </span>
+                      <span className="mt-0.5 block text-xs tabular-nums text-slate-500">
+                        {money(item.valueUsd)} ({money(item.price)})
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3">
           <div>
             <p className="text-sm font-semibold text-slate-900">Find any crypto asset</p>
