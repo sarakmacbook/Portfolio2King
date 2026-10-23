@@ -221,7 +221,7 @@ html.dark .bg-slate-900 .text-slate-100 { color: inherit; }
 html.dark .bg-slate-900 .text-slate-200,
 html.dark .bg-slate-900 .text-slate-300,
 html.dark .bg-slate-900 .text-slate-400 { color: inherit; opacity: 0.72; }
-html.dark .bg-indigo-50, html.dark .bg-indigo-50\/40, html.dark .bg-indigo-50\/50, html.dark .bg-indigo-50\/60, html.dark .bg-indigo-50\/80 { background-color: rgb(124 58 237 / .12); }
+html.dark .bg-indigo-50, html.dark .bg-indigo-50\/40, html.dark .bg-indigo-50\/50, html.dark .bg-indigo-50\/60, html.dark .bg-indigo-50\/70, html.dark .bg-indigo-50\/80 { background-color: rgb(124 58 237 / .12); }
 html.dark .bg-emerald-50, html.dark .bg-emerald-50\/60 { background-color: rgb(16 185 129 / .09); }
 html.dark .bg-rose-50, html.dark .bg-rose-50\/60, html.dark .hover\:bg-rose-50:hover { background-color: rgb(244 63 94 / .09); }
 html.dark .bg-amber-50 { background-color: rgb(245 158 11 / .09); }
