@@ -1,3 +1,11 @@
+/**
+ * The Holdings category tabs: which rows they match, which one is selected
+ * (shared by the table and the value header through a tiny store), and the
+ * order the tabs are arranged in.
+ *
+ * The ordering helpers are pure — see tests/holdings-categories.test.ts.
+ */
+import { isKeyOf, moveKeyBy, moveKeyTo, normaliseKeyOrder } from "@/lib/order-list";
 import type { AssetType } from "@/lib/constants";
 
 export type HoldingFilter = AssetType | "all" | "stablecoin" | "volatile";
@@ -17,6 +25,54 @@ export const HOLDING_FILTERS: Array<{ value: HoldingFilter; label: string }> = [
   { value: "volatile", label: "Volatile crypto" },
   { value: "other", label: "Other" },
 ];
+
+/** Every category key, in the default left-to-right order of the tab row. */
+export const HOLDING_FILTER_KEYS: readonly HoldingFilter[] = HOLDING_FILTERS.map((item) => item.value);
+
+/** "All" first, then cash, stocks, the two crypto buckets and other assets. */
+export const DEFAULT_HOLDING_FILTER_ORDER: HoldingFilter[] = [...HOLDING_FILTER_KEYS];
+
+export function isHoldingFilter(value: unknown): value is HoldingFilter {
+  return isKeyOf(value, HOLDING_FILTER_KEYS);
+}
+
+/**
+ * Accepts a stored value — comma string, JSON array, or array — and returns a
+ * complete, duplicate-free, known-only category order.
+ */
+export function normaliseHoldingFilterOrder(value: unknown): HoldingFilter[] {
+  return normaliseKeyOrder(value, HOLDING_FILTER_KEYS);
+}
+
+/** The category tabs (key + label) in a saved order, ready to render. */
+export function orderHoldingFilters(
+  order: readonly HoldingFilter[],
+): Array<{ value: HoldingFilter; label: string }> {
+  const labels = new Map(HOLDING_FILTERS.map((item) => [item.value, item.label]));
+  return normaliseHoldingFilterOrder(order).map((value) => ({
+    value,
+    label: labels.get(value) ?? value,
+  }));
+}
+
+/** Moves one category left (-1) or right (+1); clamped at the ends. */
+export function moveHoldingFilterBy(
+  order: readonly HoldingFilter[],
+  key: HoldingFilter,
+  delta: number,
+): HoldingFilter[] {
+  return moveKeyBy(order, key, delta);
+}
+
+/** Moves `key` so it lands before or after `overKey` (drag-and-drop). */
+export function moveHoldingFilterTo(
+  order: readonly HoldingFilter[],
+  key: HoldingFilter,
+  overKey: HoldingFilter,
+  after: boolean,
+): HoldingFilter[] {
+  return moveKeyTo(order, key, overKey, after);
+}
 
 export function matchesHoldingFilter(
   row: Pick<FilterableHolding, "type" | "cryptoCategory">,

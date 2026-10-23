@@ -1,9 +1,9 @@
 /**
  * Small helpers shared by every "move this up/down" list in the app
- * (holding categories, dashboard cards, allocation slices).
+ * (dashboard cards, stat cards, holding categories).
  *
- * Pure functions only — see tests/holdings-groups.test.ts and
- * tests/dashboard-layout.test.ts.
+ * Pure functions only — see tests/dashboard-layout.test.ts and
+ * tests/holdings-categories.test.ts.
  */
 
 export function isKeyOf<K extends string>(value: unknown, keys: readonly K[]): value is K {

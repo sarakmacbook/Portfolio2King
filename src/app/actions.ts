@@ -28,9 +28,11 @@ import {
   clearDashboardOrder,
   clearDashboardStatLabels,
   clearDashboardStatOrder,
+  clearHoldingsCategoryOrder,
   saveDashboardOrder,
   saveDashboardStatLabels,
   saveDashboardStatOrder,
+  saveHoldingsCategoryOrder,
 } from "@/lib/dashboard-order-db";
 import { isDashboardBlockKey } from "@/lib/dashboard-layout";
 import {
@@ -39,6 +41,7 @@ import {
   normaliseDashboardStatLabels,
   type DashboardStatKey,
 } from "@/lib/dashboard-stats";
+import { isHoldingFilter } from "@/lib/holdings-filter";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -372,6 +375,22 @@ function parseDashboardStatOrder(raw: string): string[] {
   return keys;
 }
 
+function parseHoldingCategoryOrder(raw: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("Could not read the holdings categories. Reload the page and try again.");
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("The holdings categories are empty.");
+  if (parsed.length > 16) throw new Error("Too many holdings categories.");
+  const keys = parsed.map((value) => (typeof value === "string" ? value.trim() : ""));
+  if (keys.some((key) => !isHoldingFilter(key))) {
+    throw new Error("The holdings categories contain an unknown category.");
+  }
+  return keys;
+}
+
 function parseDashboardStatLabels(raw: string): Record<DashboardStatKey, string> {
   let parsed: unknown;
   try {
@@ -404,6 +423,12 @@ export async function saveDashboardLayout(_prev: ActionState, fd: FormData): Pro
     if (statsOrder) await saveDashboardStatOrder(parseDashboardStatOrder(statsOrder));
     const statsLabels = str(fd, "statsLabels");
     if (statsLabels) await saveDashboardStatLabels(parseDashboardStatLabels(statsLabels));
+    // The Holdings category tabs are arranged in the same mode; a form without
+    // the field leaves the saved order untouched.
+    const holdingCategories = str(fd, "holdingCategories");
+    if (holdingCategories) {
+      await saveHoldingsCategoryOrder(parseHoldingCategoryOrder(holdingCategories));
+    }
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save the dashboard layout" };
   }
@@ -417,6 +442,7 @@ export async function resetDashboardLayout(_prev: ActionState, _fd: FormData): P
     await clearDashboardOrder();
     await clearDashboardStatOrder();
     await clearDashboardStatLabels();
+    await clearHoldingsCategoryOrder();
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not reset the dashboard layout" };
   }

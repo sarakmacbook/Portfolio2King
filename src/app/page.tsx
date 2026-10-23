@@ -12,6 +12,7 @@ import {
   loadDashboardOrder,
   loadDashboardStatLabels,
   loadDashboardStatOrder,
+  loadHoldingsCategoryOrder,
 } from "@/lib/dashboard-order-db";
 import { KIND_META, TYPE_META, fmtDate, money, pct, pnlColor, qty } from "@/lib/format";
 import {
@@ -32,14 +33,16 @@ export const dynamic = "force-dynamic";
 export default async function Dashboard() {
   if (!isDatabaseConfigured()) return <DatabaseSetup />;
   const list = await getAllAssets();
-  const [snaps, priceSnaps, activity, dashboardOrder, statOrder, statLabels] = await Promise.all([
-    getSnapshots(),
-    getAllPriceSnapshots(),
-    getRecentActivity(6),
-    loadDashboardOrder(),
-    loadDashboardStatOrder(),
-    loadDashboardStatLabels(),
-  ]);
+  const [snaps, priceSnaps, activity, dashboardOrder, statOrder, statLabels, categoryOrder] =
+    await Promise.all([
+      getSnapshots(),
+      getAllPriceSnapshots(),
+      getRecentActivity(6),
+      loadDashboardOrder(),
+      loadDashboardStatOrder(),
+      loadDashboardStatLabels(),
+      loadHoldingsCategoryOrder(),
+    ]);
   const totals = computeTotals(list);
   const t = today();
   const stalePrices = list.some(
@@ -143,6 +146,7 @@ export default async function Dashboard() {
         initialOrder={dashboardOrder}
         initialStatsOrder={statOrder}
         initialStatsLabels={statLabels}
+        initialCategoryOrder={categoryOrder}
         statsCards={{
           cash: {
             value: money(totals.cashValue),
