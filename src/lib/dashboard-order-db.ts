@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { appSettings } from "@/db/schema";
 import { normaliseDashboardOrder, type DashboardBlockKey } from "@/lib/dashboard-layout";
+import { normaliseHoldingFilterOrder, type HoldingFilter } from "@/lib/holdings-filter";
 import {
   normaliseDashboardStatLabels,
   normaliseDashboardStatOrder,
@@ -10,8 +11,10 @@ import {
 import { ensureSchema } from "@/lib/portfolio";
 
 /**
- * Persists the dashboard card layout in `app_settings`. Kept separate from the
- * server actions so it can be exercised against a real database directly.
+ * Persists the dashboard card layout in `app_settings` — the card order, the
+ * stat cards inside the stat row, and the category tabs inside the Holdings
+ * card. Kept separate from the server actions so it can be exercised against a
+ * real database directly.
  */
 
 /** app_settings key holding the dashboard card order. */
@@ -22,6 +25,9 @@ export const DASHBOARD_STATS_SETTING = "dashboard.statsOrder";
 
 /** app_settings key holding custom headings for the four stat cards. */
 export const DASHBOARD_STAT_LABELS_SETTING = "dashboard.statsLabels";
+
+/** app_settings key holding the left-to-right order of the Holdings category tabs. */
+export const HOLDINGS_CATEGORIES_SETTING = "holdings.categoriesOrder";
 
 async function readSetting(key: string): Promise<string | null> {
   const [row] = await db
@@ -100,4 +106,26 @@ export async function saveDashboardStatLabels(
 export async function clearDashboardStatLabels(): Promise<void> {
   await ensureSchema();
   await db.delete(appSettings).where(eq(appSettings.key, DASHBOARD_STAT_LABELS_SETTING));
+}
+
+/** Order of the Holdings category tabs, falling back to "All" first when unset. */
+export async function loadHoldingsCategoryOrder(): Promise<HoldingFilter[]> {
+  await ensureSchema();
+  return normaliseHoldingFilterOrder(await readSetting(HOLDINGS_CATEGORIES_SETTING));
+}
+
+/** Stores the category tab order; missing tabs are appended in their default spot. */
+export async function saveHoldingsCategoryOrder(
+  order: readonly unknown[],
+): Promise<HoldingFilter[]> {
+  await ensureSchema();
+  const normalised = normaliseHoldingFilterOrder(order);
+  await writeSetting(HOLDINGS_CATEGORIES_SETTING, normalised.join(","));
+  return normalised;
+}
+
+/** Removes the stored category order (Reset to default). */
+export async function clearHoldingsCategoryOrder(): Promise<void> {
+  await ensureSchema();
+  await db.delete(appSettings).where(eq(appSettings.key, HOLDINGS_CATEGORIES_SETTING));
 }

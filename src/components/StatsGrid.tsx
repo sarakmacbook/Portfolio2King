@@ -8,6 +8,7 @@ import {
   moveStatTo,
   type DashboardStatKey,
 } from "@/lib/dashboard-stats";
+import GripIcon from "./GripIcon";
 
 export type StatCardData = {
   value: string;
@@ -15,19 +16,6 @@ export type StatCardData = {
   valueClass?: string;
   hintClass?: string;
 };
-
-function GripIcon() {
-  return (
-    <svg viewBox="0 0 10 16" className="h-3 w-2 fill-current" aria-hidden="true">
-      <circle cx="2" cy="3" r="1.3" />
-      <circle cx="8" cy="3" r="1.3" />
-      <circle cx="2" cy="8" r="1.3" />
-      <circle cx="8" cy="8" r="1.3" />
-      <circle cx="2" cy="13" r="1.3" />
-      <circle cx="8" cy="13" r="1.3" />
-    </svg>
-  );
-}
 
 /**
  * The four dashboard numbers. They keep their grid, and in "Arrange layout"
@@ -132,7 +120,7 @@ export default function StatsGrid({
                     className="flex min-w-0 cursor-grab items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-indigo-900 active:cursor-grabbing"
                     title="Drag to move this card"
                   >
-                    <GripIcon />
+                    <GripIcon className="h-3 w-2" />
                     <span className="truncate">{label}</span>
                   </span>
                   <span className="ml-auto flex">

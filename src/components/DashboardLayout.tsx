@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition, type ReactNode } from "react";
+import { useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { resetDashboardLayout, saveDashboardLayout, type ActionState } from "@/app/actions";
 import {
   DASHBOARD_BLOCKS,
@@ -15,6 +15,9 @@ import {
   normaliseDashboardStatLabels,
   type DashboardStatKey,
 } from "@/lib/dashboard-stats";
+import { DEFAULT_HOLDING_FILTER_ORDER, type HoldingFilter } from "@/lib/holdings-filter";
+import GripIcon from "./GripIcon";
+import { HoldingsArrangeProvider } from "./holdings-arrange";
 import StatsGrid, { type StatCardData } from "./StatsGrid";
 
 /** Column spans so the two charts stay side by side when they are adjacent. */
@@ -26,23 +29,12 @@ const SPAN: Record<DashboardBlockKey, string> = {
   activity: "lg:col-span-5",
 };
 
-function GripIcon() {
-  return (
-    <svg viewBox="0 0 10 16" className="h-3.5 w-2.5 fill-current" aria-hidden="true">
-      <circle cx="2" cy="3" r="1.3" />
-      <circle cx="8" cy="3" r="1.3" />
-      <circle cx="2" cy="8" r="1.3" />
-      <circle cx="8" cy="8" r="1.3" />
-      <circle cx="2" cy="13" r="1.3" />
-      <circle cx="8" cy="13" r="1.3" />
-    </svg>
-  );
-}
-
 /**
  * Wraps the dashboard cards so they can be moved up/down as whole blocks.
  * The order is saved server-side (`app_settings.dashboard.order`) only when the
- * user clicks **Save layout**.
+ * user clicks **Save layout**. The same mode also arranges what lives *inside*
+ * two of the cards — the stat row and the Holdings category tabs — and the
+ * Holdings card reads the pending tab order through `HoldingsArrangeProvider`.
  */
 export default function DashboardLayout({
   blocks,
@@ -50,6 +42,7 @@ export default function DashboardLayout({
   initialOrder = DEFAULT_DASHBOARD_ORDER,
   initialStatsOrder = DEFAULT_DASHBOARD_STAT_ORDER,
   initialStatsLabels = DEFAULT_DASHBOARD_STAT_LABELS,
+  initialCategoryOrder = DEFAULT_HOLDING_FILTER_ORDER,
 }: {
   blocks: Record<Exclude<DashboardBlockKey, "stats">, ReactNode>;
   /** Values and hints for the four stat cards, keyed by stat id. */
@@ -57,10 +50,13 @@ export default function DashboardLayout({
   initialOrder?: DashboardBlockKey[];
   initialStatsOrder?: DashboardStatKey[];
   initialStatsLabels?: Record<DashboardStatKey, string>;
+  /** Saved left-to-right order of the Holdings category tabs. */
+  initialCategoryOrder?: HoldingFilter[];
 }) {
   const [order, setOrder] = useState<DashboardBlockKey[]>(initialOrder);
   const [statsOrder, setStatsOrder] = useState<DashboardStatKey[]>(initialStatsOrder);
   const [statsLabels, setStatsLabels] = useState<Record<DashboardStatKey, string>>(initialStatsLabels);
+  const [categoryOrder, setCategoryOrder] = useState<HoldingFilter[]>(initialCategoryOrder);
   const [arranging, setArranging] = useState(false);
   const [dragging, setDragging] = useState<DashboardBlockKey | null>(null);
   const [drop, setDrop] = useState<{ key: DashboardBlockKey; after: boolean } | null>(null);
@@ -70,6 +66,12 @@ export default function DashboardLayout({
   const savedOrder = useRef<DashboardBlockKey[]>(initialOrder);
   const savedStatsOrder = useRef<DashboardStatKey[]>(initialStatsOrder);
   const savedStatsLabels = useRef<Record<DashboardStatKey, string>>(initialStatsLabels);
+  const savedCategoryOrder = useRef<HoldingFilter[]>(initialCategoryOrder);
+
+  const holdingsArrange = useMemo(
+    () => ({ arranging, categoryOrder, onCategoryOrderChange: setCategoryOrder }),
+    [arranging, categoryOrder],
+  );
 
   function clearDrag() {
     setDragging(null);
@@ -80,6 +82,7 @@ export default function DashboardLayout({
     savedOrder.current = order;
     savedStatsOrder.current = statsOrder;
     savedStatsLabels.current = statsLabels;
+    savedCategoryOrder.current = categoryOrder;
     setNotice(null);
     setArranging(true);
   }
@@ -88,6 +91,7 @@ export default function DashboardLayout({
     setOrder(savedOrder.current);
     setStatsOrder(savedStatsOrder.current);
     setStatsLabels(savedStatsLabels.current);
+    setCategoryOrder(savedCategoryOrder.current);
     clearDrag();
     setArranging(false);
   }
@@ -123,6 +127,7 @@ export default function DashboardLayout({
       fd.set("order", payload);
       fd.set("statsOrder", JSON.stringify(statsOrder));
       fd.set("statsLabels", JSON.stringify(normalisedLabels));
+      fd.set("holdingCategories", JSON.stringify(categoryOrder));
       const result: ActionState = await saveDashboardLayout({}, fd);
       if (result.error) {
         setNotice({ kind: "error", text: result.error });
@@ -132,6 +137,7 @@ export default function DashboardLayout({
       savedOrder.current = order;
       savedStatsOrder.current = statsOrder;
       savedStatsLabels.current = normalisedLabels;
+      savedCategoryOrder.current = categoryOrder;
       setArranging(false);
       setNotice({ kind: "ok", text: result.message ?? "Dashboard layout saved." });
     });
@@ -147,9 +153,11 @@ export default function DashboardLayout({
       setOrder(DEFAULT_DASHBOARD_ORDER);
       setStatsOrder(DEFAULT_DASHBOARD_STAT_ORDER);
       setStatsLabels(DEFAULT_DASHBOARD_STAT_LABELS);
+      setCategoryOrder(DEFAULT_HOLDING_FILTER_ORDER);
       savedOrder.current = DEFAULT_DASHBOARD_ORDER;
       savedStatsOrder.current = DEFAULT_DASHBOARD_STAT_ORDER;
       savedStatsLabels.current = DEFAULT_DASHBOARD_STAT_LABELS;
+      savedCategoryOrder.current = DEFAULT_HOLDING_FILTER_ORDER;
       clearDrag();
       setArranging(false);
       setNotice({ kind: "ok", text: result.message ?? "Dashboard layout reset to the default." });
@@ -182,7 +190,8 @@ export default function DashboardLayout({
         {arranging ? (
           <>
             <p className="mr-auto text-xs font-medium text-indigo-700">
-              Drag a card header to move it, use ▲ / ▼ or ◀ / ▶, and edit any stat label. Nothing changes until you save.
+              Drag a card header to move it, use ▲ / ▼ or ◀ / ▶, shuffle the stat cards and the Holdings
+              category tabs, and edit any stat label. Nothing changes until you save.
             </p>
             <button type="button" className="btn-ghost" onClick={cancelArranging} disabled={saving}>
               Cancel
@@ -208,91 +217,93 @@ export default function DashboardLayout({
         )}
       </div>
 
-      <div className="grid gap-6 lg:grid-flow-row-dense lg:grid-cols-5">
-        {order.map((key) => {
-          const meta = DASHBOARD_BLOCKS[key];
-          const isDragging = dragging === key;
-          const isDropTarget = drop?.key === key && !isDragging;
-          const position = order.indexOf(key);
-          return (
-            <div
-              key={key}
-              onDragOver={(event) => {
-                if (!arranging || !dragging || dragging === key) return;
-                event.preventDefault();
-                event.dataTransfer.dropEffect = "move";
-                const rect = event.currentTarget.getBoundingClientRect();
-                const after = event.clientY - rect.top > rect.height / 2;
-                setDrop((current) =>
-                  current?.key === key && current.after === after ? current : { key, after },
-                );
-              }}
-              onDrop={(event) => {
-                if (!arranging) return;
-                event.preventDefault();
-                handleDrop();
-              }}
-              className={`min-w-0 ${SPAN[key]} ${isDragging ? "opacity-50" : ""} ${
-                isDropTarget ? "rounded-2xl ring-2 ring-indigo-400 ring-offset-4 ring-offset-slate-50" : ""
-              }`}
-            >
-              {arranging && (
-                <div className="mb-2 flex items-center gap-2 rounded-xl border border-dashed border-indigo-300 bg-indigo-50/80 px-3 py-2">
-                  <span
-                    draggable
-                    onDragStart={(event) => {
-                      setDragging(key);
-                      event.dataTransfer.effectAllowed = "move";
-                      event.dataTransfer.setData("text/plain", key);
-                    }}
-                    onDragEnd={clearDrag}
-                    className="flex cursor-grab items-center gap-2 text-xs font-semibold uppercase tracking-wide text-indigo-900 active:cursor-grabbing"
-                    title="Drag to move this card"
-                  >
-                    <GripIcon />
-                    {meta.label}
-                  </span>
-                  <span className="hidden text-[11px] text-indigo-700/70 sm:inline">{meta.hint}</span>
-                  <span className="ml-auto flex flex-col">
-                    <button
-                      type="button"
-                      className="grid h-4 w-6 place-items-center rounded text-[10px] text-indigo-700 hover:bg-white disabled:opacity-30"
-                      onClick={() => move(key, -1)}
-                      disabled={position === 0}
-                      aria-label={`Move ${meta.label} up`}
+      <HoldingsArrangeProvider value={holdingsArrange}>
+        <div className="grid gap-6 lg:grid-flow-row-dense lg:grid-cols-5">
+          {order.map((key) => {
+            const meta = DASHBOARD_BLOCKS[key];
+            const isDragging = dragging === key;
+            const isDropTarget = drop?.key === key && !isDragging;
+            const position = order.indexOf(key);
+            return (
+              <div
+                key={key}
+                onDragOver={(event) => {
+                  if (!arranging || !dragging || dragging === key) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  const after = event.clientY - rect.top > rect.height / 2;
+                  setDrop((current) =>
+                    current?.key === key && current.after === after ? current : { key, after },
+                  );
+                }}
+                onDrop={(event) => {
+                  if (!arranging) return;
+                  event.preventDefault();
+                  handleDrop();
+                }}
+                className={`min-w-0 ${SPAN[key]} ${isDragging ? "opacity-50" : ""} ${
+                  isDropTarget ? "rounded-2xl ring-2 ring-indigo-400 ring-offset-4 ring-offset-slate-50" : ""
+                }`}
+              >
+                {arranging && (
+                  <div className="mb-2 flex items-center gap-2 rounded-xl border border-dashed border-indigo-300 bg-indigo-50/80 px-3 py-2">
+                    <span
+                      draggable
+                      onDragStart={(event) => {
+                        setDragging(key);
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", key);
+                      }}
+                      onDragEnd={clearDrag}
+                      className="flex cursor-grab items-center gap-2 text-xs font-semibold uppercase tracking-wide text-indigo-900 active:cursor-grabbing"
+                      title="Drag to move this card"
                     >
-                      ▲
-                    </button>
-                    <button
-                      type="button"
-                      className="grid h-4 w-6 place-items-center rounded text-[10px] text-indigo-700 hover:bg-white disabled:opacity-30"
-                      onClick={() => move(key, 1)}
-                      disabled={position === order.length - 1}
-                      aria-label={`Move ${meta.label} down`}
-                    >
-                      ▼
-                    </button>
-                  </span>
-                </div>
-              )}
-              <div className={arranging ? "rounded-2xl ring-2 ring-indigo-200/80" : ""}>
-                {key === "stats" ? (
-                  <StatsGrid
-                    cards={statsCards}
-                    order={statsOrder}
-                    onOrderChange={setStatsOrder}
-                    labels={statsLabels}
-                    onLabelChange={updateStatLabel}
-                    arranging={arranging}
-                  />
-                ) : (
-                  blocks[key]
+                      <GripIcon />
+                      {meta.label}
+                    </span>
+                    <span className="hidden text-[11px] text-indigo-700/70 sm:inline">{meta.hint}</span>
+                    <span className="ml-auto flex flex-col">
+                      <button
+                        type="button"
+                        className="grid h-4 w-6 place-items-center rounded text-[10px] text-indigo-700 hover:bg-white disabled:opacity-30"
+                        onClick={() => move(key, -1)}
+                        disabled={position === 0}
+                        aria-label={`Move ${meta.label} up`}
+                      >
+                        ▲
+                      </button>
+                      <button
+                        type="button"
+                        className="grid h-4 w-6 place-items-center rounded text-[10px] text-indigo-700 hover:bg-white disabled:opacity-30"
+                        onClick={() => move(key, 1)}
+                        disabled={position === order.length - 1}
+                        aria-label={`Move ${meta.label} down`}
+                      >
+                        ▼
+                      </button>
+                    </span>
+                  </div>
                 )}
+                <div className={arranging ? "rounded-2xl ring-2 ring-indigo-200/80" : ""}>
+                  {key === "stats" ? (
+                    <StatsGrid
+                      cards={statsCards}
+                      order={statsOrder}
+                      onOrderChange={setStatsOrder}
+                      labels={statsLabels}
+                      onLabelChange={updateStatLabel}
+                      arranging={arranging}
+                    />
+                  ) : (
+                    blocks[key]
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      </HoldingsArrangeProvider>
     </div>
   );
 }

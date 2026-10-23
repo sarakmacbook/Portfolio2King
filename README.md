@@ -126,6 +126,15 @@ to its default heading), so Cash can sit last or be renamed to "Dry powder"
 without moving the whole row. Both orders and any custom labels are saved by the
 same **Save layout** click and restored by **Reset to default**.
 
+The **Holdings** category tabs — **All**, **Cash**, **Stocks**, **Stablecoins**,
+**Volatile crypto** and **Other** — are arranged in the same mode. Each tab turns
+into a dashed pill with a grip and **◀ / ▶** buttons (dragging works too) and the
+row wraps instead of scrolling, so every tab stays reachable on a phone. Put
+**Stablecoins** or **Volatile crypto** first if that is what you check every
+morning; the saved order is the order the tabs read in from then on. Arranging
+only changes the order — clicking a tab still filters the table and the total
+above it, and the counts on the tabs still update as holdings change.
+
 Details:
 
 - The layout is stored in `app_settings` under `dashboard.order` as a
@@ -136,6 +145,11 @@ Details:
 - The stat-card order lives beside it under `dashboard.statsOrder`
   (`cash,invested,unrealized,realized` by default), and custom headings live
   under `dashboard.statsLabels` as a JSON map of `{ cash, invested, unrealized, realized }`.
+- The Holdings category order lives beside them under `holdings.categoriesOrder`
+  (`all,cash,stock,stablecoin,volatile,other` by default) and is normalised the
+  same way, so an unknown or half-written setting still renders all six tabs.
+  **Save layout** stores it with the card and stat orders; **Reset to default**
+  clears all three.
 - The two charts stay side by side (Value history 3/5, Allocation 2/5) whenever
   they are next to each other, and full-width cards start a new row. On phones the
   cards stack in the saved order.
