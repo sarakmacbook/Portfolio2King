@@ -105,6 +105,18 @@ export function ensureSchema() {
           telegram_sent integer NOT NULL DEFAULT 0,
           created_at timestamptz NOT NULL DEFAULT now()
         )`);
+      // Per-exchange holdings, so re-syncing one venue never overwrites another.
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS exchange_balances (
+          id serial PRIMARY KEY,
+          asset_id integer NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+          exchange text NOT NULL,
+          quantity double precision NOT NULL,
+          symbol text NOT NULL DEFAULT '',
+          synced_at timestamptz NOT NULL DEFAULT now(),
+          UNIQUE (asset_id, exchange)
+        )`);
+
       await db.execute(sql`
         CREATE TABLE IF NOT EXISTS app_settings (
           key text PRIMARY KEY,

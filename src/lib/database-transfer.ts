@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg";
 import { getPool } from "@/db";
-import { assets, priceSnapshots, snapshots, transactions } from "@/db/schema";
+import { assets, exchangeBalances, priceSnapshots, snapshots, transactions } from "@/db/schema";
 import { asc } from "drizzle-orm";
 import { db } from "@/db";
 import { createBackup, type PortfolioBackup } from "@/lib/database-backup";
@@ -14,18 +14,27 @@ export type ImportSummary = {
   transactions: number;
   snapshots: number;
   priceSnapshots: number;
+  exchangeBalances: number;
 };
 
 /** Read every portfolio table and build a portable backup document. */
 export async function exportBackup(): Promise<PortfolioBackup> {
   await ensureSchema();
-  const [assetRows, transactionRows, snapshotRows, priceSnapshotRows] = await Promise.all([
+  const [assetRows, transactionRows, snapshotRows, priceSnapshotRows, exchangeBalanceRows] = await Promise.all([
     db.select().from(assets).orderBy(asc(assets.id)),
     db.select().from(transactions).orderBy(asc(transactions.id)),
     db.select().from(snapshots).orderBy(asc(snapshots.date)),
     db.select().from(priceSnapshots).orderBy(asc(priceSnapshots.assetId), asc(priceSnapshots.date)),
+    db.select().from(exchangeBalances).orderBy(asc(exchangeBalances.assetId), asc(exchangeBalances.exchange)),
   ]);
-  return createBackup(assetRows, transactionRows, snapshotRows, new Date(), priceSnapshotRows);
+  return createBackup(
+    assetRows,
+    transactionRows,
+    snapshotRows,
+    new Date(),
+    priceSnapshotRows,
+    exchangeBalanceRows,
+  );
 }
 
 async function insertAsset(client: PoolClient, asset: PortfolioBackup["tables"]["assets"][number], id?: number) {
@@ -97,6 +106,23 @@ async function insertPriceSnapshot(
   );
 }
 
+/**
+ * Restores the sync baseline. Without it the next sync would compare against
+ * zero and import every balance again, doubling the portfolio.
+ */
+async function insertExchangeBalance(
+  client: PoolClient,
+  balance: NonNullable<PortfolioBackup["tables"]["exchangeBalances"]>[number],
+  assetId: number,
+  upsert: boolean,
+) {
+  await client.query(
+    `INSERT INTO exchange_balances (asset_id, exchange, quantity, symbol, synced_at) VALUES ($1,$2,$3,$4,$5)
+     ${upsert ? "ON CONFLICT (asset_id, exchange) DO UPDATE SET quantity = EXCLUDED.quantity, symbol = EXCLUDED.symbol, synced_at = EXCLUDED.synced_at" : ""}`,
+    [assetId, balance.exchange, balance.quantity, balance.symbol, balance.syncedAt],
+  );
+}
+
 /** Keep serial sequences ahead of any explicitly restored ids. */
 async function resetSequences(client: PoolClient) {
   await client.query(
@@ -104,6 +130,9 @@ async function resetSequences(client: PoolClient) {
   );
   await client.query(
     `SELECT setval(pg_get_serial_sequence('transactions', 'id'), COALESCE((SELECT MAX(id) FROM transactions), 1), EXISTS (SELECT 1 FROM transactions))`,
+  );
+  await client.query(
+    `SELECT setval(pg_get_serial_sequence('exchange_balances', 'id'), COALESCE((SELECT MAX(id) FROM exchange_balances), 1), EXISTS (SELECT 1 FROM exchange_balances))`,
   );
 }
 
@@ -123,7 +152,9 @@ export async function importBackup(backup: PortfolioBackup, mode: ImportMode): P
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    const exchangeBalanceRows = backup.tables.exchangeBalances ?? [];
     if (mode === "replace") {
+      await client.query("DELETE FROM exchange_balances");
       await client.query("DELETE FROM price_snapshots");
       await client.query("DELETE FROM snapshots");
       await client.query("DELETE FROM transactions");
@@ -132,6 +163,9 @@ export async function importBackup(backup: PortfolioBackup, mode: ImportMode): P
       for (const tx of backup.tables.transactions) await insertTransaction(client, tx, tx.assetId, tx.id);
       for (const snapshot of backup.tables.snapshots) await insertSnapshot(client, snapshot, false);
       for (const ps of backup.tables.priceSnapshots) await insertPriceSnapshot(client, ps, ps.assetId, false);
+      for (const balance of exchangeBalanceRows) {
+        await insertExchangeBalance(client, balance, balance.assetId, false);
+      }
     } else {
       const idMap = new Map<number, number>();
       for (const asset of backup.tables.assets) idMap.set(asset.id, await insertAsset(client, asset));
@@ -139,6 +173,9 @@ export async function importBackup(backup: PortfolioBackup, mode: ImportMode): P
       for (const snapshot of backup.tables.snapshots) await insertSnapshot(client, snapshot, true);
       for (const ps of backup.tables.priceSnapshots) {
         await insertPriceSnapshot(client, ps, idMap.get(ps.assetId)!, true);
+      }
+      for (const balance of exchangeBalanceRows) {
+        await insertExchangeBalance(client, balance, idMap.get(balance.assetId)!, true);
       }
     }
     await resetSequences(client);
@@ -155,5 +192,6 @@ export async function importBackup(backup: PortfolioBackup, mode: ImportMode): P
     transactions: backup.tables.transactions.length,
     snapshots: backup.tables.snapshots.length,
     priceSnapshots: backup.tables.priceSnapshots.length,
+    exchangeBalances: backup.tables.exchangeBalances?.length ?? 0,
   };
 }

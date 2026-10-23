@@ -20,6 +20,9 @@ the deployment before storing real portfolio data (see the
   Kraken, or DexScreener, and live stock/ETF quotes from Yahoo Finance — no API
   keys required. A crypto holding can be **added from a specific exchange**, and
   every later refresh keeps pricing it there.
+- **Exchange balance import** from Binance, OKX and Bybit with read-only API
+  keys: balances are fetched server-side, signed locally, and booked into the
+  portfolio as deposits — re-syncing applies only what changed.
 - Crypto asset search that falls back automatically between public data
   providers when one is rate-limited or down.
 - Daily per-asset price snapshots and portfolio snapshots, allocation donut and
@@ -781,6 +784,10 @@ Open **Database** → **Export & import database** (below the setup wizard):
   key is required for export and import; otherwise (like the rest of this
   unauthenticated app) they are open — restrict access to your deployment
   before storing sensitive data, and treat backup files as sensitive too.
+- Exchange sync baselines (`exchange_balances`) are exported and restored with
+  everything else, so a restored database does not import every balance again on
+  the next sync. **API keys are never written to a backup** — reconnect the
+  exchanges afterwards.
 - Backups contain no currency metadata: they are USD ledgers (see
   [Supported currencies](#supported-currencies)).
 
@@ -921,6 +928,71 @@ and no account.
 > Yahoo's endpoint is unofficial and can change or rate-limit without notice.
 > Failures never corrupt prices: the previous value is kept and the refresh
 > summary reports how many holdings could not be priced.
+
+### Import balances from Binance, OKX or Bybit
+
+**Exchanges** in the header menu imports what you actually hold on an exchange,
+instead of typing quantities by hand.
+
+1. On the exchange, create an API key with **read-only** permission (no spot
+   trading, no withdrawals, no transfers). An IP allowlist is worth setting.
+2. Open **Exchanges**, paste the key and secret into that exchange's card and
+   press **Connect & import**. OKX also asks for the passphrase you set on the
+   key; Bybit asks which account type to read (`UNIFIED`, `SPOT` or `CONTRACT`).
+3. The key is verified **before** it is saved — a wrong key shows the exchange's
+   own complaint and stores nothing. A successful check is also the first
+   import, so connecting costs one API call.
+
+What a sync does:
+
+- Each currency with a balance becomes a **crypto holding**. Unknown coins are
+  created automatically, pinned to that exchange for pricing, and named by their
+  ticker.
+- Quantities are booked as **deposit / withdraw transactions**, not by
+  overwriting the holding. So manual trades keep their cost basis, Activity
+  shows exactly what the import did, and P/L still comes from the transaction
+  history. Units removed from an exchange are booked at cost, so moving coins out
+  does not invent realized profit.
+- `exchange_balances` stores the last figure per exchange and asset. A re-sync
+  books the **difference**, which is what makes repeated syncs safe. The same
+  coin on two exchanges adds up (Binance 0.75 + OKX 0.3 = 1.05 BTC), and syncing
+  one venue never touches the other's figures.
+- A coin that disappears from an exchange (or drops to zero) is removed from the
+  portfolio once, then the baseline is deleted, so a later re-deposit imports
+  cleanly.
+- **Sync all exchanges** runs every connected key; one failing key does not stop
+  the others. Prices still come from the normal price refresh — a freshly
+  imported coin without a quote is reported as a warning and valued at the next
+  **Refresh prices**.
+
+Keys and privacy:
+
+- Keys are encrypted with **AES-256-GCM** (`src/lib/exchange-credentials.ts`)
+  and never leave the server. The browser only receives a mask such as
+  `••••••••7F3A`; no action returns the secret or the key.
+- Set `EXCHANGE_CREDENTIALS_KEY` in production (see `.env.example`). Without it
+  the encryption key is generated and stored in `app_settings`, so a database
+  dump alone would be enough to decrypt the saved keys. Rotating or clearing the
+  variable disconnects every exchange; holdings are kept.
+- **Disconnect** deletes the key. Imported holdings stay in the portfolio as
+  normal assets — delete or adjust them like any other holding.
+- Only balance endpoints are called:
+
+  | Exchange | Endpoint | Signature |
+  | --- | --- | --- |
+  | Binance | `GET /api/v3/account` | HMAC-SHA256 hex of `timestamp&recvWindow`, sent as `signature` |
+  | OKX | `GET /api/v5/account/balance` | base64 HMAC-SHA256 of `timestamp + GET + path` |
+  | Bybit | `GET /v5/account/wallet-balance?accountType=…` | HMAC-SHA256 hex of `timestamp + apiKey + recvWindow + query` |
+
+- Scope: Binance **spot** balances (`free` + `locked`), OKX **trading account
+  equity**, Bybit **wallet balance**. Staking/Earn positions, funding wallets,
+  futures positions, and sub-accounts are not included; balances under `1e-10`
+  are ignored as dust.
+- Errors are written for humans and never echo a key: rejected keys, missing
+  read permission (Binance `-2015`, OKX `50113`, Bybit `10005`/`10010`), rate
+  limits, and timeouts each get their own sentence.
+- Backups include the per-exchange baselines but **never the API keys**. Restoring
+  a backup therefore does not re-import every balance on the next sync.
 
 ### Adding a crypto asset from an exchange
 

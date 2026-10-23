@@ -60,14 +60,17 @@ export async function POST(request: Request) {
 
   try {
     const summary = await importBackup(parsed, mode as ImportMode);
+    // Only mention exchange rows when the backup actually had any.
+    const exchangeNote =
+      summary.exchangeBalances > 0 ? `, ${summary.exchangeBalances} exchange balances` : "";
     revalidatePath("/", "layout");
     return Response.json({
       ok: true,
       ...summary,
       message:
         mode === "replace"
-          ? `Database restored: ${summary.assets} assets, ${summary.transactions} transactions, ${summary.snapshots} portfolio snapshots, ${summary.priceSnapshots} daily price snapshots. Previous data was replaced.`
-          : `Import merged: ${summary.assets} assets, ${summary.transactions} transactions, ${summary.snapshots} portfolio snapshots, ${summary.priceSnapshots} daily price snapshots added.`,
+          ? `Database restored: ${summary.assets} assets, ${summary.transactions} transactions, ${summary.snapshots} portfolio snapshots, ${summary.priceSnapshots} daily price snapshots${exchangeNote}. Previous data was replaced.`
+          : `Import merged: ${summary.assets} assets, ${summary.transactions} transactions, ${summary.snapshots} portfolio snapshots, ${summary.priceSnapshots} daily price snapshots${exchangeNote} added.`,
     });
   } catch {
     // The import runs in one transaction, so the database is unchanged.
