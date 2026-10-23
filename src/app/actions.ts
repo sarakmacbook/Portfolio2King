@@ -27,6 +27,7 @@ import { getWeb3Wallet, parseWeb3WalletId } from "@/lib/web3-wallets";
 import { saveAssetWalletLogo } from "@/lib/web3-wallets-db";
 import { refreshPricesWithAlerts } from "@/lib/price-refresh";
 import { clearDashboardLayout, persistDashboardLayout } from "@/lib/dashboard-layout-save";
+import { setHoldingFolder } from "@/lib/dashboard-order-db";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -369,6 +370,29 @@ export async function resetDashboardLayout(_prev: ActionState, _fd: FormData): P
   }
   refresh();
   return { ok: true, message: "Dashboard layout reset to the default.", ts: Date.now() };
+}
+
+/**
+ * Files one holding into a folder — or, with `folderId: null`, back to
+ * **Unfiled** — and stores it straight away.
+ *
+ * This is the drag-and-drop path used outside "Arrange layout" mode, where a
+ * drop on a folder should take effect immediately instead of waiting for a
+ * **Save layout** click. Arrange mode keeps its own deferred behaviour: there the
+ * table edits the pending filing in memory and one save writes everything.
+ */
+export async function saveHoldingFolderAssignment(input: {
+  assetId: number;
+  folderId: string | null;
+}): Promise<{ ok: boolean; error?: string; assignments?: Record<number, string> }> {
+  try {
+    await ensureSchema();
+    const assignments = await setHoldingFolder(Number(input?.assetId), input?.folderId ?? null);
+    refresh();
+    return { ok: true, assignments };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not move that holding." };
+  }
 }
 
 export async function importWalletBalances(input: {

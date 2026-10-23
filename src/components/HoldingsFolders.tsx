@@ -5,7 +5,6 @@ import {
   FOLDER_COLORS,
   MAX_FOLDERS,
   MAX_FOLDER_NAME_LENGTH,
-  assignHolding,
   makeFolder,
   matchesFolderFilter,
   moveFolderBy,
@@ -31,8 +30,9 @@ import GripIcon from "./GripIcon";
  * exchange or emoji icon, and deleted — and a holding dragged from the table can
  * be dropped straight onto a folder to file it.
  *
- * Nothing is written until the dashboard's **Save layout** is clicked: the
- * folders and the filing both live in `DashboardLayout` state.
+ * Filing goes through `onFileHolding`, so the table decides whether a drop is
+ * pending (arrange mode, saved by **Save layout**) or persisted straight away
+ * (normal view). Editing folders themselves is always deferred to that save.
  */
 export default function HoldingsFolders({
   folders,
@@ -45,6 +45,7 @@ export default function HoldingsFolders({
   arranging,
   onFoldersChange,
   onAssignmentsChange,
+  onFileHolding,
   totalRows,
 }: {
   folders: HoldingFolder[];
@@ -59,6 +60,8 @@ export default function HoldingsFolders({
   arranging: boolean;
   onFoldersChange: (next: HoldingFolder[]) => void;
   onAssignmentsChange: (next: FolderAssignments) => void;
+  /** Files one holding (drag-and-drop); persisted at once outside arrange mode. */
+  onFileHolding: (assetId: number, folderId: string | null) => void;
   /** Total number of holdings, shown on the **All** chip. */
   totalRows: number;
 }) {
@@ -172,9 +175,7 @@ export default function HoldingsFolders({
     const assetId = Number(raw);
     if (!Number.isInteger(assetId) || assetId <= 0) return;
     event.preventDefault();
-    onAssignmentsChange(assignHolding(assignments, assetId, folderId));
-    const name = folderId ? folders.find((folder) => folder.id === folderId)?.name : null;
-    setAnnouncement(`Holding moved to ${name ?? "Unfiled"}.`);
+    onFileHolding(assetId, folderId);
     setDropFolder(null);
   }
 

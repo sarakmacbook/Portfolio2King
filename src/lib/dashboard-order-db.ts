@@ -1,9 +1,10 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { appSettings } from "@/db/schema";
+import { appSettings, assets } from "@/db/schema";
 import { normaliseDashboardOrder, type DashboardBlockKey } from "@/lib/dashboard-layout";
 import { normaliseHoldingFilterOrder, type HoldingFilter } from "@/lib/holdings-filter";
 import {
+  assignHolding,
   normaliseAssignments,
   normaliseFolders,
   type FolderAssignments,
@@ -225,4 +226,35 @@ export async function saveHoldingFolderAssignments(
   }
   await writeSetting(HOLDINGS_FOLDER_ASSIGNMENTS_SETTING, JSON.stringify(normalised));
   return normalised;
+}
+
+/**
+ * Files one holding into a folder (`null` = Unfiled) and stores it.
+ *
+ * Only that one assignment is read-modify-written, so two drops in quick
+ * succession cannot clobber each other, and both the holding and the folder are
+ * checked first: a stale page (folder deleted in another tab) is refused instead
+ * of filing a holding into a folder that no longer exists.
+ */
+export async function setHoldingFolder(
+  assetId: number,
+  folderId: string | null,
+): Promise<FolderAssignments> {
+  await ensureSchema();
+  if (!Number.isInteger(assetId) || assetId <= 0) throw new Error("Unknown holding.");
+
+  const [asset] = await db
+    .select({ id: assets.id })
+    .from(assets)
+    .where(eq(assets.id, assetId))
+    .limit(1);
+  if (!asset) throw new Error("That holding no longer exists.");
+
+  const folders = await loadHoldingsFolders();
+  const requested = typeof folderId === "string" ? folderId.trim() : "";
+  const target = requested && folders.some((folder) => folder.id === requested) ? requested : null;
+  if (requested && !target) throw new Error("That folder no longer exists.");
+
+  const current = await loadHoldingFolderAssignments(folders);
+  return saveHoldingFolderAssignments(assignHolding(current, assetId, target), folders);
 }

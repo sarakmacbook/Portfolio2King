@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Fragment,
   useEffect,
@@ -8,6 +9,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  useTransition,
   type DragEvent,
 } from "react";
 import type { AssetType } from "@/lib/constants";
@@ -31,6 +33,7 @@ import {
   normaliseHoldingOrder,
 } from "@/lib/holdings-order";
 import {
+  assignHolding,
   countInFolder,
   groupByFolder,
   matchesFolderFilter,
@@ -39,6 +42,7 @@ import {
   type HoldingFolder,
 } from "@/lib/holdings-folders";
 import { PROVIDER_LABELS, type PriceProvider } from "@/lib/market-prices";
+import { saveHoldingFolderAssignment } from "@/app/actions";
 import CryptoLogo from "./CryptoLogo";
 import ExchangeIcon, { EXCHANGE_BRAND_COLORS } from "./ExchangeIcon";
 import GripIcon from "./GripIcon";
@@ -134,6 +138,11 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
   const [rowDragging, setRowDragging] = useState<number | null>(null);
   const [rowDrop, setRowDrop] = useState<{ id: number; after: boolean } | null>(null);
   const [folderFilter, setFolderFilter] = useState<FolderFilter>("all");
+  /** Folder id (or "unfiled") of the group a holding is hovering over. */
+  const [groupDrop, setGroupDrop] = useState<string | null>(null);
+  const [filingError, setFilingError] = useState("");
+  const [filing, startFiling] = useTransition();
+  const router = useRouter();
   /** Collapsed groups — a view preference, not part of the saved layout. */
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     () => new Set(folders.filter((folder) => folder.collapsed).map((folder) => folder.id)),
@@ -242,7 +251,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
   function holdingDragProps(id: number) {
     return {
       onDragOver: (event: DragEvent<HTMLElement>) => {
-        if (!arranging || rowDragging === null || rowDragging === id) return;
+        if (rowDragging === null || rowDragging === id) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
         const rect = event.currentTarget.getBoundingClientRect();
@@ -250,13 +259,70 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
         setRowDrop((current) =>
           current?.id === id && current.after === after ? current : { id, after },
         );
+        setGroupDrop(null);
       },
       onDrop: (event: DragEvent<HTMLElement>) => {
-        if (!arranging) return;
+        if (rowDragging === null) return;
         event.preventDefault();
-        handleHoldingDrop();
+        if (arranging) {
+          handleHoldingDrop();
+          return;
+        }
+        // In normal view a drop on a row files the holding into that row's
+        // folder, which is the quickest way to "put this next to that one".
+        fileHolding(rowDragging, assignments[id] ?? null);
+        setRowDrop(null);
       },
     };
+  }
+
+  /**
+   * A whole folder group is a drop target too: dropping a holding anywhere in
+   * its header or its rows files it into that folder (the **Unfiled** group
+   * pulls it back out). This is what makes dragging a holding *under* a folder
+   * work without having to aim at the chips.
+   */
+  function groupDropProps(folderId: string | null) {
+    const key = folderId ?? "unfiled";
+    return {
+      onDragOver: (event: DragEvent<HTMLElement>) => {
+        if (rowDragging === null) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        setRowDrop(null);
+        setGroupDrop(key);
+      },
+      onDragLeave: () => setGroupDrop((current) => (current === key ? null : current)),
+      onDrop: (event: DragEvent<HTMLElement>) => {
+        if (rowDragging === null) return;
+        event.preventDefault();
+        fileHolding(rowDragging, folderId);
+      },
+    };
+  }
+
+  /**
+   * The grip shown on a holding in normal view (only once folders exist). It is
+   * hover-revealed and decorative: the dropdown above is the keyboard/touch path,
+   * so a screen reader is not given a drag handle it cannot use.
+   */
+  function viewDragHandle(row: HoldingRow, className = "") {
+    return (
+      <span
+        draggable
+        onDragStart={(event) => {
+          setRowDragging(row.id);
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", String(row.id));
+        }}
+        onDragEnd={clearRowDrag}
+        className={`cursor-grab text-slate-300 opacity-100 transition hover:text-slate-400 active:cursor-grabbing md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 ${className}`}
+        title={`Drag ${row.name} into a folder`}
+        aria-hidden="true"
+      >
+        <GripIcon className="h-3.5 w-2.5" />
+      </span>
+    );
   }
 
   /** The dashed grip + ▲ / ▼ strip shown on a holding while arranging. */
@@ -393,6 +459,16 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
     return groupByFolder(folderRows, folders, assignments);
   }, [hasFolders, folderRows, folders, assignments]);
 
+  /**
+   * Folders that currently hold nothing. They have no group of their own to drop
+   * on, so while a holding is being dragged each one becomes a thin dashed drop
+   * target — otherwise an empty folder could only be filled from the chip row.
+   */
+  const emptyFolders = useMemo(() => {
+    const filled = new Set(groups.map((group) => group.folder?.id ?? "unfiled"));
+    return folders.filter((folder) => !filled.has(folder.id));
+  }, [groups, folders]);
+
   function toggleGroup(key: string) {
     setCollapsedGroups((current) => {
       const next = new Set(current);
@@ -402,24 +478,55 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
     });
   }
 
-  function setFolderFor(row: HoldingRow, folderId: string) {
-    const next = { ...assignments };
-    if (!folderId) delete next[row.id];
-    else next[row.id] = folderId;
-    setAssignments(next);
-    const name = folders.find((folder) => folder.id === folderId)?.name;
-    setAnnouncement(`${row.symbol || row.name} moved to ${name ?? "Unfiled"}.`);
+  /**
+   * Files a holding into a folder (`null` = Unfiled) — the one path used by the
+   * drag-and-drop, the group drop zones and the per-row dropdown.
+   *
+   * Inside arrange mode the change is pending: it lives in the dialog's state and
+   * **Save layout** writes it with everything else. In normal view a drop should
+   * simply work, so the local state updates straight away (optimistic) and the
+   * single assignment is stored immediately; if the server refuses, the previous
+   * filing is put back.
+   */
+  function fileHolding(assetId: number, folderId: string | null) {
+    const target = folderId && folders.some((folder) => folder.id === folderId) ? folderId : null;
+    const previous = assignments;
+    if ((previous[assetId] ?? null) === target) return;
+
+    const name = folders.find((folder) => folder.id === target)?.name ?? "Unfiled";
+    setAssignments(assignHolding(previous, assetId, target));
+    setFilingError("");
+    setAnnouncement(`${rowLabel(assetId)} moved to ${name}.`);
+    clearRowDrag();
+    setGroupDrop(null);
+
+    if (arranging) return;
+
+    startFiling(async () => {
+      const result = await saveHoldingFolderAssignment({ assetId, folderId: target });
+      if (!result.ok) {
+        setAssignments(previous);
+        setFilingError(result.error ?? "Could not move that holding.");
+        setAnnouncement(`${rowLabel(assetId)} is back in its folder — the move did not save.`);
+        return;
+      }
+      router.refresh();
+    });
   }
 
   /** The small folder badge/selector shown with each holding. */
   function folderControl(row: HoldingRow) {
     const folder = folders.find((item) => item.id === assignments[row.id]);
-    if (arranging) {
+    // The dropdown is the keyboard- and touch-friendly way to move a holding:
+    // native drag-and-drop needs a mouse, so on a phone this is the only path.
+    if (arranging || hasFolders) {
       return (
         <select
           className="input w-full min-w-0 py-1 text-xs"
           value={folder?.id ?? ""}
-          onChange={(event) => setFolderFor(row, event.target.value)}
+          onChange={(event) => fileHolding(row.id, event.target.value || null)}
+          disabled={filing}
+          title="Move this holding to another folder"
           aria-label={`Folder for ${row.name}`}
         >
           <option value="">Unfiled</option>
@@ -628,6 +735,12 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
         </div>
       </div>
 
+      {filingError && (
+        <p role="alert" className="mx-4 mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">
+          {filingError}
+        </p>
+      )}
+
       {(hasFolders || arranging) && (
         <HoldingsFolders
           folders={folders}
@@ -641,6 +754,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
           arranging={arranging}
           onFoldersChange={setFolders}
           onAssignmentsChange={setAssignments}
+          onFileHolding={fileHolding}
         />
       )}
 
@@ -670,9 +784,23 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
               return (
                 <Fragment key={groupKey}>
                   {hasFolders && (
-                    <tr className="bg-slate-50/60">
+                    <tr
+                      {...groupDropProps(group.folder?.id ?? null)}
+                      className={`border-l-2 transition ${
+                        groupDrop === groupKey
+                          ? "border-indigo-500 bg-indigo-50/70"
+                          : "border-transparent bg-slate-50/60"
+                      }`}
+                    >
                       <th colSpan={columnCount} className="px-4 py-2 font-normal" scope="colgroup">
-                        {groupHeader(group)}
+                        <span className="flex items-center gap-2">
+                          {groupHeader(group)}
+                          {rowDragging !== null && groupDrop === groupKey && (
+                            <span className="rounded-md bg-indigo-500 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                              Drop to file here
+                            </span>
+                          )}
+                        </span>
                       </th>
                     </tr>
                   )}
@@ -697,6 +825,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                   )}
                   <td className="px-4 py-3">
                     <Link href={`/assets/${r.id}`} className="flex items-center gap-3">
+                      {hasFolders && !arranging && viewDragHandle(r, "mr-1 -ml-1")}
                       {r.type === "crypto" ? (
                         <CryptoLogo symbol={r.symbol} name={r.name} wallet={r.wallet} />
                       ) : (
@@ -774,6 +903,34 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                 </Fragment>
               );
             })}
+            {rowDragging !== null &&
+              emptyFolders.map((folder) => (
+                <tr
+                  key={`drop-${folder.id}`}
+                  {...groupDropProps(folder.id)}
+                  className={`border-l-2 border-dashed transition ${
+                    groupDrop === folder.id
+                      ? "border-indigo-500 bg-indigo-50/70"
+                      : "border-slate-200 bg-slate-50/40"
+                  }`}
+                >
+                  <td colSpan={columnCount} className="px-4 py-2">
+                    <span className="flex items-center gap-2 text-xs text-slate-500">
+                      <ExchangeIcon
+                        provider={folder.icon === "exchange" ? (folder.glyph as PriceProvider) : undefined}
+                        glyph={folder.icon === "emoji" ? folder.glyph : undefined}
+                        label={folder.name.slice(0, 1)}
+                        color={folder.color}
+                        className="h-4 w-4 rounded"
+                      />
+                      <span className="font-semibold uppercase tracking-wide text-slate-600">
+                        {folder.name}
+                      </span>
+                      <span>empty — drop a holding here to file it</span>
+                    </span>
+                  </td>
+                </tr>
+              ))}
             {folderRows.length === 0 && (
               <tr>
                 <td colSpan={columnCount} className="px-4 py-12 text-center text-sm text-slate-400">
@@ -793,7 +950,16 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
           return (
             <Fragment key={groupKey}>
               {hasFolders && (
-                <li className="bg-slate-50/60 px-4 py-2">{groupHeader(group)}</li>
+                <li
+                  {...groupDropProps(group.folder?.id ?? null)}
+                  className={`border-l-2 px-4 py-2 transition ${
+                    groupDrop === groupKey
+                      ? "border-indigo-500 bg-indigo-50/70"
+                      : "border-transparent bg-slate-50/60"
+                  }`}
+                >
+                  {groupHeader(group)}
+                </li>
               )}
               {!isCollapsed && group.rows.map((r) => {
           const isCash = r.type === "cash";
@@ -890,6 +1056,30 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
             </Fragment>
           );
         })}
+        {rowDragging !== null &&
+          emptyFolders.map((folder) => (
+            <li
+              key={`drop-${folder.id}`}
+              {...groupDropProps(folder.id)}
+              className={`border-l-2 border-dashed px-4 py-2 text-xs transition ${
+                groupDrop === folder.id
+                  ? "border-indigo-500 bg-indigo-50/70"
+                  : "border-slate-200 bg-slate-50/40 text-slate-500"
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <ExchangeIcon
+                  provider={folder.icon === "exchange" ? (folder.glyph as PriceProvider) : undefined}
+                  glyph={folder.icon === "emoji" ? folder.glyph : undefined}
+                  label={folder.name.slice(0, 1)}
+                  color={folder.color}
+                  className="h-4 w-4 rounded"
+                />
+                <span className="font-semibold uppercase tracking-wide text-slate-600">{folder.name}</span>
+                <span>empty — drop here</span>
+              </span>
+            </li>
+          ))}
         {folderRows.length === 0 && (
           <li className="px-4 py-12 text-center text-sm text-slate-400">No holdings match.</li>
         )}

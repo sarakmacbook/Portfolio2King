@@ -232,12 +232,25 @@ Folders turn a long table into a few groups without changing any numbers:
    letter, an exchange logo (Binance, OKX, Bybit, Coinbase, Kraken, DexScreener)
    or any emoji you type.
 2. File holdings in: drag a row onto a folder chip, or use the **Folder** dropdown
-   that appears on every row while arranging. A holding can be in one folder, and
-   **Unfiled** is the default.
+   on every row. A holding can be in one folder, and **Unfiled** is the default.
 3. Drop the row back on **Unfiled** — or pick *Unfiled* in its dropdown — to pull
    it out again.
 4. Click **Save layout**. **Reset to default** removes the folders; the holdings
    themselves are never deleted, they just become unfiled again.
+
+**Dragging works outside arrange mode too**, which is the quick way to tidy up:
+
+- Every holding gets a grip on hover (always visible on touch screens, and the
+  **Folder** dropdown next to it is the keyboard-friendly path). Drag it and the
+  folder groups highlight.
+- Drop it on a **folder group** — its header or anywhere in its rows — and it is
+  filed there; drop it on **Unfiled** to pull it back out; drop it on another
+  holding to put it in *that* holding's folder. Empty folders show their own
+  dashed *"drop a holding here"* row while you drag.
+- Those drops save immediately (one small request per move, with the row moving
+  optimistically and snapping back if the save fails). Arrange mode is the only
+  place where moves stay pending until **Save layout**, because that is the click
+  that stores the folders themselves.
 
 Outside arrange mode the strip is a filter: **All**, one chip per folder with its
 count and value, and **Unfiled**. Clicking a chip narrows the table (and the
