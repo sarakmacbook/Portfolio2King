@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState, useSyncExternalStore } from "react";
+import { startTransition, useActionState, useState, useSyncExternalStore } from "react";
 import { useFormStatus } from "react-dom";
 import {
   saveAlertSettingsAction,
@@ -106,23 +106,32 @@ export function TestAlertButton({
 }
 
 /**
- * Lives inside the settings form (nested forms are invalid) and overrides the
- * submit action through `formAction`, so the schedule can be previewed without
- * saving it first.
+ * Lives inside the settings form (nested forms are invalid), so the preview can
+ * pick up unsaved edits.
+ *
+ * It is a plain button rather than `type="submit" formAction={action}`: React
+ * replaces the name/value of a button whose formAction is a function (it uses the
+ * name to encode the action), so a hidden `portfolioTest` flag never reached the
+ * server and every click answered "Unknown form". A real submit would also reset
+ * every uncontrolled field in the settings form before the action runs, throwing
+ * away edits the user has not saved yet.
  */
-function PortfolioTestButton({ disabled }: { disabled?: boolean }) {
-  const [state, action] = useActionState<AlertActionState, FormData>(sendPortfolioUpdateNowAction, {});
+function PortfolioTestButton() {
+  const [state, action, pending] = useActionState<AlertActionState, FormData>(sendPortfolioUpdateNowAction, {});
   return (
     <div className="space-y-2">
       <button
-        type="submit"
-        formAction={action}
-        name="portfolioTest"
-        value="1"
+        type="button"
         className="btn-ghost"
-        disabled={disabled}
+        disabled={pending}
+        onClick={(event) => {
+          const form = event.currentTarget.form;
+          if (!form) return;
+          const formData = new FormData(form);
+          startTransition(() => action(formData));
+        }}
       >
-        Send portfolio update now
+        {pending ? "Sending…" : "Send portfolio update now"}
       </button>
       <Note state={state} />
     </div>
@@ -327,22 +336,27 @@ export default function AlertSettingsForm({
             </div>
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <PortfolioTestButton disabled={!portfolioEnabled} />
-            {portfolioEnabled && (nextPortfolioLabel || lastPortfolioLabel) && (
-              <div className="text-xs text-slate-500">
-                {nextPortfolioLabel && (
-                  <p>
-                    Next scheduled send: <span className="font-medium text-slate-700">{nextPortfolioLabel}</span>
-                  </p>
-                )}
-                <p className="mt-0.5">
-                  Last portfolio update sent:{" "}
-                  <span className="font-medium text-slate-700">{lastPortfolioLabel ?? "never"}</span>
+          {portfolioEnabled && (nextPortfolioLabel || lastPortfolioLabel) && (
+            <div className="mt-3 text-xs text-slate-500">
+              {nextPortfolioLabel && (
+                <p>
+                  Next scheduled send: <span className="font-medium text-slate-700">{nextPortfolioLabel}</span>
                 </p>
-              </div>
-            )}
-          </div>
+              )}
+              <p className="mt-0.5">
+                Last portfolio update sent:{" "}
+                <span className="font-medium text-slate-700">{lastPortfolioLabel ?? "never"}</span>
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 px-4 py-3">
+          <PortfolioTestButton />
+          <p className="max-w-md text-xs text-slate-500">
+            Sends a preview of today&apos;s message through the channels below right now. It ignores the optional
+            threshold and does not wait for the schedule, so it works before this is turned on.
+          </p>
         </div>
       </fieldset>
 

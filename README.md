@@ -209,7 +209,15 @@ Your portfolio moved from $52,000.00 to $53,222.00 since yesterday’s close: +$
 - Deposits, withdrawals and new buys move the total, so they count as part of the
   change. The message tells you how much the total moved, not why.
 - **Send portfolio update now** on `/alerts` previews today’s message without
-  waiting for the clock. Manual previews ignore the optional threshold.
+  waiting for the clock. The preview uses the comparison window and channels
+  currently shown on the form, so it reflects unsaved changes; it ignores the
+  optional threshold and works whether or not the schedule is switched on. On a
+  portfolio with no earlier snapshot it still sends — the message compares
+  against the newest snapshot (0.00 %) and says so, instead of refusing with
+  “not enough history”.
+- Test and preview results name only the channels that were used, e.g.
+  `Preview sent — “Portfolio ▲ +2.94% (+$1,000.00)” · 1 browser notified.` A
+  Telegram-only setup is never told “no browser subscribed”.
 
 ### Set up Web Push (browser / web clip)
 

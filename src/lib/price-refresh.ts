@@ -12,6 +12,7 @@ import {
   daysBetweenIso,
   describeBaseline,
   describePortfolioMove,
+  describePreviewBaseline,
   detectPriceMoves,
   formatPortfolioMove,
   formatPriceMove,
@@ -192,7 +193,48 @@ export type PortfolioUpdate = {
   move: PortfolioMove;
   title: string;
   body: string;
+  /**
+   * True when the comparison fell back to the newest snapshot (or the current
+   * total) because nothing exists on or before the cutoff. Preview only — the
+   * scheduled send never invents a baseline.
+   */
+  previewFallback?: boolean;
 };
+
+export type BuildPortfolioUpdateOptions = {
+  /**
+   * Preview mode for the "send it now" button: always produce a message, even
+   * on a portfolio younger than one snapshot, so delivery can be checked.
+   */
+  preview?: boolean;
+};
+
+/**
+ * The newest snapshot of any date, used only by previews. A brand-new ledger has
+ * today's snapshot (written on read) but nothing older, and a preview that says
+ * "not enough history" looks broken when the portfolio already has a value.
+ */
+async function loadLatestSnapshotBaseline(
+  current: number,
+  window: AlertWindow,
+): Promise<{ value: number; label: string } | null> {
+  const todayIso = today();
+  const result = await db.execute<{ total_value: number; date: string }>(sql`
+    SELECT total_value, date::text AS date
+    FROM snapshots
+    WHERE total_value > 0
+    ORDER BY date DESC
+    LIMIT 1
+  `);
+  const row = result.rows[0];
+  const value = Number(row?.total_value);
+  if (row && Number.isFinite(value) && value > 0) {
+    return { value, label: describePreviewBaseline(row.date, todayIso, window) };
+  }
+  // No snapshot at all: compare the total with itself, labelled as the fallback
+  // the scheduled send would use.
+  return current > 0 ? { value: current, label: describePreviewBaseline(null, todayIso, window) } : null;
+}
 
 /**
  * Current whole-portfolio change in money and percent. Used by the scheduled
@@ -201,14 +243,20 @@ export type PortfolioUpdate = {
 export async function buildPortfolioUpdate(
   settings: AlertSettings,
   fallbackTotal = 0,
+  options: BuildPortfolioUpdateOptions = {},
 ): Promise<PortfolioUpdate | null> {
   const list = await loadAssets();
   const current = computeTotals(list).totalValue;
-  const baseline = await loadPortfolioBaseline(settings.portfolio.window, fallbackTotal);
+  let baseline = await loadPortfolioBaseline(settings.portfolio.window, fallbackTotal);
+  let previewFallback = false;
+  if (!baseline && options.preview) {
+    baseline = await loadLatestSnapshotBaseline(current, settings.portfolio.window);
+    previewFallback = baseline !== null;
+  }
   if (!baseline) return null;
   const move = describePortfolioMove(baseline.value, current, baseline.label);
   if (!move) return null;
-  return { move, ...formatPortfolioMove(move) };
+  return { move, ...formatPortfolioMove(move), previewFallback };
 }
 
 async function loadAssets() {
