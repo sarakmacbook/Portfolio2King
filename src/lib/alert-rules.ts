@@ -920,9 +920,12 @@ export function formatPortfolioMove(move: PortfolioMove): { title: string; body:
   const title = `Portfolio ${arrow} ${percent} (${amount})`;
 
   if (move.direction === "flat") {
+    // No "unchanged since …" clause: the title already says 0.00 %, and on a
+    // weekly or monthly recap the baseline sentence only adds noise to a line
+    // that is, by definition, telling you nothing moved.
     return {
       title,
-      body: `Your portfolio is worth ${formatAmount(move.to)}, unchanged since ${move.baseline}.`,
+      body: `Your portfolio is worth ${formatAmount(move.to)}.`,
     };
   }
   return {

@@ -623,7 +623,7 @@ test("portfolio moves report money and percent, with an optional threshold", () 
   assert.ok(flat);
   assert.equal(flat.direction, "flat");
   assert.equal(formatPortfolioMove(flat).title, "Portfolio ▬ 0.00% ($0.00)");
-  assert.equal(formatPortfolioMove(flat).body, "Your portfolio is worth $50,000.00, unchanged since yesterday's close.");
+  assert.equal(formatPortfolioMove(flat).body, "Your portfolio is worth $50,000.00.");
 
   // No baseline or nonsense totals never produce an alert.
   assert.equal(describePortfolioMove(0, 51_000, "x"), null);
