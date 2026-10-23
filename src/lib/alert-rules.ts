@@ -195,7 +195,7 @@ export const MAX_TELEGRAM_TEXT_LENGTH = 4_096;
 
 /**
  * Settings for a fresh install: holding alerts on at ±5 % over a day, both
- * channels ticked, a 15-minute in-page refresh, and the scheduled portfolio
+ * channels ticked, a 10-minute in-page refresh, and the scheduled portfolio
  * update off until a time is chosen.
  */
 export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
@@ -203,7 +203,7 @@ export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
   thresholdPct: 5,
   window: "day",
   channels: ["push", "telegram"],
-  backgroundRefreshMinutes: 15,
+  backgroundRefreshMinutes: 10,
   portfolio: DEFAULT_PORTFOLIO_ALERT_SETTINGS,
 };
 

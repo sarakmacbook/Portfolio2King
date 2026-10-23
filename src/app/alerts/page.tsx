@@ -166,10 +166,10 @@ export default async function AlertsPage() {
           </div>
 
           <div>
-            <p className="font-medium text-slate-800">2 · Call the endpoint every 15 minutes</p>
+            <p className="font-medium text-slate-800">2 · Call the endpoint every 10 minutes</p>
             <pre className="mt-2 overflow-x-auto rounded-xl bg-slate-900 px-4 py-3 text-xs leading-relaxed text-slate-100">{CURL_SNIPPET}</pre>
             <p className="mt-2 text-xs text-slate-500">
-              Host cron: <code>*/15 * * * * /usr/local/bin/ledgerly-refresh</code>. systemd timer and GitHub Actions
+              Host cron: <code>*/10 * * * * /usr/local/bin/ledgerly-refresh</code>. systemd timer and GitHub Actions
               examples are in the README. On Vercel, schedule <code>/api/cron/refresh-prices</code> in{" "}
               <code>vercel.json</code> (minute-level crons need a Pro plan; the bundled daily cron also sends alerts).
             </p>

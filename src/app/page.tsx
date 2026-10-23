@@ -6,6 +6,7 @@ import AutoDailySnapshot from "@/components/AutoDailySnapshot";
 import { Donut, HistoryChart, type Point } from "@/components/Charts";
 import DashboardLayout from "@/components/DashboardLayout";
 import HoldingsTable, { type HoldingRow } from "@/components/HoldingsTable";
+import PortfolioValueHeader from "@/components/PortfolioValueHeader";
 import RefreshPricesButton from "@/components/RefreshPricesButton";
 import {
   loadDashboardOrder,
@@ -126,17 +127,12 @@ export default async function Dashboard() {
     <div className="space-y-6">
       <AutoDailySnapshot stale={stalePrices} currentDate={t} />
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium text-slate-500">Total portfolio value</p>
-          <h1 className="mt-1 break-words text-3xl font-semibold tracking-tight text-slate-900 tabular-nums sm:text-4xl">
-            {money(totals.totalValue)}
-          </h1>
-          {prev && (
-            <p className={`mt-1 text-sm font-medium ${pnlColor(change)}`}>
-              {money(change, { sign: true })} ({pct(prev.value > 0 ? change / prev.value : 0)}) since {fmtDate(prev.date)}
-            </p>
-          )}
-        </div>
+        <PortfolioValueHeader
+          totalValue={totals.totalValue}
+          rows={rows}
+          prev={prev}
+          change={change}
+        />
         <div className="flex gap-2">
           <RefreshPricesButton />
           <AddAssetDialog cashAccounts={cashAccounts} />

@@ -1,15 +1,17 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { backgroundRefreshPrices } from "@/app/alert-actions";
+import { DEFAULT_ALERT_SETTINGS } from "@/lib/alert-rules";
 
 /**
  * Keeps prices fresh while the app is open: reads the configured interval from
- * the server and triggers a throttled background refresh. Refreshes are skipped
- * while the tab is hidden (browsers throttle timers there anyway), and the
- * server ignores runs that happen sooner than the interval.
+ * the server (defaulting to every 10 minutes) and triggers a throttled
+ * background refresh, revalidating the current view whenever prices change.
  */
 export default function BackgroundRefresh() {
+  const router = useRouter();
   const running = useRef(false);
 
   useEffect(() => {
@@ -21,27 +23,43 @@ export default function BackgroundRefresh() {
       if (running.current || document.visibilityState === "hidden") return;
       running.current = true;
       void backgroundRefreshPrices()
+        .then((result) => {
+          if (!cancelled && result.refreshed > 0) {
+            router.refresh();
+          }
+        })
         .catch(() => undefined)
         .finally(() => {
           running.current = false;
         });
     };
 
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        run();
+      }
+    };
+
     async function start() {
+      let minutes = DEFAULT_ALERT_SETTINGS.backgroundRefreshMinutes;
       try {
         const response = await fetch("/api/alerts/status", { cache: "no-store" });
-        if (!response.ok) return;
-        const data = (await response.json()) as {
-          settings?: { backgroundRefreshMinutes?: number };
-        };
-        const minutes = Number(data.settings?.backgroundRefreshMinutes) || 0;
-        if (cancelled || minutes <= 0) return;
-        const ms = Math.max(5, minutes) * 60_000;
-        initial = setTimeout(run, 5_000);
-        interval = setInterval(run, ms);
+        if (response.ok) {
+          const data = (await response.json()) as {
+            settings?: { backgroundRefreshMinutes?: number };
+          };
+          if (typeof data.settings?.backgroundRefreshMinutes === "number") {
+            minutes = data.settings.backgroundRefreshMinutes;
+          }
+        }
       } catch {
-        // Offline or the server is unavailable — try again on the next page load.
+        // Fall back to the 10-minute default interval.
       }
+      if (cancelled || minutes <= 0) return;
+      const ms = Math.max(5, minutes) * 60_000;
+      initial = setTimeout(run, 5_000);
+      interval = setInterval(run, ms);
+      document.addEventListener("visibilitychange", onVisibilityChange);
     }
 
     void start();
@@ -49,8 +67,9 @@ export default function BackgroundRefresh() {
       cancelled = true;
       if (initial) clearTimeout(initial);
       if (interval) clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, []);
+  }, [router]);
 
   return null;
 }
