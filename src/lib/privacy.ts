@@ -11,6 +11,12 @@ import {
 export const PRIVACY_SETTING_KEY = "privacy.lock";
 export const PRIVACY_COOKIE_NAME = "ledgerly_privacy_session";
 export const PRIVACY_HIDDEN_COOKIE_NAME = "ledgerly_privacy_hidden";
+/**
+ * An unlocked browser stays unlocked until the user taps **Lock now** or
+ * **Forget this device**. Browsers cap cookie lifetime at 400 days, so that is
+ * the longest "remember me" that actually sticks on iOS.
+ */
+export const PRIVACY_DEVICE_MAX_AGE = 60 * 60 * 24 * 400;
 export const PRIVACY_STORAGE_KEY = "ledgerly-privacy-hidden";
 export const MASKED_VALUE = "••••••";
 

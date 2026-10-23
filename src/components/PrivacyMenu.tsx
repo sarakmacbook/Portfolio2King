@@ -24,9 +24,11 @@ export function PrivacyMenuItems({
     hasPin,
     hasPasskey,
     hidden,
+    rememberedDevice,
     hideBalances,
     requestRevealBalances,
     lockPortfolio,
+    forgetDevice,
     openDialog,
   } = usePrivacy();
   const hasLock = hasPin || hasPasskey;
@@ -47,6 +49,11 @@ export function PrivacyMenuItems({
   function runLock() {
     onDone?.();
     void lockPortfolio();
+  }
+
+  function runForget() {
+    onDone?.();
+    void forgetDevice();
   }
 
   function openSettings() {
@@ -114,6 +121,24 @@ export function PrivacyMenuItems({
         </button>
       )}
 
+      {hasLock && rememberedDevice && (
+        <button
+          type="button"
+          onClick={runForget}
+          className={`${row} ${size} text-slate-700 hover:bg-slate-50`}
+        >
+          <span className="text-base" aria-hidden="true">
+            🧹
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold">Forget this device</span>
+            <span className="block text-xs text-slate-500">
+              Require Face ID again on this browser
+            </span>
+          </span>
+        </button>
+      )}
+
       <button
         type="button"
         onClick={openSettings}
@@ -135,6 +160,14 @@ export function PrivacyMenuItems({
           </span>
         </span>
       </button>
+
+      {hasLock && (
+        <p className="px-3 pt-1 text-[11px] leading-relaxed text-slate-400">
+          {rememberedDevice
+            ? `Remembered on this device: ${rememberedDevice.label}. Stays unlocked until you lock or forget it.`
+            : "Not remembered yet — Face ID is asked once on this device."}
+        </p>
+      )}
     </div>
   );
 }
