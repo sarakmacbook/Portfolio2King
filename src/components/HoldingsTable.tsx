@@ -20,6 +20,7 @@ export type HoldingRow = {
   name: string;
   symbol: string;
   cryptoCategory: "stablecoin" | "volatile";
+  wallet?: string;
   quantity: number;
   avgCost: number;
   currentPrice: number;
@@ -166,7 +167,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                   <td className="px-4 py-3">
                     <Link href={`/assets/${r.id}`} className="flex items-center gap-3">
                       {r.type === "crypto" ? (
-                        <CryptoLogo symbol={r.symbol} name={r.name} />
+                        <CryptoLogo symbol={r.symbol} name={r.name} wallet={r.wallet} />
                       ) : (
                         <span
                           className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-xs font-bold text-white"
@@ -249,7 +250,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
             <li key={r.id} className="px-4 py-3">
               <Link href={`/assets/${r.id}`} className="flex items-start gap-3">
                 {r.type === "crypto" ? (
-                  <CryptoLogo symbol={r.symbol} name={r.name} />
+                  <CryptoLogo symbol={r.symbol} name={r.name} wallet={r.wallet} />
                 ) : (
                   <span
                     className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-xs font-bold text-white"

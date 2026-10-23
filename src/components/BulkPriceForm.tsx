@@ -14,6 +14,7 @@ export type PriceRow = {
   type: AssetType;
   name: string;
   symbol: string;
+  wallet?: string;
   /** Exchange the asset was added from ("" = any provider). */
   priceSource: PriceProvider | "";
   quantity: number;
@@ -150,7 +151,7 @@ export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
                   <td className="px-5 py-3">
                     <Link href={`/assets/${r.id}`} className="group flex items-center gap-2">
                       {r.type === "crypto" ? (
-                        <CryptoLogo symbol={r.symbol} name={r.name} className="h-7 w-7 rounded-lg" />
+                        <CryptoLogo symbol={r.symbol} name={r.name} wallet={r.wallet} className="h-7 w-7 rounded-lg" />
                       ) : (
                         <span className="h-2 w-2 rounded-full" style={{ background: TYPE_META[r.type].color }} />
                       )}
@@ -203,7 +204,7 @@ export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
             <li key={r.id} className={`px-4 py-3 ${changed ? "bg-indigo-50/40" : ""}`}>
               <div className="flex items-center gap-2">
                 {r.type === "crypto" ? (
-                  <CryptoLogo symbol={r.symbol} name={r.name} className="h-7 w-7 rounded-lg" />
+                  <CryptoLogo symbol={r.symbol} name={r.name} wallet={r.wallet} className="h-7 w-7 rounded-lg" />
                 ) : (
                   <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: TYPE_META[r.type].color }} />
                 )}

@@ -23,6 +23,8 @@ import {
   today,
 } from "@/lib/portfolio";
 import { parsePriceSource } from "@/lib/market-prices";
+import { getWeb3Wallet, parseWeb3WalletId } from "@/lib/web3-wallets";
+import { saveAssetWalletLogo } from "@/lib/web3-wallets-db";
 import { refreshPricesWithAlerts } from "@/lib/price-refresh";
 import {
   clearDashboardOrder,
@@ -113,7 +115,10 @@ export async function createAsset(_prev: ActionState, fd: FormData): Promise<Act
       type === "crypto" && CRYPTO_CATEGORIES.includes(requestedCategory) ? requestedCategory : "volatile";
     // Only crypto is priced from an exchange; anything else stores no source.
     const priceSource = type === "crypto" ? parsePriceSource(str(fd, "priceSource")) : "";
-    if (!name && !symbol) throw new Error("Name or symbol is required");
+    const walletLogo = type === "crypto" ? parseWeb3WalletId(str(fd, "walletLogo")) : "";
+    const defaultWalletName = walletLogo ? (getWeb3Wallet(walletLogo)?.name ?? "") : "";
+    const resolvedName = name || defaultWalletName || symbol;
+    if (!resolvedName && !symbol) throw new Error("Name or symbol is required");
     const quantity = num(fd, "quantity");
     const isCash = type === "cash";
     const avgCost = isCash ? 1 : num(fd, "avgCost");
@@ -130,9 +135,12 @@ export async function createAsset(_prev: ActionState, fd: FormData): Promise<Act
 
     const [row] = await db
       .insert(assets)
-      .values({ type, name: name || symbol, symbol, cryptoCategory, priceSource, currentPrice, notes })
+      .values({ type, name: resolvedName, symbol, cryptoCategory, priceSource, currentPrice, notes })
       .returning({ id: assets.id });
     newId = row.id;
+    if (walletLogo) {
+      await saveAssetWalletLogo(newId, walletLogo);
+    }
 
     if (quantity > 0) {
       await db.insert(transactions).values({
@@ -183,6 +191,9 @@ export async function updateAsset(_prev: ActionState, fd: FormData): Promise<Act
       asset.type === "crypto" && fd.has("priceSource")
         ? parsePriceSource(str(fd, "priceSource"))
         : asset.priceSource;
+    if (asset.type === "crypto" && fd.has("walletLogo")) {
+      await saveAssetWalletLogo(id, parseWeb3WalletId(str(fd, "walletLogo")));
+    }
     await db
       .update(assets)
       .set({ name: name || symbol, symbol, cryptoCategory, priceSource, notes: str(fd, "notes") })

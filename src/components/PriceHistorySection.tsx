@@ -87,6 +87,7 @@ export type AssetPriceHistoryItem = {
   type: AssetType;
   name: string;
   symbol: string;
+  wallet?: string;
   avgCost: number;
   currentPrice: number;
   points: PricePoint[];
@@ -129,7 +130,7 @@ export function PortfolioPriceHistory({ assets }: { assets: AssetPriceHistoryIte
                 }`}
               >
                 {item.type === "crypto" ? (
-                  <CryptoLogo symbol={item.symbol} name={item.name} className="h-6 w-6 rounded-lg" />
+                  <CryptoLogo symbol={item.symbol} name={item.name} wallet={item.wallet} className="h-6 w-6 rounded-lg" />
                 ) : (
                   <span
                     className="grid h-6 w-6 shrink-0 place-items-center rounded-lg text-[10px] font-bold text-white"
