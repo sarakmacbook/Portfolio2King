@@ -287,7 +287,9 @@ buttons above the box insert placeholders at the cursor.
 | Placeholder | Becomes |
 | --- | --- |
 | `{total}` | Portfolio value now — `$53,222.00` |
-| `{percent}` | Signed change — `+2.35%` |
+| `{percent}` | Signed change (capped at `±100%`) — `+2.35%` |
+| `{gain}` | Gain in `%` up to `100%`, switching to `% (x)` above `100%` — `+150.00% (2.50x)` |
+| `{x}` | Value multiple (`to ÷ from`) — `2.50x` |
 | `{amount}` | Signed money change — `+$1,222.00` |
 | `{from}` | Value it moved from — `$52,000.00` |
 | `{arrow}` | `▲`, `▼`, or `▬` |

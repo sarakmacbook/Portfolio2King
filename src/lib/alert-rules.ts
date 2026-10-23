@@ -896,6 +896,33 @@ export function formatMovePercent(changePct: number): string {
   return `${sign}${Math.abs(changePct * 100).toFixed(2)}%`;
 }
 
+/**
+ * Signed percentage change clamped to `[-100.00%, +100.00%]` for `{percent}` so
+ * it never exceeds 100%. Moves beyond +100% use `formatMoveGain` (`{gain}`) or
+ * `formatMoveMultiple` (`{x}`).
+ */
+export function formatCappedPercent(changePct: number): string {
+  const clamped = Math.max(-1, Math.min(1, changePct));
+  return formatMovePercent(clamped);
+}
+
+/** Value multiple `to / from` (`1 + changePct`), e.g. `+150%` → `"2.50x"`. */
+export function formatMoveMultiple(changePct: number): string {
+  const multiple = Math.max(0, 1 + changePct);
+  return `${multiple.toFixed(2)}x`;
+}
+
+/**
+ * Formats a move as a percentage up to +100% (e.g. `"+25.00%"`), and switches
+ * to percentage + multiple when above +100% (e.g. `"+150.00% (2.50x)"`).
+ */
+export function formatMoveGain(changePct: number): string {
+  if (changePct > 1 + 1e-9) {
+    return `${formatMovePercent(changePct)} (${formatMoveMultiple(changePct)})`;
+  }
+  return formatMovePercent(changePct);
+}
+
 /** `$1,234.56` without a sign, `+$1,234.56` / `-$1,234.56` with one. */
 export function formatSignedAmount(value: number): string {
   const amount = new Intl.NumberFormat("en-US", {
@@ -941,7 +968,9 @@ export function formatPortfolioMove(move: PortfolioMove): { title: string; body:
  */
 export const PORTFOLIO_MESSAGE_PLACEHOLDERS = [
   { token: "total", description: "Portfolio value now", sample: "$53,222.00" },
-  { token: "percent", description: "Signed change", sample: "+2.35%" },
+  { token: "percent", description: "Signed change (max 100%)", sample: "+2.35%" },
+  { token: "gain", description: "Gain in % (or % + x above 100%)", sample: "+150.00% (2.50x)" },
+  { token: "x", description: "Value multiple (to ÷ from)", sample: "2.50x" },
   { token: "amount", description: "Signed money change", sample: "+$1,222.00" },
   { token: "from", description: "Value it moved from", sample: "$52,000.00" },
   { token: "arrow", description: "▲ ▼ or ▬", sample: "▲" },
@@ -982,7 +1011,9 @@ export function portfolioMessageValues(
   const { move } = update;
   return {
     total: formatAmount(move.to),
-    percent: formatMovePercent(move.changePct),
+    percent: formatCappedPercent(move.changePct),
+    gain: formatMoveGain(move.changePct),
+    x: formatMoveMultiple(move.changePct),
     amount: formatSignedAmount(move.changeMoney),
     from: formatAmount(move.from),
     arrow: move.direction === "up" ? "▲" : move.direction === "down" ? "▼" : "▬",
