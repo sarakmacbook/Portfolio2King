@@ -14,6 +14,7 @@ import {
   describePreviewBaseline,
   describePreviewDelivery,
   describeTestDelivery,
+  duePortfolioRuns,
   portfolioMessageValues,
   renderPortfolioTemplate,
   unknownPortfolioPlaceholders,
@@ -47,6 +48,7 @@ import {
   telegramRequest,
   zonedClock,
   zonedTimeToUtc,
+  type PortfolioAlertSettings,
 } from "../src/lib/alert-rules";
 import { sendTelegramMessage } from "../src/lib/alerts";
 
@@ -88,7 +90,9 @@ test("comparison windows parse, default to a day, and shift dates safely", () =>
   assert.equal(parseAlertWindow(" DAY "), "day");
   assert.equal(parseAlertWindow("month"), "month");
   assert.equal(parseAlertWindow("monthly"), "month");
-  assert.equal(parseAlertWindow("week"), null);
+  assert.equal(parseAlertWindow("week"), "week");
+  assert.equal(parseAlertWindow("7d"), "week");
+  assert.equal(parseAlertWindow("year"), null);
   assert.equal(parseAlertWindow(""), null);
   assert.equal(parseAlertWindow(null), null);
 
@@ -142,7 +146,11 @@ test("settings rows round-trip through the parser", () => {
       enabled: true,
       time: "18:30",
       timezone: "Asia/Phnom_Penh",
-      window: "month" as const,
+      dailyEnabled: true,
+      weeklyEnabled: true,
+      weeklyDay: 3,
+      monthlyEnabled: false,
+      monthlyDay: 12,
       thresholdPct: null,
       telegramTemplate: "Portfolio {arrow} {percent}",
       telegramNote: "— sent from Ledgerly",
@@ -160,7 +168,11 @@ test("settings rows round-trip through the parser", () => {
       enabled: true,
       time: "18:30",
       timezone: "Asia/Phnom_Penh",
-      window: "month",
+      dailyEnabled: true,
+      weeklyEnabled: true,
+      weeklyDay: 3,
+      monthlyEnabled: false,
+      monthlyDay: 12,
       thresholdPct: null,
       telegramTemplate: "Portfolio {arrow} {percent}",
       telegramNote: "— sent from Ledgerly",
@@ -386,14 +398,22 @@ test("portfolio update settings: time is what matters, threshold is optional", (
     [SETTING_KEYS.portfolioEnabled]: "yes",
     [SETTING_KEYS.portfolioTime]: "7:05",
     [SETTING_KEYS.portfolioTimezone]: "Asia/Phnom_Penh",
-    [SETTING_KEYS.portfolioWindow]: "month",
+    [SETTING_KEYS.portfolioDaily]: "true",
+    [SETTING_KEYS.portfolioWeekly]: "true",
+    [SETTING_KEYS.portfolioWeeklyDay]: "5",
+    [SETTING_KEYS.portfolioMonthly]: "false",
+    [SETTING_KEYS.portfolioMonthlyDay]: "12",
     [SETTING_KEYS.portfolioThresholdPct]: "2.5",
   });
   assert.deepEqual(parsed, {
     enabled: true,
     time: "07:05",
     timezone: "Asia/Phnom_Penh",
-    window: "month",
+    dailyEnabled: true,
+    weeklyEnabled: true,
+    weeklyDay: 5,
+    monthlyEnabled: false,
+    monthlyDay: 12,
     thresholdPct: 2.5,
     telegramTemplate: "",
     telegramNote: "",
@@ -408,6 +428,92 @@ test("portfolio update settings: time is what matters, threshold is optional", (
   // Unreadable values fall back instead of breaking the page.
   assert.equal(parsePortfolioAlertSettings({ [SETTING_KEYS.portfolioTime]: "25:99" }).time, "18:00");
   assert.equal(parsePortfolioAlertSettings({ [SETTING_KEYS.portfolioThresholdPct]: "abc" }).thresholdPct, null);
+
+  // Cadence pickers clamp instead of breaking: only 0–6 and 1–28 are schedules.
+  assert.equal(parsePortfolioAlertSettings({ [SETTING_KEYS.portfolioWeeklyDay]: "9" }).weeklyDay, 1);
+  assert.equal(parsePortfolioAlertSettings({ [SETTING_KEYS.portfolioWeeklyDay]: "0" }).weeklyDay, 0);
+  assert.equal(parsePortfolioAlertSettings({ [SETTING_KEYS.portfolioMonthlyDay]: "31" }).monthlyDay, 1);
+  assert.equal(parsePortfolioAlertSettings({ [SETTING_KEYS.portfolioMonthlyDay]: "28" }).monthlyDay, 28);
+  // An old single-window row is ignored, not turned into a cadence.
+  assert.equal(
+    parsePortfolioAlertSettings({ [SETTING_KEYS.portfolioWindow]: "month" }).dailyEnabled,
+    true,
+  );
+});
+
+test("daily, weekly and monthly recaps are independent schedules", () => {
+  const settings: PortfolioAlertSettings = {
+    ...DEFAULT_PORTFOLIO_ALERT_SETTINGS,
+    enabled: true,
+    time: "18:00",
+    timezone: "Asia/Phnom_Penh",
+    weeklyDay: 4, // Thursday
+    monthlyDay: 22,
+  };
+  const at = (iso: string) => new Date(iso);
+
+  // Thursday 22 Oct 2026, after 18:00 Phnom Penh (UTC+7): all three are due.
+  const runs = duePortfolioRuns(at("2026-10-22T12:00:00Z"), settings, "Asia/Phnom_Penh");
+  assert.deepEqual(
+    runs.map((run) => run.cadence),
+    ["day", "week", "month"],
+  );
+  // Monthly dedupes per calendar month, daily per day, weekly per its weekday.
+  assert.deepEqual(
+    runs.map((run) => run.periodKey),
+    ["2026-10-22", "2026-10-22", "2026-10"],
+  );
+  assert.deepEqual(new Set(runs.map((run) => portfolioAlertKey(run))).size, 3);
+
+  // Friday: only the daily recap is due, never the weekly one.
+  const friday = duePortfolioRuns(at("2026-10-23T12:00:00Z"), settings, "Asia/Phnom_Penh");
+  assert.deepEqual(friday.map((run) => run.cadence), ["day"]);
+
+  // Saturday the 24th: daily only. The weekly slot waits for next Thursday.
+  assert.deepEqual(
+    duePortfolioRuns(at("2026-10-24T12:00:00Z"), settings, "Asia/Phnom_Penh").map((run) => run.cadence),
+    ["day"],
+  );
+
+  // Ticking only the weekly recap leaves one send per Thursday.
+  const weeklyOnly = duePortfolioRuns(
+    at("2026-10-22T12:00:00Z"),
+    { ...settings, dailyEnabled: false, monthlyEnabled: false },
+    "Asia/Phnom_Penh",
+  );
+  assert.deepEqual(weeklyOnly.map((run) => run.cadence), ["week"]);
+
+  // Nothing before the chosen time, and nothing when the master switch is off.
+  assert.deepEqual(duePortfolioRuns(at("2026-10-22T10:00:00Z"), settings, "Asia/Phnom_Penh"), []);
+  assert.deepEqual(
+    duePortfolioRuns(at("2026-10-22T12:00:00Z"), { ...settings, enabled: false }, "Asia/Phnom_Penh"),
+    [],
+  );
+  assert.deepEqual(
+    duePortfolioRuns(
+      at("2026-10-22T12:00:00Z"),
+      { ...settings, dailyEnabled: false, weeklyEnabled: false, monthlyEnabled: false },
+      "Asia/Phnom_Penh",
+    ),
+    [],
+  );
+
+  // Cadence gating is explicit too.
+  assert.equal(portfolioScheduleFor(at("2026-10-23T12:00:00Z"), "18:00", "Asia/Phnom_Penh", "week", settings), null);
+  assert.equal(
+    portfolioScheduleFor(at("2026-10-22T12:00:00Z"), "18:00", "Asia/Phnom_Penh", "week", settings)?.date,
+    "2026-10-22",
+  );
+  assert.equal(portfolioScheduleFor(at("2026-10-23T12:00:00Z"), "18:00", "Asia/Phnom_Penh", "month", settings), null);
+
+  // Next send skips to the next enabled cadence day, not merely tomorrow.
+  const nextWeekly = nextPortfolioAlertAt(
+    at("2026-10-23T12:00:00Z"),
+    "18:00",
+    "Asia/Phnom_Penh",
+    { ...settings, dailyEnabled: false, monthlyEnabled: false },
+  );
+  assert.equal(nextWeekly?.toISOString(), "2026-10-29T11:00:00.000Z");
 });
 
 test("time zones decide when the portfolio update is due", () => {
@@ -447,7 +553,7 @@ test("time zones decide when the portfolio update is due", () => {
   // (and no stale send) once the date rolls over.
   const evening = portfolioScheduleFor(new Date("2026-10-22T11:05:00Z"), "18:00", "Asia/Phnom_Penh");
   const night = portfolioScheduleFor(new Date("2026-10-22T16:00:00Z"), "18:00", "Asia/Phnom_Penh");
-  assert.equal(portfolioAlertKey(evening!.date), portfolioAlertKey(night!.date));
+  assert.equal(portfolioAlertKey(evening!), portfolioAlertKey(night!));
   assert.equal(portfolioScheduleFor(new Date("2026-10-22T17:30:00Z"), "18:00", "Asia/Phnom_Penh"), null);
   assert.equal(
     portfolioScheduleFor(new Date("2026-10-23T11:00:00Z"), "18:00", "Asia/Phnom_Penh")?.date,
@@ -523,9 +629,13 @@ test("portfolio moves report money and percent, with an optional threshold", () 
   assert.equal(portfolioMovePassesThreshold(down, 3), true);
   assert.equal(portfolioMovePassesThreshold(flat, 0.5), false);
 
-  assert.equal(portfolioAlertKey("2026-10-22"), "portfolio:2026-10-22:day");
-  assert.equal(portfolioAlertKey("2026-10-22", "month"), "portfolio:2026-10-22:month");
-  assert.notEqual(portfolioAlertKey("2026-10-22"), portfolioAlertKey("2026-10-23"));
+  assert.equal(portfolioAlertKey({ cadence: "day", periodKey: "2026-10-22" }), "portfolio:day:2026-10-22");
+  assert.equal(portfolioAlertKey({ cadence: "week", periodKey: "2026-10-22" }), "portfolio:week:2026-10-22");
+  assert.equal(portfolioAlertKey({ cadence: "month", periodKey: "2026-10" }), "portfolio:month:2026-10");
+  assert.notEqual(
+    portfolioAlertKey({ cadence: "day", periodKey: "2026-10-22" }),
+    portfolioAlertKey({ cadence: "day", periodKey: "2026-10-23" }),
+  );
 });
 
 test("test and preview results only mention the channels that were used", () => {

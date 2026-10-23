@@ -12,6 +12,7 @@ import {
   MAX_PORTFOLIO_NOTE_LENGTH,
   MAX_PORTFOLIO_TEMPLATE_LENGTH,
   PORTFOLIO_MESSAGE_PLACEHOLDERS,
+  WEEKDAY_NAMES,
   composePortfolioTelegramMessage,
   formatPortfolioMove,
   unknownPortfolioPlaceholders,
@@ -222,14 +223,14 @@ function PortfolioTelegramEditor({
   /** Real update per comparison window, built on the server. */
   previewUpdates?: Record<AlertWindow, PortfolioUpdate | null> | null;
   previewContext?: PortfolioMessageContext | null;
-  windowOverride?: PortfolioAlertSettings["window"];
+  windowOverride?: AlertWindow;
   timeOverride?: string;
 }) {
   const [template, setTemplate] = useState(settings.telegramTemplate);
   const [note, setNote] = useState(settings.telegramNote);
   const templateRef = useRef<HTMLTextAreaElement>(null);
 
-  const shownWindow = windowOverride ?? settings.window;
+  const shownWindow: AlertWindow = windowOverride ?? "day";
   const previewUpdate = previewUpdates?.[shownWindow] ?? null;
   const usingSample = !previewUpdate;
   const update = previewUpdate ?? SAMPLE_MESSAGE;
@@ -376,7 +377,7 @@ export default function AlertSettingsForm({
   const [portfolioEnabled, setPortfolioEnabled] = useState(settings.portfolio.enabled);
   // Kept in state so {window} and {time} in the live preview follow the picker
   // before the form is saved, instead of showing the last saved values.
-  const [previewWindow, setPreviewWindow] = useState<PortfolioAlertSettings["window"]>(settings.portfolio.window);
+  const [previewWindow, setPreviewWindow] = useState<AlertWindow>("day");
   const [previewTime, setPreviewTime] = useState(settings.portfolio.time);
   const [pickedTimeZone, setPickedTimeZone] = useState<string | null>(null);
   const detectedTimeZone = useSyncExternalStore(noopSubscribe, deviceTimeZone, serverTimeZone);
@@ -546,21 +547,102 @@ export default function AlertSettingsForm({
               />
               <p className="mt-1 text-xs text-slate-400">Optional — leave blank to get it every day.</p>
             </div>
+          </div>
+
+          <fieldset className="mt-4 rounded-2xl border border-slate-200 p-4">
+            <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              How often
+            </legend>
+            <p className="text-xs text-slate-500">
+              Each recap compares with its own horizon and sends once per period, so ticking one never repeats another.
+            </p>
+
+            <div className="mt-3 space-y-2">
+              <div className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 px-3 py-2">
+                <label className="flex flex-1 items-center gap-2.5 text-sm text-slate-800">
+                  <input
+                    type="checkbox"
+                    name="portfolioDaily"
+                    defaultChecked={settings.portfolio.dailyEnabled}
+                    className="h-4 w-4 accent-indigo-600"
+                  />
+                  Every day
+                </label>
+                <span className="text-xs text-slate-500">compared with yesterday&apos;s total</span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 px-3 py-2">
+                <label className="flex flex-1 items-center gap-2.5 text-sm text-slate-800">
+                  <input
+                    type="checkbox"
+                    name="portfolioWeekly"
+                    defaultChecked={settings.portfolio.weeklyEnabled}
+                    className="h-4 w-4 accent-indigo-600"
+                  />
+                  Every week on
+                </label>
+                <select
+                  name="portfolioWeeklyDay"
+                  defaultValue={String(settings.portfolio.weeklyDay)}
+                  aria-label="Day of the week for the weekly recap"
+                  className="input w-auto py-1 text-xs"
+                >
+                  {WEEKDAY_NAMES.map((name, index) => (
+                    <option key={name} value={index}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs text-slate-500">compared with 7 days ago</span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 px-3 py-2">
+                <label className="flex flex-1 items-center gap-2.5 text-sm text-slate-800">
+                  <input
+                    type="checkbox"
+                    name="portfolioMonthly"
+                    defaultChecked={settings.portfolio.monthlyEnabled}
+                    className="h-4 w-4 accent-indigo-600"
+                  />
+                  Every month on day
+                </label>
+                <input
+                  type="number"
+                  name="portfolioMonthlyDay"
+                  min={1}
+                  max={28}
+                  defaultValue={settings.portfolio.monthlyDay}
+                  aria-label="Day of the month for the monthly recap"
+                  className="input w-20 py-1 text-xs"
+                />
+                <span className="text-xs text-slate-500">compared with ~30 days ago (1–28, so every month has it)</span>
+              </div>
+            </div>
+          </fieldset>
+
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="label" htmlFor="portfolioWindow">
-                Compare over
+              <label className="label" htmlFor="portfolioPreviewWindow">
+                Preview recap
               </label>
               <select
-                id="portfolioWindow"
-                name="portfolioWindow"
+                id="portfolioPreviewWindow"
+                name="portfolioPreviewWindow"
                 value={previewWindow}
-                onChange={(event) => setPreviewWindow(event.target.value as PortfolioAlertSettings["window"])}
+                onChange={(event) => setPreviewWindow(event.target.value as AlertWindow)}
                 className="input"
               >
-                <option value="day">Day — vs yesterday&apos;s total</option>
-                <option value="month">Month — vs the total 30 days ago</option>
+                <option value="day">Daily — vs yesterday&apos;s total</option>
+                <option value="week">Weekly — vs the total 7 days ago</option>
+                <option value="month">Monthly — vs the total 30 days ago</option>
               </select>
-              <p className="mt-1 text-xs text-slate-400">Deposits and withdrawals count as part of the change.</p>
+              <p className="mt-1 text-xs text-slate-400">
+                Only changes the preview below; each ticked recap sends its own message. Deposits and withdrawals count
+                as part of the change.
+              </p>
+            </div>
+            <div className="self-end text-xs text-slate-400">
+              The optional threshold applies to every recap.
             </div>
           </div>
 

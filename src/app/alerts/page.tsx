@@ -52,7 +52,7 @@ export default async function AlertsPage() {
   const portfolioZone = resolveTimeZone(settings.portfolio.timezone);
   const nextPortfolioAt =
     settings.portfolio.enabled && settings.portfolio.time
-      ? nextPortfolioAlertAt(new Date(), settings.portfolio.time, portfolioZone)
+      ? nextPortfolioAlertAt(new Date(), settings.portfolio.time, portfolioZone, settings.portfolio)
       : null;
   const nextPortfolioLabel = nextPortfolioAt
     ? nextPortfolioAt.toLocaleString("en-US", {
@@ -68,22 +68,21 @@ export default async function AlertsPage() {
 
   // The exact message a Telegram send would carry: real totals, the real
   // comparison window and the date it would go out. Built here (server) so the
-  // preview on /alerts is not a mock-up with invented numbers. Both windows are
-  // prepared, so switching "Compare over" updates the preview before saving.
+  // preview on /alerts is not a mock-up with invented numbers. All three
+  // cadences are prepared, so switching the preview updates before saving.
   const previewContext: PortfolioMessageContext = {
     date: zonedClock(new Date(), portfolioZone).date,
     time: settings.portfolio.time || "18:00",
-    window: settings.portfolio.window,
+    window: "day",
   };
-  let previewUpdates: Record<AlertWindow, PortfolioUpdate | null> = { day: null, month: null };
+  let previewUpdates: Record<AlertWindow, PortfolioUpdate | null> = { day: null, week: null, month: null };
   try {
-    const build = (window: AlertWindow) =>
-      buildPortfolioUpdate({ ...settings, portfolio: { ...settings.portfolio, window } }, 0, { preview: true });
-    const [day, month] = await Promise.all([build("day"), build("month")]);
-    previewUpdates = { day, month };
+    const build = (window: AlertWindow) => buildPortfolioUpdate(settings, 0, { preview: true, window });
+    const [day, week, month] = await Promise.all([build("day"), build("week"), build("month")]);
+    previewUpdates = { day, week, month };
   } catch {
     // A preview must never take the settings page down with it.
-    previewUpdates = { day: null, month: null };
+    previewUpdates = { day: null, week: null, month: null };
   }
 
   let publicKey: string | null = null;
