@@ -249,9 +249,12 @@ That preview is produced by
 Now {total} ({percent} from {from})
 ```
 
-plus the note `— sent from Ledgerly`. A live preview under the box shows exactly
-what Telegram receives, and the buttons above it insert placeholders at the
-cursor.
+plus the note `— sent from Ledgerly`. The panel under the box is a live preview
+of **your own** next message: the real totals, window and date are computed on
+the server and every placeholder is filled in, so it matches what Telegram
+receives and follows your edits (and the "Compare over" picker) as you type. A
+portfolio with nothing in it yet falls back to a clearly-labelled sample. The
+buttons above the box insert placeholders at the cursor.
 
 | Placeholder | Becomes |
 | --- | --- |

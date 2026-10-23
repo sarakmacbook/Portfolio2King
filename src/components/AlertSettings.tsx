@@ -16,10 +16,12 @@ import {
   formatPortfolioMove,
   unknownPortfolioPlaceholders,
   type AlertSettings,
+  type AlertWindow,
   type PortfolioAlertSettings,
   type PortfolioMessageContext,
   type PortfolioMove,
 } from "@/lib/alert-rules";
+import type { PortfolioUpdate } from "@/lib/price-refresh";
 import { SubmitButton } from "./ui";
 
 const REFRESH_OPTIONS = [0, 5, 10, 15, 30, 60, 120];
@@ -77,33 +79,47 @@ function serverTimeZone(): string {
 }
 
 function Note({ state }: { state: AlertActionState }) {
+  // The composed message is shown even when delivery failed: "nothing was
+  // delivered" is still useful to see *what* was (not) delivered, and the
+  // preview button doubles as a look at today's real message.
+  const sample =
+    state.sample && state.sample !== state.message ? (
+      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+          Message sent to Telegram
+        </p>
+        <pre className="whitespace-pre-wrap break-words font-sans text-xs text-slate-700">{state.sample}</pre>
+      </div>
+    ) : null;
+
   if (state.error) {
-    return <p className="mt-2 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700 ring-1 ring-rose-200">{state.error}</p>;
-  }
-  if (state.ok && state.message) {
     return (
       <div className="mt-2 space-y-2">
-        <p className="rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700 ring-1 ring-emerald-200">
-          {state.message}
+        <p role="alert" className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700 ring-1 ring-rose-200">
+          {state.error}
         </p>
-        {state.warning && (
-          <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-200">{state.warning}</p>
-        )}
-        {state.sample && state.sample !== state.message && (
-          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-              Message sent to Telegram
-            </p>
-            <pre className="whitespace-pre-wrap break-words font-sans text-xs text-slate-700">{state.sample}</pre>
-          </div>
-        )}
+        {sample}
       </div>
     );
   }
-  if (state.warning) {
-    return <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-200">{state.warning}</p>;
+  if (state.ok && (state.message || state.warning)) {
+    return (
+      <div className="mt-2 space-y-2">
+        {state.message && (
+          <p role="status" className="rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700 ring-1 ring-emerald-200">
+            {state.message}
+          </p>
+        )}
+        {state.warning && (
+          <p role="status" className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-200">
+            {state.warning}
+          </p>
+        )}
+        {sample}
+      </div>
+    );
   }
-  return null;
+  return sample;
 }
 
 function TestSubmit({ label, disabled, className }: { label: string; disabled?: boolean; className: string }) {
@@ -189,16 +205,43 @@ const STANDARD_PREVIEW = `${SAMPLE_MESSAGE.title}\n${SAMPLE_MESSAGE.body}`;
 /**
  * Template + note for the Telegram copy of the portfolio update. Both are plain
  * text, so nothing needs escaping and emoji just work.
+ *
+ * The preview uses the real portfolio (`previewUpdates` / `previewContext`,
+ * built on the server), so it matches the message Telegram actually receives.
+ * Only when the ledger has no value yet does it fall back to the fixed sample,
+ * and the panel says so.
  */
-function PortfolioTelegramEditor({ settings }: { settings: PortfolioAlertSettings }) {
+function PortfolioTelegramEditor({
+  settings,
+  previewUpdates,
+  previewContext,
+  windowOverride,
+  timeOverride,
+}: {
+  settings: PortfolioAlertSettings;
+  /** Real update per comparison window, built on the server. */
+  previewUpdates?: Record<AlertWindow, PortfolioUpdate | null> | null;
+  previewContext?: PortfolioMessageContext | null;
+  windowOverride?: PortfolioAlertSettings["window"];
+  timeOverride?: string;
+}) {
   const [template, setTemplate] = useState(settings.telegramTemplate);
   const [note, setNote] = useState(settings.telegramNote);
   const templateRef = useRef<HTMLTextAreaElement>(null);
 
+  const shownWindow = windowOverride ?? settings.window;
+  const previewUpdate = previewUpdates?.[shownWindow] ?? null;
+  const usingSample = !previewUpdate;
+  const update = previewUpdate ?? SAMPLE_MESSAGE;
+  const context: PortfolioMessageContext = {
+    ...(previewContext ?? SAMPLE_CONTEXT),
+    window: shownWindow,
+    ...(timeOverride ? { time: timeOverride } : {}),
+  };
   const preview = composePortfolioTelegramMessage(
-    SAMPLE_MESSAGE,
+    update,
     { telegramTemplate: template, telegramNote: note },
-    SAMPLE_CONTEXT,
+    context,
   );
   const unknown = [...new Set([...unknownPortfolioPlaceholders(template), ...unknownPortfolioPlaceholders(note)])];
 
@@ -288,6 +331,11 @@ function PortfolioTelegramEditor({ settings }: { settings: PortfolioAlertSetting
           Preview · what Telegram receives
         </p>
         <pre className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-100">{preview}</pre>
+        <p className="mt-1 text-[10px] text-slate-400">
+          {usingSample
+            ? "Sample numbers — add a holding with a value to see your own totals here."
+            : "Your real totals. Telegram gets this text, updated as you type."}
+        </p>
       </div>
     </div>
   );
@@ -298,6 +346,8 @@ export default function AlertSettingsForm({
   telegramConnected = true,
   nextPortfolioLabel = null,
   lastPortfolioLabel = null,
+  previewUpdates = null,
+  previewContext = null,
 }: {
   settings: AlertSettings;
   telegramConnected?: boolean;
@@ -305,6 +355,14 @@ export default function AlertSettingsForm({
   nextPortfolioLabel?: string | null;
   /** Pre-formatted on the server, e.g. "2 h ago". */
   lastPortfolioLabel?: string | null;
+  /**
+   * The real next portfolio update per comparison window, built on the server
+   * with the saved settings. Null (or omitted) means the ledger has no value yet
+   * and the preview falls back to the fixed sample.
+   */
+  previewUpdates?: Record<AlertWindow, PortfolioUpdate | null> | null;
+  /** Date/time/window that would be used for the next send. */
+  previewContext?: PortfolioMessageContext | null;
 }) {
   const [state, action] = useActionState<AlertActionState, FormData>(
     (_previous, formData) => saveAlertSettingsAction(_previous, formData),
@@ -312,6 +370,10 @@ export default function AlertSettingsForm({
   );
 
   const [portfolioEnabled, setPortfolioEnabled] = useState(settings.portfolio.enabled);
+  // Kept in state so {window} and {time} in the live preview follow the picker
+  // before the form is saved, instead of showing the last saved values.
+  const [previewWindow, setPreviewWindow] = useState<PortfolioAlertSettings["window"]>(settings.portfolio.window);
+  const [previewTime, setPreviewTime] = useState(settings.portfolio.time);
   const [pickedTimeZone, setPickedTimeZone] = useState<string | null>(null);
   const detectedTimeZone = useSyncExternalStore(noopSubscribe, deviceTimeZone, serverTimeZone);
 
@@ -434,7 +496,8 @@ export default function AlertSettingsForm({
                 name="portfolioTime"
                 type="time"
                 step={60}
-                defaultValue={settings.portfolio.time}
+                value={previewTime}
+                onChange={(event) => setPreviewTime(event.target.value)}
                 className="input"
               />
               <p className="mt-1 text-xs text-slate-400">
@@ -483,7 +546,13 @@ export default function AlertSettingsForm({
               <label className="label" htmlFor="portfolioWindow">
                 Compare over
               </label>
-              <select id="portfolioWindow" name="portfolioWindow" defaultValue={settings.portfolio.window} className="input">
+              <select
+                id="portfolioWindow"
+                name="portfolioWindow"
+                value={previewWindow}
+                onChange={(event) => setPreviewWindow(event.target.value as PortfolioAlertSettings["window"])}
+                className="input"
+              >
                 <option value="day">Day — vs yesterday&apos;s total</option>
                 <option value="month">Month — vs the total 30 days ago</option>
               </select>
@@ -491,7 +560,13 @@ export default function AlertSettingsForm({
             </div>
           </div>
 
-          <PortfolioTelegramEditor settings={settings.portfolio} />
+          <PortfolioTelegramEditor
+            settings={settings.portfolio}
+            previewUpdates={previewUpdates}
+            previewContext={previewContext}
+            windowOverride={previewWindow}
+            timeOverride={previewTime}
+          />
 
           {portfolioEnabled && (nextPortfolioLabel || lastPortfolioLabel) && (
             <div className="mt-3 text-xs text-slate-500">

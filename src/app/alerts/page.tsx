@@ -13,7 +13,14 @@ import {
   getVapidConfig,
 } from "@/lib/alerts";
 import { getTelegramStatus } from "@/lib/telegram-bot";
-import { nextPortfolioAlertAt, resolveTimeZone } from "@/lib/alert-rules";
+import {
+  nextPortfolioAlertAt,
+  resolveTimeZone,
+  zonedClock,
+  type AlertWindow,
+  type PortfolioMessageContext,
+} from "@/lib/alert-rules";
+import { buildPortfolioUpdate, type PortfolioUpdate } from "@/lib/price-refresh";
 export const dynamic = "force-dynamic";
 
 const CURL_SNIPPET = `curl -fsS -H "Authorization: Bearer $CRON_SECRET" \
@@ -58,6 +65,26 @@ export default async function AlertsPage() {
         timeZoneName: "short",
       })
     : null;
+
+  // The exact message a Telegram send would carry: real totals, the real
+  // comparison window and the date it would go out. Built here (server) so the
+  // preview on /alerts is not a mock-up with invented numbers. Both windows are
+  // prepared, so switching "Compare over" updates the preview before saving.
+  const previewContext: PortfolioMessageContext = {
+    date: zonedClock(new Date(), portfolioZone).date,
+    time: settings.portfolio.time || "18:00",
+    window: settings.portfolio.window,
+  };
+  let previewUpdates: Record<AlertWindow, PortfolioUpdate | null> = { day: null, month: null };
+  try {
+    const build = (window: AlertWindow) =>
+      buildPortfolioUpdate({ ...settings, portfolio: { ...settings.portfolio, window } }, 0, { preview: true });
+    const [day, month] = await Promise.all([build("day"), build("month")]);
+    previewUpdates = { day, month };
+  } catch {
+    // A preview must never take the settings page down with it.
+    previewUpdates = { day: null, month: null };
+  }
 
   let publicKey: string | null = null;
   let keyError = "";
@@ -112,6 +139,8 @@ export default async function AlertsPage() {
           telegramConnected={telegram.configured}
           nextPortfolioLabel={nextPortfolioLabel}
           lastPortfolioLabel={lastPortfolio ? timeAgo(lastPortfolio) : null}
+          previewUpdates={previewUpdates}
+          previewContext={previewContext}
         />
       </section>
 
