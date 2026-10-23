@@ -99,6 +99,14 @@ export type PortfolioAlertSettings = {
    * Stored as `alerts.portfolio.telegramNote`, capped at MAX_PORTFOLIO_NOTE_LENGTH.
    */
   telegramNote: string;
+  /**
+   * Append an auto-written line (a short quote or reminder) to every scheduled
+   * recap. One line per period, picked offline from a built-in list, so each
+   * send reads differently without typing anything. It follows the manual note
+   * when both are set.
+   * Stored as `alerts.portfolio.autoNote` ("true"/"false").
+   */
+  autoNote: boolean;
 };
 
 export type AlertSettings = {
@@ -171,6 +179,8 @@ export const DEFAULT_PORTFOLIO_ALERT_SETTINGS: PortfolioAlertSettings = {
   // Opt-in: a threshold normally means "only wake me when it moved", and a
   // perfectly flat day is the quietest of all.
   sendUnchanged: false,
+  // Off by default: a generated line should be opted into, never sneaked in.
+  autoNote: false,
   telegramTemplate: "",
   telegramNote: "",
 };
@@ -238,6 +248,8 @@ export const SETTING_KEYS = {
   portfolioMonthlyDay: "alerts.portfolio.monthlyDay",
   /** Send a recap even when the total is unchanged — "true" / "false". */
   portfolioSendUnchanged: "alerts.portfolio.sendUnchanged",
+  /** Add an auto-written quote/sign-off to each recap — "true" / "false". */
+  portfolioAutoNote: "alerts.portfolio.autoNote",
   /** Optional portfolio threshold in percent — "" means "always send". */
   portfolioThresholdPct: "alerts.portfolio.thresholdPct",
   /** Custom Telegram message — "" = the standard title + body. */
@@ -676,6 +688,10 @@ export function parsePortfolioAlertSettings(
       values[SETTING_KEYS.portfolioSendUnchanged],
       DEFAULT_PORTFOLIO_ALERT_SETTINGS.sendUnchanged,
     ),
+    autoNote: parseBooleanSetting(
+      values[SETTING_KEYS.portfolioAutoNote],
+      DEFAULT_PORTFOLIO_ALERT_SETTINGS.autoNote,
+    ),
     telegramTemplate: clampText(values[SETTING_KEYS.portfolioTelegramTemplate], MAX_PORTFOLIO_TEMPLATE_LENGTH),
     telegramNote: clampText(values[SETTING_KEYS.portfolioTelegramNote], MAX_PORTFOLIO_NOTE_LENGTH),
   };
@@ -724,6 +740,7 @@ export function settingsToRows(settings: AlertSettings): Array<{ key: string; va
       value: settings.portfolio.thresholdPct === null ? "" : String(settings.portfolio.thresholdPct),
     },
     { key: SETTING_KEYS.portfolioSendUnchanged, value: settings.portfolio.sendUnchanged ? "true" : "false" },
+    { key: SETTING_KEYS.portfolioAutoNote, value: settings.portfolio.autoNote ? "true" : "false" },
     { key: SETTING_KEYS.portfolioTelegramTemplate, value: settings.portfolio.telegramTemplate },
     { key: SETTING_KEYS.portfolioTelegramNote, value: settings.portfolio.telegramNote },
   ];
@@ -945,6 +962,12 @@ export type PortfolioMessageContext = {
   /** Local scheduled time, `HH:MM`. */
   time: string;
   window: AlertWindow;
+  /**
+   * The auto-written line for this period, when the setting is on. Passed in
+   * rather than generated here so the preview and the real send use exactly the
+   * same line.
+   */
+  autoNote?: string;
 };
 
 const PLACEHOLDER_PATTERN = /\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}/g;
@@ -1006,8 +1029,10 @@ export function composePortfolioTelegramMessage(
   const values = portfolioMessageValues(update, context);
   const template = settings.telegramTemplate.trim();
   const message = template ? renderPortfolioTemplate(template, values) : `${update.title}\n${update.body}`;
-  const note = settings.telegramNote.trim();
-  const text = note ? `${message}\n\n${note}` : message;
+  // The manual note comes first, then the auto line, so a person's own words
+  // are never pushed below a generated one.
+  const extra = [settings.telegramNote.trim(), context.autoNote?.trim() ?? ""].filter(Boolean).join("\n");
+  const text = extra ? `${message}\n\n${extra}` : message;
   // Telegram rejects anything longer; cut instead of losing the whole message.
   return text.length > MAX_TELEGRAM_TEXT_LENGTH
     ? `${text.slice(0, MAX_TELEGRAM_TEXT_LENGTH - 1)}…`

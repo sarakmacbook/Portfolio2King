@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { autoNoteFor } from "@/lib/auto-notes";
 import { db } from "@/db";
 import { assets } from "@/db/schema";
 import {
@@ -491,6 +492,9 @@ async function dispatchPortfolioRun(input: {
     date: run.date,
     time: portfolio.time,
     window: run.cadence,
+    // One line per period: the next send of the same cadence picks the next
+    // one, while a retry of this send keeps the same wording.
+    autoNote: portfolio.autoNote ? autoNoteFor(run.cadence, run.periodKey) : "",
   });
   const result = await dispatchAlert({
     dedupeKey: portfolioAlertKey(run),
