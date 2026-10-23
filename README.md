@@ -207,6 +207,11 @@ Your portfolio moved from $52,000.00 to $53,222.00 since yesterday’s close: +$
   (%)* blank and the update arrives every day at that time, even when nothing
   moved (`Portfolio ▬ 0.00% ($0.00)`). Enter e.g. `2` to skip days with a
   smaller move.
+- **“Also send when nothing changed (0.00 %)”** keeps the flat days even with a
+  threshold set: the daily total still arrives when the portfolio did not move,
+  while moves that are merely smaller than the threshold stay skipped. It is
+  off by default, and it is unnecessary when the threshold is blank (that
+  already sends everything). Stored as `alerts.portfolio.sendUnchanged`.
 - **Each cadence compares with its own horizon:** daily vs yesterday’s total,
   weekly vs the total 7 days ago, monthly vs ~30 days ago. The baseline is the
   newest daily snapshot before that cutoff. Until one exists, the previous

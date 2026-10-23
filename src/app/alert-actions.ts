@@ -130,6 +130,7 @@ export async function saveAlertSettingsAction(
     if (weeklyEnabled && weeklyDay === null) {
       throw new Error("Pick a day of the week for the weekly recap.");
     }
+    const sendUnchanged = formData.get("portfolioSendUnchanged") !== null;
     const monthlyDay = parseMonthDay(formData.get("portfolioMonthlyDay"));
     if (monthlyEnabled && monthlyDay === null) {
       throw new Error("Monthly recap day must be between 1 and 28.");
@@ -165,6 +166,7 @@ export async function saveAlertSettingsAction(
         monthlyEnabled,
         monthlyDay: monthlyDay ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.monthlyDay,
         thresholdPct: portfolioThreshold.value,
+        sendUnchanged,
         telegramTemplate,
         telegramNote,
       },
@@ -181,7 +183,9 @@ export async function saveAlertSettingsAction(
       monthlyEnabled ? `monthly on the ${ordinal(monthlyDay ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.monthlyDay)}` : "",
     ].filter(Boolean);
     const portfolioRule = portfolioEnabled && portfolioTime
-      ? `portfolio recap ${cadenceWords.join(", ")} at ${portfolioTime} (${portfolioTimezone})`
+      ? `portfolio recap ${cadenceWords.join(", ")} at ${portfolioTime} (${portfolioTimezone})${
+          portfolioThreshold.value !== null && sendUnchanged ? ", even when unchanged" : ""
+        }`
       : "portfolio update off";
     const customWord = telegramTemplate
       ? " Custom Telegram message on."

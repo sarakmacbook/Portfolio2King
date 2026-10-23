@@ -546,6 +546,17 @@ export default function AlertSettingsForm({
                 className="input"
               />
               <p className="mt-1 text-xs text-slate-400">Optional — leave blank to get it every day.</p>
+              <label className="mt-2 flex items-start gap-2 text-xs text-slate-600">
+                <input
+                  type="checkbox"
+                  name="portfolioSendUnchanged"
+                  defaultChecked={settings.portfolio.sendUnchanged}
+                  className="mt-0.5 h-3.5 w-3.5 accent-indigo-600"
+                />
+                <span>
+                  Also send when nothing changed (0.00%) — otherwise a threshold skips flat days.
+                </span>
+              </label>
             </div>
           </div>
 

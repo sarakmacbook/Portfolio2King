@@ -152,6 +152,7 @@ test("settings rows round-trip through the parser", () => {
       monthlyEnabled: false,
       monthlyDay: 12,
       thresholdPct: null,
+      sendUnchanged: true,
       telegramTemplate: "Portfolio {arrow} {percent}",
       telegramNote: "— sent from Ledgerly",
     },
@@ -174,6 +175,7 @@ test("settings rows round-trip through the parser", () => {
       monthlyEnabled: false,
       monthlyDay: 12,
       thresholdPct: null,
+      sendUnchanged: true,
       telegramTemplate: "Portfolio {arrow} {percent}",
       telegramNote: "— sent from Ledgerly",
     },
@@ -404,6 +406,7 @@ test("portfolio update settings: time is what matters, threshold is optional", (
     [SETTING_KEYS.portfolioMonthly]: "false",
     [SETTING_KEYS.portfolioMonthlyDay]: "12",
     [SETTING_KEYS.portfolioThresholdPct]: "2.5",
+    [SETTING_KEYS.portfolioSendUnchanged]: "true",
   });
   assert.deepEqual(parsed, {
     enabled: true,
@@ -415,6 +418,7 @@ test("portfolio update settings: time is what matters, threshold is optional", (
     monthlyEnabled: false,
     monthlyDay: 12,
     thresholdPct: 2.5,
+    sendUnchanged: true,
     telegramTemplate: "",
     telegramNote: "",
   });
@@ -628,6 +632,11 @@ test("portfolio moves report money and percent, with an optional threshold", () 
   assert.equal(portfolioMovePassesThreshold(up, 2.5), false);
   assert.equal(portfolioMovePassesThreshold(down, 3), true);
   assert.equal(portfolioMovePassesThreshold(flat, 0.5), false);
+  // "Even when nothing changed" keeps the 0.00 % day but does not ignore the
+  // threshold for moves that are merely small.
+  assert.equal(portfolioMovePassesThreshold(flat, 0.5, true), true);
+  assert.equal(portfolioMovePassesThreshold(flat, 25, true), true);
+  assert.equal(portfolioMovePassesThreshold(up, 2.5, true), false);
 
   assert.equal(portfolioAlertKey({ cadence: "day", periodKey: "2026-10-22" }), "portfolio:day:2026-10-22");
   assert.equal(portfolioAlertKey({ cadence: "week", periodKey: "2026-10-22" }), "portfolio:week:2026-10-22");

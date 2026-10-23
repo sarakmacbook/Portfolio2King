@@ -481,7 +481,7 @@ async function dispatchPortfolioRun(input: {
   if (!move) return { status: "no-baseline", cadence: run.cadence };
 
   const change = { changeMoney: move.changeMoney, changePct: move.changePct };
-  if (!portfolioMovePassesThreshold(move, portfolio.thresholdPct)) {
+  if (!portfolioMovePassesThreshold(move, portfolio.thresholdPct, portfolio.sendUnchanged)) {
     return { status: "below-threshold", cadence: run.cadence, ...change };
   }
 
