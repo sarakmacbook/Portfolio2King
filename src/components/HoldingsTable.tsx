@@ -231,7 +231,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
             })}
           </div>
         ) : (
-          <div className="flex gap-1 overflow-x-auto">
+          <div className="tab-strip -mx-1 flex gap-1 overflow-x-auto px-1">
             {categories.map(({ value, label }) => (
               <button
                 key={value}

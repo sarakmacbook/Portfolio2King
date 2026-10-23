@@ -34,7 +34,7 @@ export function Modal({
       <div
         role="dialog"
         aria-modal="true"
-        className={`relative max-h-[92vh] w-full overflow-y-auto rounded-t-3xl bg-white p-6 shadow-2xl sm:rounded-3xl ${
+        className={`relative max-h-[92dvh] w-full overscroll-contain overflow-y-auto rounded-t-3xl bg-white p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl sm:pb-6 ${
           wide ? "sm:max-w-2xl" : "sm:max-w-lg"
         }`}
       >

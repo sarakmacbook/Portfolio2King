@@ -162,8 +162,11 @@ Every screen is built to work on a phone as well as a desktop:
 - **Navigation** keeps **Dashboard** and **Activity** directly in the top bar and
   groups **Exchanges**, **Refresh prices**, **Alerts** and **Database** inside a
   **Settings** submenu (which highlights whenever any of those pages is open);
-  below 768 px the bar collapses into a mobile menu button with an expandable
-  **Settings** section.
+  below 768 px the bar collapses into a single ☰ menu with an expandable
+  **Settings** section. Only one menu is open at a time, it closes on a route
+  change, an outside tap, **Escape**, or when the phone is rotated back to the
+  desktop layout, and it scrolls inside itself instead of running off the
+  screen.
 - **Holdings** switches from a seven-column table to one card per holding below
   768 px, with value, P/L, quantity × price and the weight bar. Sorting moves to a
   **Sort** dropdown because the table header is not visible there.
@@ -174,6 +177,32 @@ Every screen is built to work on a phone as well as a desktop:
 - **Charts** scale to the container width and support touch scrubbing.
 - Long names, notes and totals truncate or wrap instead of pushing the layout
   sideways; inputs use a 16 px font on small screens so iOS does not zoom.
+- **Tap targets** are at least 44 px (menu button, theme toggle, menu rows), taps
+  skip Safari's 300 ms delay, and the sticky header + menu respect the notch and
+  home indicator through `env(safe-area-inset-*)`.
+
+### Hiding and revealing balances
+
+There is exactly **one** control that hides or reveals money, and it lives in the
+navigation menu: **☰ → Privacy** on a phone and **Privacy ▾** in the header on
+desktop (`src/components/PrivacyMenu.tsx`). The header itself has no eye button,
+and the “balances are hidden” notice is informational only — it never offers a
+second toggle that could fall out of sync. The same menu holds **Lock now** and
+**Manage Face ID / PIN**; the lock screen still owns unlocking, because that is a
+gate rather than a toggle.
+
+### Install as an iPhone web clip
+
+Add Ledgerly to the Home Screen from Safari, then open it from the icon:
+
+- `display: "standalone"` + `statusBarStyle: "black-translucent"` with
+  `viewport-fit=cover`, so the header gradient runs under the status bar and the
+  controls are padded down by `env(safe-area-inset-top)`.
+- A sticky header and a fixed-height phone menu (`100dvh` minus the header) keep
+  navigation reachable and scrollable while the page behind it is frozen.
+- The menu surface is opaque in both themes and animates on mount instead of
+  keeping `will-change`/`backface-visibility` alive, which is what used to make
+  Safari paint menu rows outside their own panel.
 
 ## Background refresh and alerts
 
