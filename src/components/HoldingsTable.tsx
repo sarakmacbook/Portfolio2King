@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent } from "react";
 import type { AssetType } from "@/lib/constants";
 import { TYPE_META, money, pct, pnlColor, qty } from "@/lib/format";
 import {
@@ -16,6 +16,12 @@ import {
   subscribeHoldingFilter,
   type HoldingFilter,
 } from "@/lib/holdings-filter";
+import {
+  applyHoldingOrder,
+  moveHoldingBy,
+  moveHoldingTo,
+  normaliseHoldingOrder,
+} from "@/lib/holdings-order";
 import CryptoLogo from "./CryptoLogo";
 import GripIcon from "./GripIcon";
 import { useHoldingsArrange } from "./holdings-arrange";
@@ -38,10 +44,28 @@ export type HoldingRow = {
   weight: number;
 };
 
-type SortKey = "name" | "value" | "pnl" | "pnlPct" | "weight";
+type SortKey = "custom" | "name" | "value" | "pnl" | "pnlPct" | "weight";
+
+/** Every sort key but the (arranged) custom one. */
+type ColumnSortKey = Exclude<SortKey, "custom">;
+
+/** Column sorting, shared by the visible rows and the arrangement seed. */
+function compareHoldingRows(
+  a: HoldingRow,
+  b: HoldingRow,
+  key: ColumnSortKey,
+  dir: 1 | -1,
+): number {
+  const av = a[key];
+  const bv = b[key];
+  if (typeof av === "string" && typeof bv === "string") return av.localeCompare(bv) * dir;
+  return ((av as number) - (bv as number)) * dir;
+}
 
 /** Mobile has no table header, so sorting is offered as a select instead. */
 const SORT_OPTIONS: Array<{ value: string; label: string }> = [
+  /** The order the rows were dragged into (default when one is saved). */
+  { value: "custom:1", label: "Custom · my arrangement" },
   { value: "value:-1", label: "Value · high to low" },
   { value: "value:1", label: "Value · low to high" },
   { value: "name:1", label: "Name · A to Z" },
@@ -58,22 +82,30 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
     getSelectedHoldingFilter,
     () => "all",
   );
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "value", dir: -1 });
-
   /**
-   * Inside the dashboard the "Arrange layout" mode owns the category order and
-   * saves it with everything else; on its own the table keeps the default
-   * order and the tabs are simply clickable.
+   * Inside the dashboard the "Arrange layout" mode owns the category order, the
+   * order of the holdings themselves, and saves both with everything else; on
+   * its own the table keeps the default order and the tabs are just clickable.
    */
   const arrange = useHoldingsArrange();
   const [localCategoryOrder, setLocalCategoryOrder] =
     useState<HoldingFilter[]>(DEFAULT_HOLDING_FILTER_ORDER);
+  const [localAssetOrder, setLocalAssetOrder] = useState<number[]>([]);
   const arranging = arrange?.arranging ?? false;
   const categoryOrder = arrange?.categoryOrder ?? localCategoryOrder;
   const setCategoryOrder = arrange?.onCategoryOrderChange ?? setLocalCategoryOrder;
+  const assetOrder = arrange?.assetOrder ?? localAssetOrder;
+  const setAssetOrder = arrange?.onAssetOrderChange ?? setLocalAssetOrder;
+
+  const [query, setQuery] = useState("");
+  // A saved arrangement is what the table shows until a column is sorted on.
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>(() =>
+    assetOrder.length > 0 ? { key: "custom", dir: 1 } : { key: "value", dir: -1 },
+  );
   const [dragging, setDragging] = useState<HoldingFilter | null>(null);
   const [drop, setDrop] = useState<{ key: HoldingFilter; after: boolean } | null>(null);
+  const [rowDragging, setRowDragging] = useState<number | null>(null);
+  const [rowDrop, setRowDrop] = useState<{ id: number; after: boolean } | null>(null);
   const [announcement, setAnnouncement] = useState("");
 
   useEffect(() => {
@@ -87,6 +119,8 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
     if (arranging) return;
     setDragging(null);
     setDrop(null);
+    setRowDragging(null);
+    setRowDrop(null);
   }, [arranging]);
 
   const counts = useMemo(() => {
@@ -129,30 +163,179 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
     clearDrag();
   }
 
+  function clearRowDrag() {
+    setRowDragging(null);
+    setRowDrop(null);
+  }
+
+  /** A row's name for the screen-reader announcements. */
+  function rowLabel(id: number): string {
+    const row = rows.find((r) => r.id === id);
+    return row ? row.symbol || row.name : "Holding";
+  }
+
+  /** Position of a row in the whole arrangement (1-based). */
+  function rowPosition(id: number): number {
+    return fullOrder.indexOf(id) + 1;
+  }
+
+  function moveHolding(id: number, delta: number) {
+    const from = fullOrder.indexOf(id);
+    const to = Math.max(0, Math.min(fullOrder.length - 1, from + delta));
+    if (from < 0 || to === from) return;
+    setAssetOrder(moveHoldingBy(fullOrder, id, delta));
+    setSort({ key: "custom", dir: 1 });
+    setAnnouncement(`${rowLabel(id)} moved to position ${to + 1} of ${fullOrder.length}.`);
+  }
+
+  function handleHoldingDrop() {
+    if (rowDragging === null || !rowDrop || rowDragging === rowDrop.id) {
+      clearRowDrag();
+      return;
+    }
+    const next = moveHoldingTo(fullOrder, rowDragging, rowDrop.id, rowDrop.after);
+    setAssetOrder(next);
+    setSort({ key: "custom", dir: 1 });
+    setAnnouncement(
+      `${rowLabel(rowDragging)} moved to position ${next.indexOf(rowDragging) + 1} of ${next.length}.`,
+    );
+    clearRowDrag();
+  }
+
+  /**
+   * Drag-and-drop wiring for one holding, shared by the desktop row and the
+   * phone card. Only the grip starts a drag; dropping above or below the middle
+   * of a row puts the dragged holding before or after it.
+   */
+  function holdingDragProps(id: number) {
+    return {
+      onDragOver: (event: DragEvent<HTMLElement>) => {
+        if (!arranging || rowDragging === null || rowDragging === id) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        const rect = event.currentTarget.getBoundingClientRect();
+        const after = event.clientY - rect.top > rect.height / 2;
+        setRowDrop((current) =>
+          current?.id === id && current.after === after ? current : { id, after },
+        );
+      },
+      onDrop: (event: DragEvent<HTMLElement>) => {
+        if (!arranging) return;
+        event.preventDefault();
+        handleHoldingDrop();
+      },
+    };
+  }
+
+  /** The dashed grip + ▲ / ▼ strip shown on a holding while arranging. */
+  function holdingArrangeControls(id: number, name: string, className = "") {
+    const position = rowPosition(id);
+    return (
+      <span className={`flex items-center gap-1 ${className}`}>
+        <span
+          draggable
+          onDragStart={(event) => {
+            setRowDragging(id);
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", String(id));
+          }}
+          onDragEnd={clearRowDrag}
+          className="flex cursor-grab items-center gap-1 text-indigo-700 active:cursor-grabbing"
+          title="Drag to move this holding"
+        >
+          <GripIcon className="h-3.5 w-2.5" />
+          <span className="text-[10px] font-medium tabular-nums">{position}</span>
+        </span>
+        <span className="flex flex-col">
+          <button
+            type="button"
+            className="grid h-4 w-5 place-items-center rounded text-[9px] text-indigo-700 hover:bg-white disabled:opacity-30"
+            onClick={() => moveHolding(id, -1)}
+            disabled={position <= 1}
+            aria-label={`Move ${name} up`}
+          >
+            ▲
+          </button>
+          <button
+            type="button"
+            className="grid h-4 w-5 place-items-center rounded text-[9px] text-indigo-700 hover:bg-white disabled:opacity-30"
+            onClick={() => moveHolding(id, 1)}
+            disabled={position >= fullOrder.length}
+            aria-label={`Move ${name} down`}
+          >
+            ▼
+          </button>
+        </span>
+      </span>
+    );
+  }
+
+  /** Every holding's id, in the order it arrived in (the base for arranging). */
+  const rowIds = useMemo(() => rows.map((r) => r.id), [rows]);
+
+  /**
+   * The complete arrangement the ▲ / ▼ buttons and drag-and-drop move things
+   * around in: the saved ids that still exist first, then any holding the saved
+   * order does not know about (a newly added asset) at the end. With nothing
+   * saved yet, the arrangement simply *is* what is on screen — so the first
+   * nudge or drop starts from the order the user is looking at, and a trip
+   * through arrange mode alone never freezes the table.
+   */
+  const fullOrder = useMemo(() => {
+    if (assetOrder.length > 0) return normaliseHoldingOrder(assetOrder, rowIds);
+    if (sort.key === "custom") return rowIds;
+    const key = sort.key;
+    return [...rows].sort((a, b) => compareHoldingRows(a, b, key, sort.dir)).map((r) => r.id);
+  }, [assetOrder, sort, rows, rowIds]);
+
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return rows
+    const visible = rows
       .filter((r) => matchesHoldingFilter(r, filter))
-      .filter((r) => !q || r.name.toLowerCase().includes(q) || r.symbol.toLowerCase().includes(q))
-      .sort((a, b) => {
-        const k = sort.key;
-        const av = a[k];
-        const bv = b[k];
-        if (typeof av === "string" && typeof bv === "string") return av.localeCompare(bv) * sort.dir;
-        return ((av as number) - (bv as number)) * sort.dir;
-      });
-  }, [rows, filter, query, sort]);
+      .filter((r) => !q || r.name.toLowerCase().includes(q) || r.symbol.toLowerCase().includes(q));
+    // The custom order is an actual sort key, so filtering or searching a
+    // category never loses the arrangement: hidden rows keep their place.
+    if (sort.key === "custom") return applyHoldingOrder(visible, fullOrder);
+    const key = sort.key;
+    return visible.sort((a, b) => compareHoldingRows(a, b, key, sort.dir));
+  }, [rows, filter, query, sort, fullOrder]);
+
+  /**
+   * Entering arrange mode shows the saved arrangement rather than whatever column
+   * was last sorted on; without one, the rows keep the order they are in and the
+   * first move turns that into a custom arrangement.
+   */
+  const wasArranging = useRef(false);
+  useEffect(() => {
+    if (arranging && !wasArranging.current && assetOrder.length > 0) {
+      setSort({ key: "custom", dir: 1 });
+    }
+    wasArranging.current = arranging;
+  }, [arranging, assetOrder.length]);
+
+  // "Custom" with nothing arranged (e.g. after Reset to default) falls back to
+  // the value column rather than an arbitrary order.
+  useEffect(() => {
+    if (arranging || assetOrder.length > 0) return;
+    setSort((current) => (current.key === "custom" ? { key: "value", dir: -1 } : current));
+  }, [arranging, assetOrder.length]);
 
   const th = (key: SortKey, label: string, align = "text-right") => (
     <th className={`px-4 py-3 font-medium ${align}`}>
-      <button
-        type="button"
-        className="inline-flex items-center gap-1 hover:text-slate-900"
-        onClick={() => setSort((s) => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : key === "name" ? 1 : -1 }))}
-      >
-        {label}
-        <span className="text-[10px]">{sort.key === key ? (sort.dir === 1 ? "▲" : "▼") : ""}</span>
-      </button>
+      {/* While arranging, the column headers would only re-order the rows
+          behind the arrangement the user is editing, so they stay labels. */}
+      {arranging ? (
+        <span>{label}</span>
+      ) : (
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 hover:text-slate-900"
+          onClick={() => setSort((s) => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : key === "name" ? 1 : -1 }))}
+        >
+          {label}
+          <span className="text-[10px]">{sort.key === key ? (sort.dir === 1 ? "▲" : "▼") : ""}</span>
+        </button>
+      )}
     </th>
   );
 
@@ -258,24 +441,26 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
             onChange={(e) => setQuery(e.target.value)}
             aria-label="Search holdings"
           />
-          <label className="flex items-center gap-2 text-xs text-slate-500 md:hidden">
-            <span className="shrink-0">Sort</span>
-            <select
-              className="input min-w-0 py-1.5 text-sm"
-              value={`${sort.key}:${sort.dir}`}
-              onChange={(event) => {
-                const [key, dir] = event.target.value.split(":");
-                setSort({ key: key as SortKey, dir: dir === "1" ? 1 : -1 });
-              }}
-              aria-label="Sort holdings"
-            >
-              {SORT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          {!arranging && (
+            <label className="flex items-center gap-2 text-xs text-slate-500 md:hidden">
+              <span className="shrink-0">Sort</span>
+              <select
+                className="input min-w-0 py-1.5 text-sm"
+                value={`${sort.key}:${sort.dir}`}
+                onChange={(event) => {
+                  const [key, dir] = event.target.value.split(":");
+                  setSort({ key: key as SortKey, dir: dir === "1" ? 1 : -1 });
+                }}
+                aria-label="Sort holdings"
+              >
+                {SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
       </div>
 
@@ -283,6 +468,11 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
         <table className="w-full min-w-[760px] text-sm">
           <thead className="text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
+              {arranging && (
+                <th className="w-14 px-2 py-3 text-left font-medium" scope="col">
+                  Order
+                </th>
+              )}
               {th("name", "Asset", "text-left")}
               <th className="px-4 py-3 text-right font-medium">Quantity</th>
               <th className="px-4 py-3 text-right font-medium">Avg cost</th>
@@ -295,8 +485,23 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
           <tbody className="divide-y divide-slate-100">
             {shown.map((r) => {
               const isCash = r.type === "cash";
+              const isDragging = rowDragging === r.id;
+              const isDropTarget = rowDrop?.id === r.id && !isDragging;
               return (
-                <tr key={r.id} className="group transition hover:bg-slate-50/80">
+                <tr
+                  key={r.id}
+                  {...holdingDragProps(r.id)}
+                  className={`group transition hover:bg-slate-50/80 ${isDragging ? "opacity-50" : ""} ${
+                    isDropTarget ? "bg-indigo-50/70 ring-2 ring-inset ring-indigo-400" : ""
+                  }`}
+                >
+                  {arranging && (
+                    <td className="px-2 py-3 align-middle">
+                      <span className="rounded-lg border border-dashed border-indigo-300 bg-indigo-50/80 px-1.5 py-1">
+                        {holdingArrangeControls(r.id, r.name)}
+                      </span>
+                    </td>
+                  )}
                   <td className="px-4 py-3">
                     <Link href={`/assets/${r.id}`} className="flex items-center gap-3">
                       {r.type === "crypto" ? (
@@ -361,7 +566,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
             })}
             {shown.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-12 text-center text-sm text-slate-400">
+                <td colSpan={arranging ? 8 : 7} className="px-4 py-12 text-center text-sm text-slate-400">
                   No holdings match.
                 </td>
               </tr>
@@ -379,8 +584,24 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
               ? "Crypto · Stablecoin"
               : "Crypto · Volatile"
             : TYPE_META[r.type].label;
+          const isDragging = rowDragging === r.id;
+          const isDropTarget = rowDrop?.id === r.id && !isDragging;
           return (
-            <li key={r.id} className="px-4 py-3">
+            <li
+              key={r.id}
+              {...holdingDragProps(r.id)}
+              className={`px-4 py-3 ${isDragging ? "opacity-50" : ""} ${
+                isDropTarget ? "bg-indigo-50/70 ring-2 ring-inset ring-indigo-400" : ""
+              }`}
+            >
+              {arranging && (
+                <div className="mb-2 flex items-center gap-2 rounded-lg border border-dashed border-indigo-300 bg-indigo-50/80 px-2 py-1">
+                  <span className="text-[11px] font-medium uppercase tracking-wide text-indigo-900">
+                    Holding
+                  </span>
+                  {holdingArrangeControls(r.id, r.name, "ml-auto")}
+                </div>
+              )}
               <Link href={`/assets/${r.id}`} className="flex items-start gap-3">
                 {r.type === "crypto" ? (
                   <CryptoLogo symbol={r.symbol} name={r.name} wallet={r.wallet} />

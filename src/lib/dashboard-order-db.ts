@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { appSettings } from "@/db/schema";
 import { normaliseDashboardOrder, type DashboardBlockKey } from "@/lib/dashboard-layout";
 import { normaliseHoldingFilterOrder, type HoldingFilter } from "@/lib/holdings-filter";
+import { parseHoldingOrderIds } from "@/lib/holdings-order";
 import {
   normaliseDashboardStatLabels,
   normaliseDashboardStatOrder,
@@ -12,9 +13,9 @@ import { ensureSchema } from "@/lib/portfolio";
 
 /**
  * Persists the dashboard card layout in `app_settings` — the card order, the
- * stat cards inside the stat row, and the category tabs inside the Holdings
- * card. Kept separate from the server actions so it can be exercised against a
- * real database directly.
+ * stat cards inside the stat row, the category tabs inside the Holdings card
+ * and the order of the holdings themselves. Kept separate from the server
+ * actions so it can be exercised against a real database directly.
  */
 
 /** app_settings key holding the dashboard card order. */
@@ -28,6 +29,9 @@ export const DASHBOARD_STAT_LABELS_SETTING = "dashboard.statsLabels";
 
 /** app_settings key holding the left-to-right order of the Holdings category tabs. */
 export const HOLDINGS_CATEGORIES_SETTING = "holdings.categoriesOrder";
+
+/** app_settings key holding the order of the asset rows inside the Holdings card. */
+export const HOLDINGS_ORDER_SETTING = "holdings.order";
 
 async function readSetting(key: string): Promise<string | null> {
   const [row] = await db
@@ -128,4 +132,33 @@ export async function saveHoldingsCategoryOrder(
 export async function clearHoldingsCategoryOrder(): Promise<void> {
   await ensureSchema();
   await db.delete(appSettings).where(eq(appSettings.key, HOLDINGS_CATEGORIES_SETTING));
+}
+
+/**
+ * Order of the asset rows in the Holdings card, as stored ids (empty = the
+ * holdings are shown in the default order, sorted or as the database returns
+ * them). Ids of deleted holdings are kept out of the way by the caller, which
+ * normalises them against the holdings that still exist.
+ */
+export async function loadHoldingsOrder(): Promise<number[]> {
+  await ensureSchema();
+  return parseHoldingOrderIds(await readSetting(HOLDINGS_ORDER_SETTING));
+}
+
+/** Stores the holding order; an empty list clears it (back to the default order). */
+export async function saveHoldingsOrder(order: readonly unknown[]): Promise<number[]> {
+  await ensureSchema();
+  const ids = parseHoldingOrderIds(order);
+  if (ids.length === 0) {
+    await clearHoldingsOrder();
+    return [];
+  }
+  await writeSetting(HOLDINGS_ORDER_SETTING, ids.join(","));
+  return ids;
+}
+
+/** Removes the stored holding order (Reset to default). */
+export async function clearHoldingsOrder(): Promise<void> {
+  await ensureSchema();
+  await db.delete(appSettings).where(eq(appSettings.key, HOLDINGS_ORDER_SETTING));
 }

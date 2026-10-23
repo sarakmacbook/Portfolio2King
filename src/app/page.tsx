@@ -13,6 +13,7 @@ import {
   loadDashboardStatLabels,
   loadDashboardStatOrder,
   loadHoldingsCategoryOrder,
+  loadHoldingsOrder,
 } from "@/lib/dashboard-order-db";
 import { loadAssetWalletLogos } from "@/lib/web3-wallets-db";
 import { KIND_META, TYPE_META, fmtDate, money, pct, pnlColor, qty } from "@/lib/format";
@@ -42,6 +43,7 @@ export default async function Dashboard() {
     statOrder,
     statLabels,
     categoryOrder,
+    holdingOrder,
     walletLogos,
   ] = await Promise.all([
     getSnapshots(),
@@ -51,6 +53,7 @@ export default async function Dashboard() {
     loadDashboardStatOrder(),
     loadDashboardStatLabels(),
     loadHoldingsCategoryOrder(),
+    loadHoldingsOrder(),
     loadAssetWalletLogos(),
   ]);
   const totals = computeTotals(list);
@@ -158,6 +161,7 @@ export default async function Dashboard() {
         initialStatsOrder={statOrder}
         initialStatsLabels={statLabels}
         initialCategoryOrder={categoryOrder}
+        initialAssetOrder={holdingOrder}
         statsCards={{
           cash: {
             value: money(totals.cashValue),

@@ -135,6 +135,18 @@ morning; the saved order is the order the tabs read in from then on. Arranging
 only changes the order — clicking a tab still filters the table and the total
 above it, and the counts on the tabs still update as holdings change.
 
+**The holdings themselves are arranged in the same mode.** Every row gets an
+**Order** column (on a phone: a dashed strip above the card) with the same grip
+and **▲ / ▼** buttons. Drag a row over another one to drop it above or below, or
+nudge it one place at a time — a screen reader announces the new position, and the
+number next to the grip shows where the holding sits. The arrangement is the
+table's default order from then on: it is what you see on the dashboard and in
+the **Custom · my arrangement** option of the phone **Sort** menu, while the
+column headers still sort by value, P/L, weight or name for a one-off look (they
+become plain labels while you arrange, so they cannot fight the arrangement). It
+is saved by the same **Save layout** click and cleared by **Reset to default**,
+which puts the table back to largest-value-first.
+
 Details:
 
 - The layout is stored in `app_settings` under `dashboard.order` as a
@@ -150,6 +162,11 @@ Details:
   same way, so an unknown or half-written setting still renders all six tabs.
   **Save layout** stores it with the card and stat orders; **Reset to default**
   clears all three.
+- The order of the holdings is stored under `holdings.order` as a comma-separated
+  list of asset ids (empty or missing = the default order). Ids of holdings you
+  have deleted are ignored, and a holding that is not in the list yet — anything
+  added after the arrangement was saved — keeps its normal place at the end, so
+  arranging can never hide a row. It is also saved and reset with the layout.
 - The two charts stay side by side (Value history 3/5, Allocation 2/5) whenever
   they are next to each other, and full-width cards start a new row. On phones the
   cards stack in the saved order.

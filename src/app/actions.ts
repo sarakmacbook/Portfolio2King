@@ -31,10 +31,12 @@ import {
   clearDashboardStatLabels,
   clearDashboardStatOrder,
   clearHoldingsCategoryOrder,
+  clearHoldingsOrder,
   saveDashboardOrder,
   saveDashboardStatLabels,
   saveDashboardStatOrder,
   saveHoldingsCategoryOrder,
+  saveHoldingsOrder,
 } from "@/lib/dashboard-order-db";
 import { isDashboardBlockKey } from "@/lib/dashboard-layout";
 import {
@@ -402,6 +404,26 @@ function parseHoldingCategoryOrder(raw: string): string[] {
   return keys;
 }
 
+/**
+ * The row order of the Holdings card: a JSON array of asset ids. An empty array
+ * means "no custom order" and clears the saved one.
+ */
+function parseHoldingOrder(raw: string): number[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("Could not read the holdings order. Reload the page and try again.");
+  }
+  if (!Array.isArray(parsed)) throw new Error("Could not read the holdings order.");
+  if (parsed.length > 5000) throw new Error("Too many holdings to arrange.");
+  const ids = parsed.map((value) => (typeof value === "number" ? value : Number(value)));
+  if (ids.some((id) => !Number.isInteger(id) || id <= 0)) {
+    throw new Error("The holdings order contains an unknown asset.");
+  }
+  return ids;
+}
+
 function parseDashboardStatLabels(raw: string): Record<DashboardStatKey, string> {
   let parsed: unknown;
   try {
@@ -440,6 +462,11 @@ export async function saveDashboardLayout(_prev: ActionState, fd: FormData): Pro
     if (holdingCategories) {
       await saveHoldingsCategoryOrder(parseHoldingCategoryOrder(holdingCategories));
     }
+    // The holdings themselves are arranged in the same mode: a form without the
+    // field (or an empty list) leaves the default order in place.
+    if (fd.has("holdingOrder")) {
+      await saveHoldingsOrder(parseHoldingOrder(str(fd, "holdingOrder")));
+    }
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save the dashboard layout" };
   }
@@ -454,6 +481,7 @@ export async function resetDashboardLayout(_prev: ActionState, _fd: FormData): P
     await clearDashboardStatOrder();
     await clearDashboardStatLabels();
     await clearHoldingsCategoryOrder();
+    await clearHoldingsOrder();
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not reset the dashboard layout" };
   }
