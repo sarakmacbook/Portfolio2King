@@ -108,22 +108,31 @@ whose tags record the original currency.
 
 ## Arrange the dashboard
 
-The dashboard cards — **Holdings**, **Value history**, **Allocation** and
-**Recent activity** — can be moved up and down as whole blocks:
+The dashboard cards — **Portfolio stats** (the Cash / Invested / Unrealized /
+Realized row), **Holdings**, **Value history**, **Allocation** and **Recent
+activity** — can be moved up and down as whole blocks:
 
 1. Click **⇅ Arrange layout** above the cards.
 2. Drag a card's dashed header (the one with the grip dots), or use its **▲ / ▼**
    buttons — the touch-friendly and keyboard-accessible path.
 3. Click **Save layout**. Nothing is written until you save; **Cancel** discards
-   pending moves and **Reset to default** restores Holdings → Value history →
-   Allocation → Recent activity.
+   pending moves and **Reset to default** restores Portfolio stats → Holdings →
+   Value history → Allocation → Recent activity.
+
+The four stat cards can be shuffled **inside** their row at the same time: each
+one gets its own small header with a grip and **◀ / ▶** buttons, so Cash can sit
+last or Realized first without moving the whole row. Both orders are saved by the
+same **Save layout** click.
 
 Details:
 
 - The layout is stored in `app_settings` under `dashboard.order` as a
   comma-separated list of card keys. Unknown keys are dropped, duplicates removed,
   and missing cards appended in their default spot, so a stale tab or a
-  hand-edited setting cannot break the page.
+  hand-edited setting cannot break the page. An order saved before the stat row
+  became a block keeps that row at the top instead of pushing it to the bottom.
+- The stat-card order lives beside it under `dashboard.statsOrder`
+  (`cash,invested,unrealized,realized` by default).
 - The two charts stay side by side (Value history 3/5, Allocation 2/5) whenever
   they are next to each other, and full-width cards start a new row. On phones the
   cards stack in the saved order.
