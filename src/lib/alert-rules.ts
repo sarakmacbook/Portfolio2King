@@ -4,7 +4,12 @@
  * directly (see tests/alerts.test.ts).
  */
 
+/**
+ * Every way an alert can be delivered. Adding a value here means handling it in
+ * `sendToChannels()` and offering it in the /alerts channel checkboxes.
+ */
 export const ALERT_CHANNELS = ["push", "telegram"] as const;
+/** One delivery channel — "push" (Web Push) or "telegram". */
 export type AlertChannel = (typeof ALERT_CHANNELS)[number];
 
 /** Window a price move is measured over: one day, or one month (30 days). */
@@ -20,45 +25,108 @@ export const WINDOW_DAYS: Record<AlertWindow, number> = { day: 1, month: 30 };
  * — blank means "always send at this time", whatever the change.
  */
 export type PortfolioAlertSettings = {
-  /** Own switch, independent of the per-holding threshold alerts. */
+  /**
+   * Own switch, independent of the per-holding threshold alerts.
+   * `false` = no scheduled update at all; a manual preview still works.
+   * Stored as `alerts.portfolio.enabled` ("true"/"false").
+   */
   enabled: boolean;
-  /** Local wall-clock time, `HH:MM` (24 h). Empty string = no schedule. */
+  /**
+   * Local wall-clock time the update belongs to, `HH:MM` (24 h) — never a UTC
+   * instant, because the schedule is "6 pm where I live".
+   * Empty string = no schedule (a blank time turns the feature off).
+   * Stored as `alerts.portfolio.time`.
+   */
   time: string;
-  /** IANA zone the time is read in. Empty string = the server's zone. */
+  /**
+   * IANA zone `time` is read in, e.g. `Asia/Phnom_Penh`. The first refresh at or
+   * after this local time sends the message; saveAlertSettingsAction replaces a
+   * blank value with the server's zone so the page and the schedule agree.
+   * Stored as `alerts.portfolio.timezone`.
+   */
   timezone: string;
-  /** Compare against yesterday's total, or against the total ~30 days ago. */
+  /**
+   * What the total is compared against: `day` = yesterday's snapshot,
+   * `month` = the snapshot ~30 days back (falling back to the oldest one).
+   * Stored as `alerts.portfolio.window`.
+   */
   window: AlertWindow;
-  /** Optional filter in percent. `null` sends every scheduled update. */
+  /**
+   * Optional filter in percent (0.5–50). `null` (blank in the form) means
+   * "always send at this time", which is the common case for a daily update.
+   * Stored as `alerts.portfolio.thresholdPct`, with "" for null.
+   */
   thresholdPct: number | null;
   /**
    * Telegram-only message template, using `{total}`, `{percent}`, … tokens
    * (see PORTFOLIO_MESSAGE_PLACEHOLDERS). Blank = the standard title + body.
    * Browser push always keeps the structured title/body.
+   * Stored as `alerts.portfolio.telegramTemplate`, capped at
+   * MAX_PORTFOLIO_TEMPLATE_LENGTH.
    */
   telegramTemplate: string;
-  /** Optional line appended to the Telegram message, after the template. */
+  /**
+   * Optional line appended to the Telegram message, after the template (or after
+   * the standard text when no template is set). Rarely longer than a sentence.
+   * Stored as `alerts.portfolio.telegramNote`, capped at MAX_PORTFOLIO_NOTE_LENGTH.
+   */
   telegramNote: string;
 };
 
 export type AlertSettings = {
-  /** Master switch for automatic alerts (does not affect manual test sends). */
+  /**
+   * Master switch for the automatic per-holding alerts. Manual test sends bypass
+   * it (that is how a setup is verified before switching alerts on), and it does
+   * not touch the scheduled portfolio update, which has its own switch.
+   * Stored as `alerts.enabled`.
+   */
   enabled: boolean;
-  /** Percentage move that triggers an alert, e.g. 5 → ±5 %. */
+  /**
+   * How far a single holding must move before it alerts, in percent,
+   * e.g. `5` = ±5 %. Range MIN_THRESHOLD_PCT–MAX_THRESHOLD_PCT, one decimal.
+   * Stored as `alerts.thresholdPct`.
+   */
   thresholdPct: number;
-  /** Compare against yesterday's close, or against the price ~30 days ago. */
+  /**
+   * Comparison window for those per-holding alerts: `day` = yesterday's close,
+   * `month` = the price ~30 days ago. Day and month rules never dedupe each
+   * other, so switching the window can send a fresh alert the same day.
+   * Stored as `alerts.window`.
+   */
   window: AlertWindow;
+  /**
+   * Where alerts are delivered. An empty array is a valid state ("no channels"):
+   * nothing is sent and the page says so. Closed set — see ALERT_CHANNELS.
+   * Stored as a comma-separated `alerts.channels`, e.g. "push,telegram".
+   */
   channels: AlertChannel[];
-  /** While the app is open, refresh prices at most this often. 0 disables it. */
+  /**
+   * While a tab is open, prices are refreshed at most this often, in minutes.
+   * `0` disables the in-page timer. Scheduled cron/systemd runs are unaffected.
+   * Range MIN_REFRESH_MINUTES–MAX_REFRESH_MINUTES. Stored as
+   * `refresh.intervalMinutes`.
+   */
   backgroundRefreshMinutes: number;
-  /** Scheduled portfolio summary (money + %). */
+  /**
+   * The scheduled whole-portfolio summary (money + %). Independent of
+   * `enabled` above. See PortfolioAlertSettings for each of its fields.
+   */
   portfolio: PortfolioAlertSettings;
 };
 
+/** Smallest per-holding (and portfolio) threshold the form accepts, in percent. */
 export const MIN_THRESHOLD_PCT = 0.5;
+/** Largest threshold the form accepts, in percent. */
 export const MAX_THRESHOLD_PCT = 50;
+/** Shortest in-page background refresh interval, in minutes (below = noise). */
 export const MIN_REFRESH_MINUTES = 5;
+/** Longest background refresh interval, in minutes (12 hours). */
 export const MAX_REFRESH_MINUTES = 720;
 
+/**
+ * Used for a database row that has never been written, and by tests. The update
+ * starts switched off at 18:00 so enabling it is always a deliberate act.
+ */
 export const DEFAULT_PORTFOLIO_ALERT_SETTINGS: PortfolioAlertSettings = {
   enabled: false,
   time: "18:00",
@@ -71,11 +139,17 @@ export const DEFAULT_PORTFOLIO_ALERT_SETTINGS: PortfolioAlertSettings = {
 
 /** Guards against pasting a wall of text into a chat app. */
 export const MAX_PORTFOLIO_TEMPLATE_LENGTH = 1_000;
+/** Same guard for the optional trailing note. */
 export const MAX_PORTFOLIO_NOTE_LENGTH = 500;
 
 /** Telegram's hard limit for one message, in UTF-16 code units. */
 export const MAX_TELEGRAM_TEXT_LENGTH = 4_096;
 
+/**
+ * Settings for a fresh install: holding alerts on at ±5 % over a day, both
+ * channels ticked, a 15-minute in-page refresh, and the scheduled portfolio
+ * update off until a time is chosen.
+ */
 export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
   enabled: true,
   thresholdPct: 5,
@@ -85,19 +159,36 @@ export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
   portfolio: DEFAULT_PORTFOLIO_ALERT_SETTINGS,
 };
 
-/** Keys used in the `app_settings` table. */
+/**
+ * Keys used in the `app_settings` table (one text row each).
+ *
+ * They are the storage contract: renaming one strands existing installations on
+ * their defaults until the row is rewritten, so treat them as append-only.
+ */
 export const SETTING_KEYS = {
+  /** Master switch for automatic holding alerts — "true" / "false". */
   enabled: "alerts.enabled",
+  /** Holding threshold in percent — e.g. "5" (one decimal kept). */
   thresholdPct: "alerts.thresholdPct",
+  /** Holding comparison window — "day" or "month". */
   window: "alerts.window",
+  /** Delivery channels — comma-separated, e.g. "push,telegram"; "" = none. */
   channels: "alerts.channels",
+  /** In-page refresh interval in minutes — "0" (off) or 5–720. */
   backgroundRefreshMinutes: "refresh.intervalMinutes",
+  /** Scheduled portfolio update switch — "true" / "false". */
   portfolioEnabled: "alerts.portfolio.enabled",
+  /** Local send time — "HH:MM"; an explicitly blank row means "no schedule". */
   portfolioTime: "alerts.portfolio.time",
+  /** IANA zone the time is read in — empty means the server's zone. */
   portfolioTimezone: "alerts.portfolio.timezone",
+  /** Portfolio comparison window — "day" or "month". */
   portfolioWindow: "alerts.portfolio.window",
+  /** Optional portfolio threshold in percent — "" means "always send". */
   portfolioThresholdPct: "alerts.portfolio.thresholdPct",
+  /** Custom Telegram message — "" = the standard title + body. */
   portfolioTelegramTemplate: "alerts.portfolio.telegramTemplate",
+  /** Extra Telegram line appended after the message — usually "". */
   portfolioTelegramNote: "alerts.portfolio.telegramNote",
 } as const;
 
