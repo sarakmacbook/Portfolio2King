@@ -51,6 +51,7 @@ import {
   type PortfolioAlertSettings,
 } from "../src/lib/alert-rules";
 import { sendTelegramMessage } from "../src/lib/alerts";
+import { AUTO_NOTES, autoNoteFor, autoNoteForDate } from "../src/lib/auto-notes";
 
 const originalFetch = globalThis.fetch;
 
@@ -153,6 +154,7 @@ test("settings rows round-trip through the parser", () => {
       monthlyDay: 12,
       thresholdPct: null,
       sendUnchanged: true,
+      autoNote: true,
       telegramTemplate: "Portfolio {arrow} {percent}",
       telegramNote: "— sent from Ledgerly",
     },
@@ -176,6 +178,7 @@ test("settings rows round-trip through the parser", () => {
       monthlyDay: 12,
       thresholdPct: null,
       sendUnchanged: true,
+      autoNote: true,
       telegramTemplate: "Portfolio {arrow} {percent}",
       telegramNote: "— sent from Ledgerly",
     },
@@ -407,6 +410,7 @@ test("portfolio update settings: time is what matters, threshold is optional", (
     [SETTING_KEYS.portfolioMonthlyDay]: "12",
     [SETTING_KEYS.portfolioThresholdPct]: "2.5",
     [SETTING_KEYS.portfolioSendUnchanged]: "true",
+    [SETTING_KEYS.portfolioAutoNote]: "true",
   });
   assert.deepEqual(parsed, {
     enabled: true,
@@ -419,6 +423,7 @@ test("portfolio update settings: time is what matters, threshold is optional", (
     monthlyDay: 12,
     thresholdPct: 2.5,
     sendUnchanged: true,
+    autoNote: true,
     telegramTemplate: "",
     telegramNote: "",
   });
@@ -782,4 +787,40 @@ test("custom wording is trimmed, capped, and survives a settings round-trip", ()
   const empty = parsePortfolioAlertSettings({});
   assert.equal(empty.telegramTemplate, "");
   assert.equal(empty.telegramNote, "");
+});
+
+test("auto notes change every period and never repeat the previous one", () => {
+  assert.ok(AUTO_NOTES.length >= 24, "the pool must be big enough to feel varied");
+
+  // Consecutive days step through the list instead of replaying one line.
+  const days = ["2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-24"];
+  const lines = days.map((day) => autoNoteForDate("day", day));
+  assert.equal(new Set(lines).size, days.length);
+
+  // The same period always resolves to the same line: retries and previews agree.
+  assert.equal(autoNoteFor("day", "2026-10-22"), autoNoteFor("day", "2026-10-22"));
+
+  // Weekly and monthly advance one step per period, not one per send.
+  assert.notEqual(autoNoteForDate("week", "2026-10-22"), autoNoteForDate("week", "2026-10-29"));
+  assert.notEqual(autoNoteForDate("month", "2026-10-22"), autoNoteForDate("month", "2026-11-22"));
+  assert.equal(autoNoteForDate("month", "2026-10-01"), autoNoteForDate("month", "2026-10-31"));
+
+  // The composed message puts the manual note first, then the auto line.
+  const move = describePortfolioMove(10_000, 10_100, "yesterday's close");
+  assert.ok(move);
+  const update = { title: "Portfolio ▲ +1.00% (+$100.00)", body: "Now $10,100.00", move };
+  const line = autoNoteForDate("day", "2026-10-22");
+  const withNote = composePortfolioTelegramMessage(
+    update,
+    { telegramTemplate: "", telegramNote: "— me" },
+    { date: "2026-10-22", time: "18:00", window: "day", autoNote: line },
+  );
+  assert.ok(withNote.endsWith(`\n\n— me\n${line}`));
+
+  const plain = composePortfolioTelegramMessage(
+    update,
+    { telegramTemplate: "", telegramNote: "" },
+    { date: "2026-10-22", time: "18:00", window: "day" },
+  );
+  assert.equal(plain, `${update.title}\n${update.body}`);
 });

@@ -33,6 +33,7 @@ import {
   type AlertSettings,
   type AlertWindow,
 } from "@/lib/alert-rules";
+import { autoNoteForDate } from "@/lib/auto-notes";
 import { buildPortfolioUpdate, refreshPricesWithAlerts } from "@/lib/price-refresh";
 import {
   clearTelegramConfig,
@@ -131,6 +132,7 @@ export async function saveAlertSettingsAction(
       throw new Error("Pick a day of the week for the weekly recap.");
     }
     const sendUnchanged = formData.get("portfolioSendUnchanged") !== null;
+    const autoNote = formData.get("portfolioAutoNote") !== null;
     const monthlyDay = parseMonthDay(formData.get("portfolioMonthlyDay"));
     if (monthlyEnabled && monthlyDay === null) {
       throw new Error("Monthly recap day must be between 1 and 28.");
@@ -167,6 +169,7 @@ export async function saveAlertSettingsAction(
         monthlyDay: monthlyDay ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.monthlyDay,
         thresholdPct: portfolioThreshold.value,
         sendUnchanged,
+        autoNote,
         telegramTemplate,
         telegramNote,
       },
@@ -291,10 +294,16 @@ export async function sendPortfolioUpdateNowAction(
     }
 
     const zone = resolveTimeZone(previewSettings.portfolio.timezone);
+    const previewDate = zonedClock(new Date(), zone).date;
+    // Unsaved auto-note toggle too, so the preview matches what Save would do.
+    const autoNoteOn = fromSettingsForm
+      ? formData.get("portfolioAutoNote") !== null
+      : previewSettings.portfolio.autoNote;
     const telegramText = composePortfolioTelegramMessage(update, previewSettings.portfolio, {
-      date: zonedClock(new Date(), zone).date,
+      date: previewDate,
       time: previewSettings.portfolio.time || "18:00",
       window,
+      autoNote: autoNoteOn ? autoNoteForDate(window, previewDate) : "",
     });
     const result = await dispatchAlert({
       dedupeKey: `portfolio-test:${Date.now()}`,

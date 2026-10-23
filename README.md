@@ -291,6 +291,14 @@ buttons above the box insert placeholders at the cursor.
   is sent as typed, so nothing disappears from your message.
 - **The note** is appended as the last line after a blank line, with or without a
   template.
+- **Auto note** adds one short quote or reminder to every scheduled recap, so the
+  message reads differently each time without anyone writing it. It is generated
+  **locally** — no API key, no network call, no cost — from a built-in list of
+  short original lines, and it advances one step per period: a new line each
+  day, week or month, a different line for each cadence, and the *same* line if
+  the same send is retried (`autoNoteFor(cadence, period)` is a pure function of
+  the period, shown in the settings preview before you save). It follows your
+  own note when both are set. Stored as `alerts.portfolio.autoNote`.
 - Limits: the message is capped at 1,000 characters and the note at 500. A
   rendered message longer than Telegram’s 4,096-character limit is cut with an
   ellipsis instead of failing to send.

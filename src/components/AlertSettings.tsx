@@ -22,6 +22,7 @@ import {
   type PortfolioMessageContext,
   type PortfolioMove,
 } from "@/lib/alert-rules";
+import { autoNoteForDate } from "@/lib/auto-notes";
 import type { PortfolioUpdate } from "@/lib/price-refresh";
 import { SubmitButton } from "./ui";
 
@@ -228,16 +229,22 @@ function PortfolioTelegramEditor({
 }) {
   const [template, setTemplate] = useState(settings.telegramTemplate);
   const [note, setNote] = useState(settings.telegramNote);
+  const [autoNote, setAutoNote] = useState(settings.autoNote);
   const templateRef = useRef<HTMLTextAreaElement>(null);
 
   const shownWindow: AlertWindow = windowOverride ?? "day";
   const previewUpdate = previewUpdates?.[shownWindow] ?? null;
   const usingSample = !previewUpdate;
   const update = previewUpdate ?? SAMPLE_MESSAGE;
+  const previewDate = (previewContext ?? SAMPLE_CONTEXT).date;
+  // The same pure function the scheduler uses, so the line shown here is the
+  // line that is sent for this period.
+  const autoNoteLine = autoNote ? autoNoteForDate(shownWindow, previewDate) : "";
   const context: PortfolioMessageContext = {
     ...(previewContext ?? SAMPLE_CONTEXT),
     window: shownWindow,
     ...(timeOverride ? { time: timeOverride } : {}),
+    autoNote: autoNoteLine,
   };
   const preview = composePortfolioTelegramMessage(
     update,
@@ -317,8 +324,32 @@ function PortfolioTelegramEditor({
           placeholder="e.g. — sent from Ledgerly"
           className="input"
         />
-        <p className="mt-1 text-xs text-slate-400">Added as the last line, after the message above.</p>
+        <p className="mt-1 text-xs text-slate-400">
+          Added as the last line, after the message above. An auto note, if it is on, follows it.
+        </p>
       </div>
+
+      <label className="mt-3 flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2">
+        <input
+          type="checkbox"
+          name="portfolioAutoNote"
+          checked={autoNote}
+          onChange={(event) => setAutoNote(event.target.checked)}
+          className="mt-1 h-4 w-4 accent-indigo-600"
+        />
+        <span>
+          <span className="block text-sm font-semibold text-slate-900">Auto note</span>
+          <span className="block text-xs text-slate-500">
+            Write one short quote or reminder for me. It changes with every send — a new line each day, week or month —
+            and never repeats the previous period&apos;s.
+          </span>
+          {autoNote && (
+            <span className="mt-1 block text-xs text-slate-600">
+              Next line: <span className="font-medium">“{autoNoteForDate(shownWindow, previewDate)}”</span>
+            </span>
+          )}
+        </span>
+      </label>
 
       {unknown.length > 0 && (
         <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-200">
