@@ -124,6 +124,21 @@ export function ensureSchema() {
           updated_at timestamptz NOT NULL DEFAULT now()
         )`);
 
+      // One-time migration: Auto note originally defaulted to off, so any
+      // earlier settings save wrote "false" before the default became true.
+      const autoNoteMigrated = await db.execute<{ value: string }>(sql`
+        SELECT value FROM app_settings WHERE key = 'alerts.portfolio.autoNote.defaultOnMigrated' LIMIT 1
+      `);
+      if (autoNoteMigrated.rows.length === 0) {
+        await db.execute(sql`
+          INSERT INTO app_settings (key, value, updated_at)
+          VALUES
+            ('alerts.portfolio.autoNote', 'true', now()),
+            ('alerts.portfolio.autoNote.defaultOnMigrated', '1', now())
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+        `);
+      }
+
       // One-time backfill for pre-existing non-cash assets that predate price_snapshots.
       const unseeded = await db.execute<{ id: number }>(sql`
         SELECT a.id

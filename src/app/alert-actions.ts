@@ -1,7 +1,16 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { dispatchAlert, getAlertSettings, saveAlertSettings, sendTestAlert } from "@/lib/alerts";
+import {
+  advanceAutoNoteStep,
+  clearPortfolioScheduleDedupe,
+  dispatchAlert,
+  getAlertSettings,
+  getAutoNoteStep,
+  saveAlertSettings,
+  sendTestAlert,
+  setAutoNoteStep,
+} from "@/lib/alerts";
 import {
   DEFAULT_PORTFOLIO_ALERT_SETTINGS,
   MAX_PORTFOLIO_NOTE_LENGTH,
@@ -55,6 +64,8 @@ export type AlertActionState = {
   warning?: string;
   /** Exact text Telegram receives (portfolio preview), for the page to show. */
   sample?: string;
+  /** Updated auto-note step after a send, so the preview immediately advances. */
+  autoNoteStep?: number;
 };
 
 function describeWindow(window: AlertWindow): string {
@@ -152,6 +163,14 @@ export async function saveAlertSettingsAction(
       ...new Set([...unknownPortfolioPlaceholders(telegramTemplate), ...unknownPortfolioPlaceholders(telegramNote)]),
     ];
 
+    const previous = await getAlertSettings();
+    const nextWeeklyDay = weeklyDay ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.weeklyDay;
+    const nextMonthlyDay = monthlyDay ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.monthlyDay;
+    const scheduleChanged =
+      previous.portfolio.time !== portfolioTime ||
+      previous.portfolio.weeklyDay !== nextWeeklyDay ||
+      previous.portfolio.monthlyDay !== nextMonthlyDay;
+
     await saveAlertSettings({
       enabled,
       thresholdPct,
@@ -164,9 +183,9 @@ export async function saveAlertSettingsAction(
         timezone: portfolioTimezone,
         dailyEnabled,
         weeklyEnabled,
-        weeklyDay: weeklyDay ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.weeklyDay,
+        weeklyDay: nextWeeklyDay,
         monthlyEnabled,
-        monthlyDay: monthlyDay ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.monthlyDay,
+        monthlyDay: nextMonthlyDay,
         thresholdPct: portfolioThreshold.value,
         sendUnchanged,
         autoNote,
@@ -174,6 +193,13 @@ export async function saveAlertSettingsAction(
         telegramNote,
       },
     });
+    const rawStep = formData.get("portfolioAutoNoteStep");
+    if (rawStep !== null && rawStep !== "" && Number.isFinite(Number(rawStep))) {
+      await setAutoNoteStep(Number(rawStep));
+    }
+    if (scheduleChanged) {
+      await clearPortfolioScheduleDedupe();
+    }
     revalidatePath("/alerts");
     revalidatePath("/", "layout");
 
@@ -299,11 +325,16 @@ export async function sendPortfolioUpdateNowAction(
     const autoNoteOn = fromSettingsForm
       ? formData.get("portfolioAutoNote") !== null
       : previewSettings.portfolio.autoNote;
+    const rawStep = fromSettingsForm ? formData.get("portfolioAutoNoteStep") : null;
+    const step =
+      rawStep !== null && rawStep !== "" && Number.isFinite(Number(rawStep))
+        ? Math.max(0, Math.trunc(Number(rawStep)))
+        : await getAutoNoteStep();
     const telegramText = composePortfolioTelegramMessage(update, previewSettings.portfolio, {
       date: previewDate,
       time: previewSettings.portfolio.time || "18:00",
       window,
-      autoNote: autoNoteOn ? autoNoteForDate(window, previewDate) : "",
+      autoNote: autoNoteOn ? autoNoteForDate(window, previewDate, step) : "",
     });
     const result = await dispatchAlert({
       dedupeKey: `portfolio-test:${Date.now()}`,
@@ -315,6 +346,7 @@ export async function sendPortfolioUpdateNowAction(
       settings: previewSettings,
       force: true,
     });
+    const nextStep = autoNoteOn ? await advanceAutoNoteStep(step) : step;
     revalidatePath("/alerts");
 
     const described = describePreviewDelivery(result, channels, update.title);
@@ -325,6 +357,7 @@ export async function sendPortfolioUpdateNowAction(
       ...described,
       message: described.message ? `${described.message}${historyNote}` : described.message,
       sample: telegramText,
+      autoNoteStep: nextStep,
       ts: Date.now(),
     };
   } catch {

@@ -165,8 +165,17 @@ export function TestAlertButton({
  * every uncontrolled field in the settings form before the action runs, throwing
  * away edits the user has not saved yet.
  */
-function PortfolioTestButton() {
-  const [state, action, pending] = useActionState<AlertActionState, FormData>(sendPortfolioUpdateNowAction, {});
+function PortfolioTestButton({ onStepAdvance }: { onStepAdvance?: (step: number) => void }) {
+  const [state, action, pending] = useActionState<AlertActionState, FormData>(
+    async (prev, formData) => {
+      const next = await sendPortfolioUpdateNowAction(prev, formData);
+      if (typeof next.autoNoteStep === "number") {
+        onStepAdvance?.(next.autoNoteStep);
+      }
+      return next;
+    },
+    {},
+  );
   return (
     <div className="space-y-2">
       <button
@@ -219,6 +228,8 @@ function PortfolioTelegramEditor({
   previewContext,
   windowOverride,
   timeOverride,
+  autoNoteStep = 0,
+  onStepChange,
 }: {
   settings: PortfolioAlertSettings;
   /** Real update per comparison window, built on the server. */
@@ -226,6 +237,8 @@ function PortfolioTelegramEditor({
   previewContext?: PortfolioMessageContext | null;
   windowOverride?: AlertWindow;
   timeOverride?: string;
+  autoNoteStep?: number;
+  onStepChange?: (next: number) => void;
 }) {
   const [template, setTemplate] = useState(settings.telegramTemplate);
   const [note, setNote] = useState(settings.telegramNote);
@@ -237,9 +250,10 @@ function PortfolioTelegramEditor({
   const usingSample = !previewUpdate;
   const update = previewUpdate ?? SAMPLE_MESSAGE;
   const previewDate = (previewContext ?? SAMPLE_CONTEXT).date;
-  // The same pure function the scheduler uses, so the line shown here is the
-  // line that is sent for this period.
-  const autoNoteLine = autoNote ? autoNoteForDate(shownWindow, previewDate) : "";
+  // The same pure function the scheduler uses, plus the step counter that
+  // increments on every send, so the line shown here is the line that goes out
+  // next and advances immediately after each send.
+  const autoNoteLine = autoNote ? autoNoteForDate(shownWindow, previewDate, autoNoteStep) : "";
   const context: PortfolioMessageContext = {
     ...(previewContext ?? SAMPLE_CONTEXT),
     window: shownWindow,
@@ -329,27 +343,39 @@ function PortfolioTelegramEditor({
         </p>
       </div>
 
-      <label className="mt-3 flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2">
-        <input
-          type="checkbox"
-          name="portfolioAutoNote"
-          checked={autoNote}
-          onChange={(event) => setAutoNote(event.target.checked)}
-          className="mt-1 h-4 w-4 accent-indigo-600"
-        />
-        <span>
-          <span className="block text-sm font-semibold text-slate-900">Auto note</span>
-          <span className="block text-xs text-slate-500">
-            Write one short quote or reminder for me. It changes with every send — a new line each day, week or month —
-            and never repeats the previous period&apos;s.
-          </span>
-          {autoNote && (
-            <span className="mt-1 block text-xs text-slate-600">
-              Next line: <span className="font-medium">“{autoNoteForDate(shownWindow, previewDate)}”</span>
+      <input type="hidden" name="portfolioAutoNoteStep" value={autoNoteStep} />
+      <div className="mt-3 flex flex-wrap items-start justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2">
+        <label className="flex flex-1 items-start gap-2">
+          <input
+            type="checkbox"
+            name="portfolioAutoNote"
+            checked={autoNote}
+            onChange={(event) => setAutoNote(event.target.checked)}
+            className="mt-1 h-4 w-4 accent-indigo-600"
+          />
+          <span>
+            <span className="block text-sm font-semibold text-slate-900">Auto note</span>
+            <span className="block text-xs text-slate-500">
+              Write one short quote or reminder for me. It is on by default and changes every time an alert is sent.
             </span>
-          )}
-        </span>
-      </label>
+            {autoNote && (
+              <span className="mt-1 block text-xs text-slate-600">
+                Next line: <span className="font-medium">“{autoNoteLine}”</span>
+              </span>
+            )}
+          </span>
+        </label>
+        {autoNote && onStepChange && (
+          <button
+            type="button"
+            onClick={() => onStepChange(autoNoteStep + 1)}
+            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            title="Pick the next auto note line"
+          >
+            ↻ Change
+          </button>
+        )}
+      </div>
 
       {unknown.length > 0 && (
         <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-200">
@@ -384,6 +410,7 @@ export default function AlertSettingsForm({
   lastPortfolioLabel = null,
   previewUpdates = null,
   previewContext = null,
+  initialAutoNoteStep = 0,
 }: {
   settings: AlertSettings;
   telegramConnected?: boolean;
@@ -399,6 +426,8 @@ export default function AlertSettingsForm({
   previewUpdates?: Record<AlertWindow, PortfolioUpdate | null> | null;
   /** Date/time/window that would be used for the next send. */
   previewContext?: PortfolioMessageContext | null;
+  /** Current auto-note step offset, incremented after every send. */
+  initialAutoNoteStep?: number;
 }) {
   const [state, action] = useActionState<AlertActionState, FormData>(
     (_previous, formData) => saveAlertSettingsAction(_previous, formData),
@@ -406,6 +435,7 @@ export default function AlertSettingsForm({
   );
 
   const [portfolioEnabled, setPortfolioEnabled] = useState(settings.portfolio.enabled);
+  const [autoNoteStep, setAutoNoteStep] = useState(initialAutoNoteStep);
   // Kept in state so {window} and {time} in the live preview follow the picker
   // before the form is saved, instead of showing the last saved values.
   const [previewWindow, setPreviewWindow] = useState<AlertWindow>("day");
@@ -694,6 +724,8 @@ export default function AlertSettingsForm({
             previewContext={previewContext}
             windowOverride={previewWindow}
             timeOverride={previewTime}
+            autoNoteStep={autoNoteStep}
+            onStepChange={setAutoNoteStep}
           />
 
           {portfolioEnabled && (nextPortfolioLabel || lastPortfolioLabel) && (
@@ -712,7 +744,7 @@ export default function AlertSettingsForm({
         </div>
 
         <div className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 px-4 py-3">
-          <PortfolioTestButton />
+          <PortfolioTestButton onStepAdvance={setAutoNoteStep} />
           <p className="max-w-md text-xs text-slate-500">
             Sends a preview of today&apos;s message through the channels below right now. It ignores the optional
             threshold and does not wait for the schedule, so it works before this is turned on.

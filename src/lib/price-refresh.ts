@@ -3,8 +3,10 @@ import { autoNoteFor } from "@/lib/auto-notes";
 import { db } from "@/db";
 import { assets } from "@/db/schema";
 import {
+  advanceAutoNoteStep,
   dispatchAlert,
   getAlertSettings,
+  getAutoNoteStep,
   getLastPriceRefresh,
   pruneAlertEvents,
 } from "@/lib/alerts";
@@ -487,14 +489,14 @@ async function dispatchPortfolioRun(input: {
   }
 
   const alert = formatPortfolioMove(move);
+  const autoNoteStep = portfolio.autoNote ? await getAutoNoteStep() : 0;
   // Telegram may be formatted by the user; push keeps the structured message.
   const telegramText = composePortfolioTelegramMessage({ ...alert, move }, portfolio, {
     date: run.date,
     time: portfolio.time,
     window: run.cadence,
-    // One line per period: the next send of the same cadence picks the next
-    // one, while a retry of this send keeps the same wording.
-    autoNote: portfolio.autoNote ? autoNoteFor(run.cadence, run.periodKey) : "",
+    // Advances on every delivered send so each alarm hit gets a fresh line.
+    autoNote: portfolio.autoNote ? autoNoteFor(run.cadence, run.periodKey, autoNoteStep) : "",
   });
   const result = await dispatchAlert({
     dedupeKey: portfolioAlertKey(run),
@@ -508,6 +510,10 @@ async function dispatchPortfolioRun(input: {
     // switch must not silence it. Channels are still respected.
     force: true,
   });
+
+  if (portfolio.autoNote && result.status === "sent") {
+    await advanceAutoNoteStep(autoNoteStep);
+  }
 
   if (result.telegramError) errors.add(`Telegram: ${result.telegramError}`);
   if (result.pushError) errors.add(`Push: ${result.pushError}`);
