@@ -24,8 +24,8 @@ import GripIcon from "./GripIcon";
 /**
  * The folder strip above the Holdings table.
  *
- * Outside arrange mode it is a filter bar: **All**, one chip per folder with its
- * count and value, and **Unfiled**. Inside arrange mode the chips become
+ * Outside arrange mode it is a filter bar: **All** and one chip per folder with
+ * its count and value. Inside arrange mode the chips become
  * draggable (and nudgeable with ◀ / ▶), can be renamed, recoloured, given an
  * exchange or emoji icon, and deleted — and a holding dragged from the table can
  * be dropped straight onto a folder to file it.
@@ -39,7 +39,6 @@ export default function HoldingsFolders({
   assignments,
   counts,
   totals,
-  unfiledCount,
   selected,
   onSelect,
   arranging,
@@ -54,7 +53,6 @@ export default function HoldingsFolders({
   counts: Record<string, number>;
   /** Portfolio value per folder id. */
   totals: Record<string, number>;
-  unfiledCount: number;
   selected: FolderFilter;
   onSelect: (next: FolderFilter) => void;
   arranging: boolean;
@@ -140,7 +138,7 @@ export default function HoldingsFolders({
     onFoldersChange(nextFolders);
     onAssignmentsChange(nextAssignments);
     if (selected === `folder:${folder.id}`) onSelect("all");
-    setAnnouncement(`${folder.name} deleted. Its holdings are now unfiled.`);
+    setAnnouncement(`${folder.name} deleted. Its holdings are back in the list.`);
     setEditing(null);
   }
 
@@ -170,7 +168,7 @@ export default function HoldingsFolders({
   }
 
   /** A holding dragged out of the table (text/plain = asset id) was dropped here. */
-  function handleHoldingDrop(event: DragEvent<HTMLElement>, folderId: string | null) {
+  function handleHoldingDrop(event: DragEvent<HTMLElement>, folderId: string) {
     const raw = event.dataTransfer.getData("text/plain");
     const assetId = Number(raw);
     if (!Number.isInteger(assetId) || assetId <= 0) return;
@@ -179,7 +177,7 @@ export default function HoldingsFolders({
     setDropFolder(null);
   }
 
-  function allowHoldingDrop(event: DragEvent<HTMLElement>, folderId: string | null) {
+  function allowHoldingDrop(event: DragEvent<HTMLElement>, folderId: string) {
     // Only react to holdings: a folder or category drag carries its own key.
     const raw = event.dataTransfer.types.includes("text/plain");
     if (!raw) return;
@@ -244,21 +242,6 @@ export default function HoldingsFolders({
                 </button>
               );
             })}
-            {unfiledCount > 0 && folders.length > 0 && (
-              <button
-                type="button"
-                onClick={() => onSelect(selected === "unfiled" ? "all" : "unfiled")}
-                className={chipClass(selected === "unfiled")}
-                aria-pressed={selected === "unfiled"}
-                onDragOver={(event) => allowHoldingDrop(event, null)}
-                onDrop={(event) => handleHoldingDrop(event, null)}
-              >
-                Unfiled
-                <span className={selected === "unfiled" ? "opacity-70" : "text-slate-400"}>
-                  {unfiledCount}
-                </span>
-              </button>
-            )}
           </>
         )}
 

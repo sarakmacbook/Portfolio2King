@@ -232,11 +232,11 @@ Folders turn a long table into a few groups without changing any numbers:
    letter, an exchange logo (Binance, OKX, Bybit, Coinbase, Kraken, DexScreener)
    or any emoji you type.
 2. File holdings in: drag a row onto a folder chip, or use the **Folder** dropdown
-   on every row. A holding can be in one folder, and **Unfiled** is the default.
-3. Drop the row back on **Unfiled** — or pick *Unfiled* in its dropdown — to pull
-   it out again.
+   on every row. A holding can be in one folder; holdings with no folder are
+   simply plain rows above the folder groups.
+3. Pick *No folder* in a holding's dropdown to pull it out of its folder again.
 4. Click **Save layout**. **Reset to default** removes the folders; the holdings
-   themselves are never deleted, they just become unfiled again.
+   themselves are never deleted, they just go back to being plain rows.
 
 **Dragging works outside arrange mode too**, which is the quick way to tidy up:
 
@@ -244,20 +244,22 @@ Folders turn a long table into a few groups without changing any numbers:
   **Folder** dropdown next to it is the keyboard-friendly path). Drag it and the
   folder groups highlight.
 - Drop it on a **folder group** — its header or anywhere in its rows — and it is
-  filed there; drop it on **Unfiled** to pull it back out; drop it on another
-  holding to put it in *that* holding's folder. Empty folders show their own
-  dashed *"drop a holding here"* row while you drag.
+  filed there; drop it on another holding to put it in *that* holding's folder.
+  To pull a holding back out, pick *No folder* in its dropdown. Empty folders
+  show their own dashed *"drop a holding here"* row while you drag.
 - Those drops save immediately (one small request per move, with the row moving
   optimistically and snapping back if the save fails). Arrange mode is the only
   place where moves stay pending until **Save layout**, because that is the click
   that stores the folders themselves.
 
-Outside arrange mode the strip is a filter: **All**, one chip per folder with its
-count and value, and **Unfiled**. Clicking a chip narrows the table (and the
-category tab + search still apply on top). With folders in play the table groups
-rows under a header per folder — icon, name, number of holdings and the folder's
-own total — and each header collapses, which is handy on a phone where the groups
-become stacked cards.
+Outside arrange mode the strip is a filter: **All** plus one chip per folder with
+its count and value. Clicking a chip narrows the table (and the category tab +
+search still apply on top). With folders in play the table lists holdings that are
+in no folder as ordinary rows first, then a header per folder — icon, name, number
+of holdings and the folder's own total — followed by that folder's rows. Each
+header collapses, which is handy on a phone where the groups become stacked cards.
+There is no *Unfiled* group or chip: a holding without a folder is not a category,
+it is just a holding.
 
 Details:
 

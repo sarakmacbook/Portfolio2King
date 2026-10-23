@@ -9,6 +9,7 @@ import {
   assignHolding,
   countInFolder,
   groupByFolder,
+  splitByFolder,
   makeFolder,
   matchesFolderFilter,
   moveFolderBy,
@@ -158,7 +159,7 @@ test("folders can be nudged and dragged into a new order", () => {
   assert.deepEqual(folders.map((f) => f.id), ["a", "b", "c"]);
 });
 
-test("groupByFolder groups in folder order with unfiled rows last", () => {
+test("splitByFolder returns folder groups plus the rows that are in no folder", () => {
   const folders = [folder("a"), folder("b"), folder("empty")];
   const rows = [
     { id: 1, value: 100 },
@@ -166,21 +167,24 @@ test("groupByFolder groups in folder order with unfiled rows last", () => {
     { id: 3, value: 300 },
     { id: 4, value: 400 },
   ];
-  const groups = groupByFolder(rows, folders, { 2: "b", 4: "a", 1: "a" });
+  const { ungrouped, groups } = splitByFolder(rows, folders, { 2: "b", 4: "a", 1: "a" });
 
-  assert.deepEqual(groups.map((group) => group.folder?.id ?? null), ["a", "b", null]);
+  // Only real folders are groups: there is no "Unfiled" bucket.
+  assert.deepEqual(groups.map((group) => group.folder.id), ["a", "b"]);
   // Inside a group the rows keep the order they arrived in (the table's sort).
   assert.deepEqual(groups[0].rows.map((row) => row.id), [1, 4]);
   assert.equal(groups[0].totalValue, 500);
   assert.deepEqual(groups[1].rows.map((row) => row.id), [2]);
-  // The holding filed into a folder that no longer exists is unfiled, not lost.
-  assert.deepEqual(groups[2].rows.map((row) => row.id), [3]);
+  // The row filed into a folder that no longer exists is simply ungrouped.
+  assert.deepEqual(ungrouped.map((row) => row.id), [3]);
 
-  // No folders at all: one flat group, exactly the rows passed in.
-  const flat = groupByFolder(rows, [], {});
-  assert.equal(flat.length, 1);
-  assert.equal(flat[0].folder, null);
-  assert.deepEqual(flat[0].rows.map((row) => row.id), [1, 2, 3, 4]);
+  // No folders at all: no groups, every row ungrouped.
+  const flat = splitByFolder(rows, [], {});
+  assert.deepEqual(flat.groups, []);
+  assert.deepEqual(flat.ungrouped.map((row) => row.id), [1, 2, 3, 4]);
+
+  // groupByFolder is the groups-only view of the same split.
+  assert.deepEqual(groupByFolder(rows, folders, { 2: "b" }).map((group) => group.folder.id), ["b"]);
 });
 
 test("folder filters and counts agree with the filing", () => {
@@ -196,8 +200,8 @@ test("folder filters and counts agree with the filing", () => {
   assert.equal(matchesFolderFilter("folder:a", 1, assignments, ids), true);
   assert.equal(matchesFolderFilter("folder:a", 3, assignments, ids), false);
   assert.equal(matchesFolderFilter("folder:b", 3, assignments, ids), true);
-  assert.equal(matchesFolderFilter("unfiled", 99, assignments, ids), true);
-  assert.equal(matchesFolderFilter("unfiled", 1, assignments, ids), false);
+  // A row in no folder only shows under "all" — there is no "unfiled" filter.
+  assert.equal(matchesFolderFilter("folder:a", 99, assignments, ids), false);
 });
 
 test("nextFolderId slugifies names and never collides", () => {
@@ -242,7 +246,11 @@ test("folders are saved, loaded and reset with the rest of the dashboard layout"
 
   const table = read("src/components/HoldingsTable.tsx");
   assert.ok(table.includes("<HoldingsFolders"), "the table renders the folder strip");
-  assert.ok(table.includes("groupByFolder("), "the table groups holdings by folder");
+  assert.ok(table.includes("splitByFolder("), "the table groups holdings by folder");
+  // Holdings in no folder are plain rows: there is no "Unfiled" group or chip
+  // (only the comments explaining why).
+  assert.ok(!/>\s*Unfiled\s*</.test(table), "no Unfiled heading in the table");
+  assert.ok(!table.includes('"unfiled"'), "no unfiled group key in the table");
   assert.ok(table.includes("folderControl("), "each holding shows its folder");
 
   const strip = read("src/components/HoldingsFolders.tsx");

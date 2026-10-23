@@ -211,7 +211,7 @@ export async function loadHoldingFolderAssignments(
   return normaliseAssignments(await readSetting(HOLDINGS_FOLDER_ASSIGNMENTS_SETTING), folderIds);
 }
 
-/** Stores the filing map; holdings that are unfiled are simply left out. */
+/** Stores the filing map; holdings that are in no folder are simply left out. */
 export async function saveHoldingFolderAssignments(
   assignments: unknown,
   folders?: readonly HoldingFolder[],
@@ -229,7 +229,7 @@ export async function saveHoldingFolderAssignments(
 }
 
 /**
- * Files one holding into a folder (`null` = Unfiled) and stores it.
+ * Files one holding into a folder (`null` = no folder) and stores it.
  *
  * Only that one assignment is read-modify-written, so two drops in quick
  * succession cannot clobber each other, and both the holding and the folder are
