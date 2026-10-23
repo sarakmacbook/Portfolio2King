@@ -110,6 +110,18 @@ html.dark .input:focus {
   --tw-ring-color: rgb(139 92 246 / .17);
   box-shadow: 0 0 0 4px rgb(139 92 246 / .13), inset 0 1px 2px rgb(0 0 0 / .2);
 }
+html.dark .input:disabled {
+  background: rgb(255 255 255 / .03);
+  color: #71798e;
+}
+html.dark .input::file-selector-button {
+  margin-right: .75rem;
+  border: 1px solid rgb(100 116 139 / .38);
+  border-radius: .5rem;
+  padding: .25rem .625rem;
+  background: rgb(255 255 255 / .06);
+  color: #e8eaf2;
+}
 html.dark select.input option { background: #111525; color: #e8eaf2; }
 html.dark .btn-primary {
   background: linear-gradient(135deg, #7c3aed, #6366f1);
@@ -125,38 +137,50 @@ html.dark .btn-ghost { color: #d5d8e3; }
 html.dark .btn-ghost:hover { border-color: rgb(139 92 246 / .48); background: rgb(139 92 246 / .1); color: #fff; }
 html.dark .btn-danger { border-color: rgb(244 63 94 / .35); color: #fb7185; }
 html.dark .btn-danger:hover { background: rgb(244 63 94 / .11); }
-html.dark .text-slate-900, html.dark .text-slate-800 { color: #f4f4f8; }
-html.dark .text-slate-700, html.dark .text-slate-600 { color: #c5c9d6; }
+html.dark .text-slate-900, html.dark .text-slate-800, html.dark .hover\:text-slate-900:hover, html.dark .hover\:text-slate-800:hover { color: #f4f4f8; }
+html.dark .text-slate-700, html.dark .text-slate-600, html.dark .hover\:text-slate-700:hover, html.dark .hover\:text-slate-600:hover { color: #c5c9d6; }
 html.dark .text-slate-500 { color: #9299ac; }
 html.dark .text-slate-400 { color: #71798e; }
-html.dark .text-indigo-600, html.dark .text-indigo-700 { color: #a99cff; }
-html.dark .text-emerald-600, html.dark .text-emerald-700, html.dark .text-emerald-800 { color: #5ee4ad; }
-html.dark .text-rose-600, html.dark .text-rose-700, html.dark .text-rose-800 { color: #fb8395; }
-html.dark .text-amber-700, html.dark .text-amber-900, html.dark .text-amber-950 { color: #f8d477; }
+html.dark .text-slate-300 { color: #525b70; }
+html.dark .text-indigo-600, html.dark .text-indigo-700, html.dark .text-indigo-900, html.dark .hover\:text-indigo-600:hover, html.dark .hover\:text-indigo-700:hover { color: #a99cff; }
+html.dark .text-indigo-700\/70 { color: rgb(169 156 255 / .75); }
+html.dark .text-emerald-600, html.dark .text-emerald-700, html.dark .text-emerald-800, html.dark .text-emerald-900 { color: #5ee4ad; }
+html.dark .text-rose-600, html.dark .text-rose-700, html.dark .text-rose-800, html.dark .hover\:text-rose-600:hover { color: #fb8395; }
+html.dark .text-amber-700, html.dark .text-amber-800, html.dark .text-amber-900, html.dark .text-amber-950 { color: #f8d477; }
 html.dark .text-orange-700 { color: #fbad72; }
 html.dark .text-sky-700 { color: #70d3f7; }
 html.dark .border-slate-100, html.dark .divide-slate-100 > :not(:last-child) { border-color: rgb(100 116 139 / .18); }
-html.dark .border-slate-200, html.dark .border-slate-300 { border-color: rgb(100 116 139 / .32); }
-html.dark .border-indigo-100, html.dark .border-indigo-200 { border-color: rgb(139 92 246 / .25); }
+html.dark .border-slate-200, html.dark .border-slate-300, html.dark .hover\:border-slate-300:hover, html.dark .hover\:border-slate-400:hover { border-color: rgb(100 116 139 / .32); }
+html.dark .border-indigo-100, html.dark .border-indigo-200, html.dark .border-indigo-300, html.dark .hover\:border-indigo-300:hover { border-color: rgb(139 92 246 / .32); }
+html.dark .border-indigo-500, html.dark .border-indigo-600 { border-color: #8b5cf6; }
 html.dark .border-emerald-100, html.dark .border-emerald-200 { border-color: rgb(16 185 129 / .22); }
-html.dark .border-rose-100, html.dark .border-rose-200 { border-color: rgb(244 63 94 / .23); }
-html.dark .border-amber-300 { border-color: rgb(245 158 11 / .34); }
-html.dark .bg-white { background-color: #121625; }
+html.dark .border-rose-100, html.dark .border-rose-200, html.dark .border-rose-300 { border-color: rgb(244 63 94 / .28); }
+html.dark .border-rose-500, html.dark .focus\:border-rose-500:focus { border-color: #f43f5e; }
+html.dark .border-amber-200, html.dark .border-amber-300 { border-color: rgb(245 158 11 / .34); }
+html.dark .bg-white, html.dark .bg-white\/80, html.dark .hover\:bg-white:hover { background-color: #121625; }
 html.dark .crypto-logo-image { background-color: white; }
-html.dark .bg-slate-50, html.dark .hover\:bg-slate-50:hover, html.dark .hover\:bg-slate-50\/80:hover { background-color: rgb(255 255 255 / .035); }
+html.dark .bg-slate-50, html.dark .bg-slate-50\/40, html.dark .bg-slate-50\/60, html.dark .hover\:bg-slate-50:hover, html.dark .hover\:bg-slate-50\/70:hover, html.dark .hover\:bg-slate-50\/80:hover { background-color: rgb(255 255 255 / .035); }
 html.dark .bg-slate-100, html.dark .hover\:bg-slate-100:hover { background-color: rgb(100 116 139 / .14); }
+html.dark .bg-slate-300 { background-color: #4b5568; }
 html.dark .bg-slate-900 { background-color: #eeeef5; color: #111322; }
-html.dark .bg-indigo-50, html.dark .bg-indigo-50\/40, html.dark .bg-indigo-50\/50 { background-color: rgb(124 58 237 / .1); }
+html.dark .bg-slate-900 .text-white,
+html.dark .bg-slate-900 .text-slate-100 { color: inherit; }
+html.dark .bg-slate-900 .text-slate-200,
+html.dark .bg-slate-900 .text-slate-300,
+html.dark .bg-slate-900 .text-slate-400 { color: inherit; opacity: 0.72; }
+html.dark .bg-indigo-50, html.dark .bg-indigo-50\/40, html.dark .bg-indigo-50\/50, html.dark .bg-indigo-50\/60, html.dark .bg-indigo-50\/80 { background-color: rgb(124 58 237 / .12); }
 html.dark .bg-emerald-50, html.dark .bg-emerald-50\/60 { background-color: rgb(16 185 129 / .09); }
-html.dark .bg-rose-50, html.dark .bg-rose-50\/60 { background-color: rgb(244 63 94 / .09); }
+html.dark .bg-rose-50, html.dark .bg-rose-50\/60, html.dark .hover\:bg-rose-50:hover { background-color: rgb(244 63 94 / .09); }
 html.dark .bg-amber-50 { background-color: rgb(245 158 11 / .09); }
 html.dark .bg-orange-50 { background-color: rgb(249 115 22 / .09); }
 html.dark .bg-sky-50 { background-color: rgb(14 165 233 / .09); }
-html.dark .ring-indigo-100, html.dark .ring-indigo-200 { --tw-ring-color: rgb(139 92 246 / .2); }
+html.dark .ring-indigo-100, html.dark .ring-indigo-200, html.dark .ring-indigo-200\/80 { --tw-ring-color: rgb(139 92 246 / .22); }
+html.dark .ring-indigo-400, html.dark .ring-indigo-500 { --tw-ring-color: rgb(139 92 246 / .55); }
+html.dark .ring-offset-slate-50 { --tw-ring-offset-color: #0b0d17; }
 html.dark .ring-amber-200 { --tw-ring-color: rgb(245 158 11 / .22); }
 html.dark .ring-slate-200 { --tw-ring-color: rgb(100 116 139 / .24); }
 html.dark .ring-emerald-200 { --tw-ring-color: rgb(16 185 129 / .22); }
-html.dark .ring-rose-200 { --tw-ring-color: rgb(244 63 94 / .24); }
+html.dark .ring-rose-200, html.dark .focus\:ring-rose-100:focus { --tw-ring-color: rgb(244 63 94 / .24); }
 html.dark footer { color: #626b80; }
 
 /* Allocation chart adapts to the card itself, not only the viewport. */

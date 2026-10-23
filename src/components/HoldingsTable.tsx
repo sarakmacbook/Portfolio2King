@@ -108,7 +108,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
               }`}
             >
               {label}
-              <span className={`ml-1.5 text-xs ${filter === value ? "text-slate-300" : "text-slate-400"}`}>
+              <span className={`ml-1.5 text-xs ${filter === value ? "opacity-70" : "text-slate-400"}`}>
                 {counts[value] ?? 0}
               </span>
             </button>
