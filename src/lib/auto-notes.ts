@@ -92,15 +92,17 @@ function periodIndex(window: AlertWindow, periodKey: string): number {
 
 /**
  * The line for one send. `periodKey` is the dedupe period — the local date for
- * daily and weekly recaps, `YYYY-MM` for the monthly one — so every send in the
- * same period gets the same line and the next period gets the next one.
+ * daily and weekly recaps, `YYYY-MM` for the monthly one — and `step` is
+ * incremented on every delivered send so consecutive sends always advance to a
+ * fresh line, even within the same day.
  */
-export function autoNoteFor(window: AlertWindow, periodKey: string): string {
-  const index = periodIndex(window, periodKey) + CADENCE_OFFSET[window];
+export function autoNoteFor(window: AlertWindow, periodKey: string, step = 0): string {
+  const safeStep = Number.isFinite(step) ? Math.trunc(step) : 0;
+  const index = periodIndex(window, periodKey) + CADENCE_OFFSET[window] + safeStep;
   return AUTO_NOTES[((index % AUTO_NOTES.length) + AUTO_NOTES.length) % AUTO_NOTES.length];
 }
 
 /** Same helper, for a calendar date: the monthly cadence keys by month. */
-export function autoNoteForDate(window: AlertWindow, date: string): string {
-  return autoNoteFor(window, window === "month" ? date.slice(0, 7) : date);
+export function autoNoteForDate(window: AlertWindow, date: string, step = 0): string {
+  return autoNoteFor(window, window === "month" ? date.slice(0, 7) : date, step);
 }

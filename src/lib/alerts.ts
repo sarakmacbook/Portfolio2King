@@ -22,6 +22,7 @@ const PUSH_TTL_SECONDS = 60 * 60 * 12;
 
 const VAPID_PUBLIC_KEY = "push.vapidPublic";
 const VAPID_PRIVATE_KEY = "push.vapidPrivate";
+const AUTO_NOTE_STEP_KEY = "alerts.portfolio.autoNoteStep";
 
 export type AlertChannelResult = {
   pushSent: number;
@@ -83,6 +84,50 @@ async function writeSetting(key: string, value: string): Promise<void> {
     .insert(appSettings)
     .values({ key, value, updatedAt: new Date() })
     .onConflictDoUpdate({ target: appSettings.key, set: { value, updatedAt: new Date() } });
+}
+
+/**
+ * Current step offset for the auto note. Incremented on every delivered
+ * portfolio recap (scheduled or manual preview) so every send gets a fresh
+ * line instead of repeating the same quote across sends on the same day.
+ */
+export async function getAutoNoteStep(): Promise<number> {
+  if (!hasDatabase()) return 0;
+  await ensureSchema();
+  const raw = await readSetting(AUTO_NOTE_STEP_KEY);
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : 0;
+}
+
+export async function setAutoNoteStep(step: number): Promise<number> {
+  if (!hasDatabase()) return 0;
+  await ensureSchema();
+  const next = Number.isFinite(step) && step >= 0 ? Math.trunc(step) : 0;
+  await writeSetting(AUTO_NOTE_STEP_KEY, String(next));
+  return next;
+}
+
+export async function advanceAutoNoteStep(currentStep?: number): Promise<number> {
+  if (!hasDatabase()) return (currentStep ?? 0) + 1;
+  await ensureSchema();
+  const base =
+    typeof currentStep === "number" && Number.isFinite(currentStep) && currentStep >= 0
+      ? Math.trunc(currentStep)
+      : await getAutoNoteStep();
+  const next = base + 1;
+  await writeSetting(AUTO_NOTE_STEP_KEY, String(next));
+  return next;
+}
+
+/**
+ * Clears stored dedupe rows for scheduled portfolio recaps when the user
+ * edits the alarm schedule time, so a rescheduled alarm can fire again on the
+ * same day with a fresh auto-note line.
+ */
+export async function clearPortfolioScheduleDedupe(): Promise<void> {
+  if (!hasDatabase()) return;
+  await ensureSchema();
+  await db.delete(alertEvents).where(eq(alertEvents.kind, "portfolio_move"));
 }
 
 // ---------------------------------------------------------------------------

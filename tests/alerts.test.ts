@@ -789,7 +789,11 @@ test("custom wording is trimmed, capped, and survives a settings round-trip", ()
   assert.equal(empty.telegramNote, "");
 });
 
-test("auto notes change every period and never repeat the previous one", () => {
+test("auto notes are on by default and change on every send and every period", () => {
+  assert.equal(DEFAULT_PORTFOLIO_ALERT_SETTINGS.autoNote, true);
+  assert.equal(parsePortfolioAlertSettings({}).autoNote, true);
+  assert.equal(parsePortfolioAlertSettings({ [SETTING_KEYS.portfolioAutoNote]: "false" }).autoNote, false);
+
   assert.ok(AUTO_NOTES.length >= 24, "the pool must be big enough to feel varied");
 
   // Consecutive days step through the list instead of replaying one line.
@@ -797,8 +801,12 @@ test("auto notes change every period and never repeat the previous one", () => {
   const lines = days.map((day) => autoNoteForDate("day", day));
   assert.equal(new Set(lines).size, days.length);
 
-  // The same period always resolves to the same line: retries and previews agree.
-  assert.equal(autoNoteFor("day", "2026-10-22"), autoNoteFor("day", "2026-10-22"));
+  // Consecutive sends within the same day step through the list too.
+  const sameDaySends = [0, 1, 2, 3, 4].map((step) => autoNoteForDate("day", "2026-10-23", step));
+  assert.equal(new Set(sameDaySends).size, sameDaySends.length);
+
+  // The same period and step resolve to the same line: previews and sends agree.
+  assert.equal(autoNoteFor("day", "2026-10-22", 3), autoNoteFor("day", "2026-10-22", 3));
 
   // Weekly and monthly advance one step per period, not one per send.
   assert.notEqual(autoNoteForDate("week", "2026-10-22"), autoNoteForDate("week", "2026-10-29"));

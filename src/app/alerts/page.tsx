@@ -7,6 +7,7 @@ import { isDatabaseConfigured } from "@/db";
 import {
   countPushSubscriptions,
   getAlertSettings,
+  getAutoNoteStep,
   getLastPortfolioUpdate,
   getLastPriceRefresh,
   getRecentAlerts,
@@ -40,13 +41,14 @@ function timeAgo(date: Date | null): string {
 export default async function AlertsPage() {
   if (!isDatabaseConfigured()) return <DatabaseSetup />;
 
-  const [settings, subscribers, telegram, recent, lastRefresh, lastPortfolio] = await Promise.all([
+  const [settings, subscribers, telegram, recent, lastRefresh, lastPortfolio, autoNoteStep] = await Promise.all([
     getAlertSettings(),
     countPushSubscriptions(),
     getTelegramStatus(),
     getRecentAlerts(12),
     getLastPriceRefresh(),
     getLastPortfolioUpdate(),
+    getAutoNoteStep(),
   ]);
 
   const portfolioZone = resolveTimeZone(settings.portfolio.timezone);
@@ -140,6 +142,7 @@ export default async function AlertsPage() {
           lastPortfolioLabel={lastPortfolio ? timeAgo(lastPortfolio) : null}
           previewUpdates={previewUpdates}
           previewContext={previewContext}
+          initialAutoNoteStep={autoNoteStep}
         />
       </section>
 

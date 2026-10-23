@@ -179,8 +179,8 @@ export const DEFAULT_PORTFOLIO_ALERT_SETTINGS: PortfolioAlertSettings = {
   // Opt-in: a threshold normally means "only wake me when it moved", and a
   // perfectly flat day is the quietest of all.
   sendUnchanged: false,
-  // Off by default: a generated line should be opted into, never sneaked in.
-  autoNote: false,
+  // Ticked by default so every recap gets a fresh line unless unticked.
+  autoNote: true,
   telegramTemplate: "",
   telegramNote: "",
 };
