@@ -232,9 +232,17 @@ never turns into an empty wallet:
 - **Needs a key.** `ETHERSCAN_API_KEY` (or `BLOCKSCAN_API_KEY`). Without one the
   sweep is skipped, the scan falls back to the direct read, and the dialog says so
   and names the fix.
-- **Token holdings are a PRO endpoint.** A free key reads native balances only;
-  Etherscan answers *"not available on your plan"*, which the dialog reports as
-  such instead of *no tokens found*.
+- **Token holdings are a PRO endpoint — but a free key still finds tokens.**
+  Etherscan answers *"not available on your plan"* to
+  `action=addresstokenbalance`; the sweep then uses the two free endpoints
+  instead: `action=tokentx` (the wallet's ERC-20 transfer history, which names
+  each token's contract, symbol and decimals) and one `action=tokenbalance` per
+  contract to read the live balance. That path is capped at 12 contracts and 6 s
+  per sweep (`BLOCKSCAN_FREE_MAX_CONTRACTS`, `BLOCKSCAN_FREE_BUDGET_MS`), reports
+  how many contracts it could not reach, and returns balances without prices — the
+  scanner prices them through its normal market lookup, so nothing shows as $0
+  dust. The dialog says the scan used the transfer history rather than the paid
+  holdings endpoint.
 - **2 calls a second.** `src/lib/blockscan.ts` walks the 14 chains this app also
   prices, one token call per chain, 550 ms apart, inside a 12 s budget; chains the
   budget did not reach are counted in the note. A single-chain scan (pick the
