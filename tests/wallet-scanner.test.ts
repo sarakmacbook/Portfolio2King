@@ -324,3 +324,169 @@ test("the direct read discovers tokens it has no hard-coded entry for", async ()
     globalThis.fetch = originalFetch;
   }
 });
+
+test("a DeBank answer is merged with the direct read, so its gaps are filled", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.DEBANK_ACCESS_KEY;
+  process.env.DEBANK_ACCESS_KEY = "test-key";
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    // DeBank knows about ETH on Base but not about LayerZero (ZRO).
+    if (url.includes("debank.com")) {
+      return new Response(
+        JSON.stringify([
+          {
+            id: "base",
+            chain: "base",
+            name: "Ether",
+            symbol: "ETH",
+            decimals: 18,
+            amount: 1,
+            price: 2650,
+            usd_value: 2650,
+            is_core: true,
+          },
+        ]),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    // Blockscout reports the wallet's ERC-20s, including ZRO.
+    if (url.includes("blockscout.com")) {
+      return new Response(
+        JSON.stringify({
+          status: "1",
+          result: [
+            {
+              contractAddress: "0x6985884C4392D348587B19cb9eAAf157F13271cd",
+              tokenName: "LayerZero",
+              symbol: "ZRO",
+              decimals: "18",
+              balance: "2500000000000000000",
+              type: "ERC-20",
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    if (url.includes("routescan.io")) {
+      return new Response(JSON.stringify({ status: "0", result: "[]" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (url.includes("rpc")) {
+      const body = JSON.parse(String(init?.body ?? "[]")) as Array<{ id: number }>;
+      return new Response(
+        JSON.stringify(
+          body.map((req) => ({ jsonrpc: "2.0", id: req.id, result: req.id === 0 ? "0xde0b6b3a7640000" : "0x0" })),
+        ),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    return new Response("Offline", { status: 502 });
+  }) as typeof fetch;
+
+  try {
+    const scan = await scanWalletAddress("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "base");
+    assert.equal(scan.source, "debank", "DeBank still supplies the priced balances");
+    const zro = scan.balances.find((balance) => balance.symbol === "ZRO");
+    assert.ok(zro, "the token DeBank missed is found by the explorer");
+    assert.equal(zro?.quantity, 2.5);
+    assert.equal(zro?.chain, "base");
+    // DeBank's own entry is not duplicated by the RPC read of the same coin.
+    assert.equal(scan.balances.filter((balance) => balance.symbol === "ETH").length, 1);
+    assert.equal(scan.directAdditions, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.DEBANK_ACCESS_KEY;
+    else process.env.DEBANK_ACCESS_KEY = originalKey;
+  }
+});
+
+test("Routescan covers a chain Blockscout has no instance for", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("blockscout.com")) return new Response("nope", { status: 404 });
+    if (url.includes("routescan.io")) {
+      return new Response(
+        JSON.stringify({
+          status: "1",
+          result: [
+            {
+              TokenAddress: "0x55d398326f99059fF775485246999027B3197955",
+              TokenName: "Tether USD (BSC)",
+              TokenSymbol: "USDT",
+              TokenQuantity: "125000000000000000000",
+              TokenDivisor: "1000000000000000000",
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    if (url.includes("rpc")) {
+      const body = JSON.parse(String(init?.body ?? "[]")) as Array<{ id: number }>;
+      return new Response(
+        JSON.stringify(body.map((req) => ({ jsonrpc: "2.0", id: req.id, result: "0x0" }))),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    return new Response("Offline", { status: 502 });
+  }) as typeof fetch;
+
+  try {
+    const scan = await scanWalletAddress("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "bsc");
+    assert.equal(scan.source, "onchain");
+    const usdt = scan.balances.find((balance) => balance.symbol === "USDT");
+    assert.ok(usdt, "the Routescan-only token is found");
+    assert.equal(usdt?.quantity, 125);
+    assert.equal(usdt?.chain, "bsc");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("chains the dropdown offers are scanned even when the RPC list does not cover them", async () => {
+  const originalFetch = globalThis.fetch;
+  const seenHosts: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    seenHosts.push(url);
+    if (url.includes("blockscout.com") || url.includes("routescan.io")) {
+      return new Response(
+        JSON.stringify({
+          status: "1",
+          result: [
+            {
+              contractAddress: "0x1111111111111111111111111111111111111111",
+              tokenName: "Linea Token",
+              symbol: "LNA",
+              decimals: "18",
+              balance: "5000000000000000000",
+              type: "ERC-20",
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    return new Response("Offline", { status: 502 });
+  }) as typeof fetch;
+
+  try {
+    // zkSync has no RPC spec in the direct read, only an explorer.
+    const scan = await scanWalletAddress("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "zksync");
+    const found = scan.balances.find((balance) => balance.symbol === "LNA");
+    assert.ok(found, "an explorer-only chain still reports its tokens");
+    assert.equal(found?.chain, "zksync");
+    assert.equal(found?.chainLabel, "zkSync");
+    assert.equal(found?.quantity, 5);
+    // Only that chain was asked about, because the filter says so.
+    assert.ok(seenHosts.every((url) => !url.includes("arbitrum")));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
