@@ -105,6 +105,14 @@ export type TrustOptions = {
   cmcApiKey?: string;
   /** The fetch used for CoinMarketCap (separate so one can be stubbed alone). */
   cmcFetchImpl?: typeof fetch;
+  /**
+   * Told whether the CoinMarketCap lookup actually ran, and how many of the
+   * scanned contracts it recognised. The caller needs this because "not listed"
+   * and "never asked" look identical on a balance — and a filter that hides
+   * unlisted tokens must switch itself off when nothing was asked, or a missing
+   * key would empty the picker.
+   */
+  onCmcLookup?: (report: { ok: boolean; asked: number; listed: number }) => void;
 };
 
 /**
@@ -215,6 +223,18 @@ export async function enrichTokenTrust<T extends TrustableBalance>(
     marketPromise,
   ]);
 
+  if (options.onCmcLookup) {
+    const listed = balances.filter((balance) => {
+      const contract = normaliseEvmContract(balance.contract);
+      return Boolean(contract && cmc?.info.has(contract));
+    }).length;
+    options.onCmcLookup({
+      ok: Boolean(cmc?.ok),
+      asked: contracts.length,
+      listed,
+    });
+  }
+
   const withStatus = balances.map((balance) => {
     const contract = normaliseEvmContract(balance.contract);
     const match: CmcMatch | null = contract && cmc ? cmcMatchFor(balance, cmc.info) : null;
@@ -322,6 +342,8 @@ export type ScannableBalance = TrustableBalance &
   TrustSignals & {
     /** The scan's own spam flag, if it carried one. */
     spam?: boolean | null;
+    /** CoinMarketCap's id, when the contract is listed (set by the trust pass). */
+    cmcId?: number;
   };
 
 export type ScanFilters = {
@@ -337,6 +359,15 @@ export type ScanFilters = {
   dustCut?: number;
   /** Hide tokens whose contract is not the official one for their symbol. */
   hideImpostor?: boolean;
+  /**
+   * Show only tokens CoinMarketCap lists for their contract.
+   *
+   * Off unless the lookup actually ran: callers pass it only when
+   * `onCmcLookup` reported `ok`, because a missing key or a rate limit must never
+   * empty the picker. A listed contract stays even when its ticker differs (a
+   * rename or a bridge), which is how a real token like `USDC.e` survives.
+   */
+  onlyCmc?: boolean;
   /** Hide tokens with no real market (unknown data is always kept). */
   requireMarket?: boolean;
   /** Volume floor for `requireMarket`. */
@@ -364,6 +395,8 @@ export type ScanSelection<T> = {
   dust: T[];
   /** Not verified: no issuer, no indexer verdict, and no deep market behind it. */
   unverified: T[];
+  /** CoinMarketCap does not list this contract (see `onlyCmc`). */
+  unlisted: T[];
   counts: {
     total: number;
     kept: number;
@@ -372,6 +405,7 @@ export type ScanSelection<T> = {
     thin: number;
     dust: number;
     unverified: number;
+    unlisted: number;
   };
   /** Combined USD value of the dust bucket. */
   dustValue: number;
@@ -402,6 +436,7 @@ export function filterScanBalances<T extends ScannableBalance>(
   const hideImpostor = filters.hideImpostor !== false;
   const requireMarket = filters.requireMarket !== false;
   const requireVerified = filters.requireVerified !== false;
+  const onlyCmc = filters.onlyCmc === true;
   const dustCut = Number.isFinite(filters.dustCut) && (filters.dustCut as number) > 0 ? (filters.dustCut as number) : 0;
   const minVolume =
     Number.isFinite(filters.minOrganicVolumeUsd) && (filters.minOrganicVolumeUsd as number) > 0
@@ -418,6 +453,7 @@ export function filterScanBalances<T extends ScannableBalance>(
   const thin: T[] = [];
   const dust: T[] = [];
   const unverified: T[] = [];
+  const unlisted: T[] = [];
 
   for (const balance of balances) {
     // The scan already answered this; recomputing keeps a hand-built balance
@@ -429,6 +465,15 @@ export function filterScanBalances<T extends ScannableBalance>(
     }
     if (hideSpam && isSpamToken(balance)) {
       spam.push(balance);
+      continue;
+    }
+    /**
+     * The strictest filter the app has: only tokens CoinMarketCap knows for that
+     * exact contract. A balance with no contract (a native coin) has nothing to
+     * look up, so it is never hidden here.
+     */
+    if (onlyCmc && normaliseEvmContract(balance.contract) && balance.cmcId === undefined) {
+      unlisted.push(balance);
       continue;
     }
     /**
@@ -467,6 +512,7 @@ export function filterScanBalances<T extends ScannableBalance>(
     thin,
     dust,
     unverified,
+    unlisted,
     counts: {
       total: balances.length,
       kept: kept.length,
@@ -475,6 +521,7 @@ export function filterScanBalances<T extends ScannableBalance>(
       thin: thin.length,
       dust: dust.length,
       unverified: unverified.length,
+      unlisted: unlisted.length,
     },
     dustValue: sum(dust),
     keptValue: sum(kept),

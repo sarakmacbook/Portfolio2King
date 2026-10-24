@@ -16,7 +16,7 @@ import {
   parseCmcQuotes,
   sameTicker,
 } from "../src/lib/coinmarketcap";
-import { enrichTokenTrust } from "../src/lib/wallet-trust";
+import { enrichTokenTrust, filterScanBalances } from "../src/lib/wallet-trust";
 
 const USDT_ETH = "0xdac17f958d2ee523a2206206994597c13d831ec7";
 const FAKE = "0x1111111111111111111111111111111111111111";
@@ -318,4 +318,92 @@ test("the scan route and the picker both carry CoinMarketCap's verdict", () => {
 
   const env = readFileSync(resolve(__dirname, "..", ".env.example"), "utf8");
   assert.ok(env.includes("CMC_PRO_API_KEY"), "the key is documented");
+});
+
+test("only CoinMarketCap-listed contracts survive the strict filter", () => {
+  const rows = [
+    // Listed for this exact contract, under a ticker the scan spelled differently.
+    { id: "listed", symbol: "PENDLE", name: "Pendle", contract: LONGTAIL, chain: "arbitrum", valueUsd: 400, organicVolumeUsd: 5_000_000, cmcId: 29210, cmcSymbolMismatch: true },
+    // Nothing on CMC for this contract.
+    { id: "unlisted", symbol: "LONGX", name: "Long Tail Token", contract: FAKE, chain: "ethereum", valueUsd: 300, organicVolumeUsd: 5_000_000 },
+    // A native coin has no contract to look up, so the rule cannot hide it.
+    { id: "native", symbol: "ETH", name: "Ethereum", contract: null, chain: "base", valueUsd: 3000 },
+  ];
+
+  const filtered = filterScanBalances(rows, { dustCut: 0, onlyCmc: true });
+  assert.deepEqual(filtered.kept.map((r) => r.id), ["listed", "native"]);
+  assert.deepEqual(filtered.unlisted.map((r) => r.id), ["unlisted"]);
+  assert.equal(filtered.counts.unlisted, 1);
+
+  // Off, and the unlisted token is back: the filter hides, it never deletes.
+  const off = filterScanBalances(rows, { dustCut: 0, onlyCmc: false });
+  assert.deepEqual(off.kept.map((r) => r.id), ["listed", "unlisted", "native"]);
+  assert.equal(off.counts.unlisted, 0);
+});
+
+test("the trust pass reports whether CoinMarketCap actually answered", async () => {
+  const { impl } = stubCmc((url) => {
+    if (url.includes("quotes/latest")) return quotesPayload({ "29210": 0.8 });
+    return infoPayload({ [LONGTAIL]: [listed(29210, "Pendle", "PENDLE", LONGTAIL)] });
+  });
+
+  const reports: Array<{ ok: boolean; asked: number; listed: number }> = [];
+  const balances = [
+    { symbol: "PENDLE", name: "Pendle", contract: LONGTAIL, chain: "ethereum", quantity: 1, price: 0, valueUsd: 0, priced: false },
+    { symbol: "LONGX", name: "Long Tail Token", contract: FAKE, chain: "ethereum", quantity: 1, price: 1, valueUsd: 1, priced: true },
+    { symbol: "ETH", name: "Ethereum", contract: null, chain: "base", quantity: 1, price: 3000, valueUsd: 3000, priced: true },
+  ];
+
+  const enriched = await enrichTokenTrust(balances, noMarket, {
+    cmcApiKey: "KEY",
+    cmcFetchImpl: impl,
+    onCmcLookup: (report) => reports.push(report),
+  });
+  assert.deepEqual(reports, [{ ok: true, asked: 2, listed: 1 }], "only contracts are asked about");
+
+  const selection = filterScanBalances(enriched, { dustCut: 0, onlyCmc: true });
+  assert.deepEqual(selection.kept.map((row) => row.symbol), ["PENDLE", "ETH"]);
+  assert.deepEqual(selection.unlisted.map((row) => row.symbol), ["LONGX"]);
+
+  // No key at all: the lookup never ran, so the filter must not be switched on.
+  const skipped: Array<{ ok: boolean; asked: number; listed: number }> = [];
+  await enrichTokenTrust(balances, noMarket, {
+    cmcApiKey: "",
+    onCmcLookup: (report) => skipped.push(report),
+  });
+  assert.deepEqual(skipped, [{ ok: false, asked: 2, listed: 0 }], "a missing key is reported, not guessed");
+
+  // A rate limit is the same story.
+  const limited: Array<{ ok: boolean; asked: number; listed: number }> = [];
+  await enrichTokenTrust(balances, noMarket, {
+    cmcApiKey: "KEY",
+    cmcFetchImpl: (async () => {
+      throw new Error("429");
+    }) as unknown as typeof fetch,
+    onCmcLookup: (report) => limited.push(report),
+  });
+  assert.equal(limited[0].ok, false);
+});
+
+test("only tokens CoinMarketCap lists, applied by the page and re-applied by the server", () => {
+  const route = read("app/api/wallet/scan/route.ts");
+  assert.ok(route.includes("cmcChecked: cmcLookup.ok"), "the route says whether CMC answered");
+  assert.ok(route.includes("cmcListed"), "and how many contracts it knew");
+
+  const dialog = read("components/AddAssetDialog.tsx");
+  assert.ok(dialog.includes("Only tokens on CoinMarketCap"), "the switch exists");
+  assert.ok(
+    dialog.includes("onlyCmc: walletOnlyCmc && walletCmcChecked"),
+    "the filter is on by default but only once CMC has answered",
+  );
+  assert.ok(dialog.includes("disabled={!walletCmcChecked}"), "and it says so when it is off");
+  assert.ok(dialog.includes("setWalletOnlyCmc(false)"), "Show them turns it off");
+  assert.ok(dialog.includes("requireCmc: walletOnlyCmc && walletCmcChecked"), "the server is asked to re-apply it");
+
+  const actions = read("app/actions.ts");
+  const body = actions.slice(actions.indexOf("export async function importWalletBalances"));
+  assert.ok(body.includes("requireCmc"), "the action accepts the rule");
+  assert.ok(body.includes("skippedUnlisted"), "and reports what it skipped");
+  assert.ok(body.includes("hasCmcAnswer"), "but never applies it when the scan had no CMC answer");
+  assert.ok(body.includes("item.cmcId === undefined"), "a native coin has no contract and is kept");
 });
