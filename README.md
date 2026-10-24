@@ -167,14 +167,26 @@ the form for you (or imports everything it finds):
    look-alike), or **unknown** (not in the table, which is most real tokens, and
    is never a reason to hide anything). The same check runs again server-side in
    `importWalletBalances`, so a stale page cannot import a fake `USDT`.
-7. **Only tokens with trading volume** (on by default) answers "is anyone
-   actually trading this?". For each contract the scan asks DexScreener for its
-   pairs and counts **organic 24h volume**: pools under $500 of liquidity are
-   ignored (anyone can create one to fake activity), volume above 200× a pool's
-   own liquidity is dropped as wash trading, and what is left has to clear $100 a
-   day. The card shows the figure (`$12.3k/24h`). No answer from DexScreener means
-   *unknown*, which is kept — a rate limit must never hide a real holding. The
-   volume floor is re-applied server-side too.
+7. **Only tokens with a real market** (on by default) answers "is this actually a
+   token anyone trades?". For each contract the scan asks DexScreener for its
+   pairs and works out two things.
+
+   *Volume* (`MIN_ORGANIC_VOLUME_USD`, $100/day): pools under $500 of liquidity
+   are ignored — anyone can create one to fake activity — and volume above 200× a
+   pool's own liquidity is dropped as wash trading, so what remains is organic.
+
+   *Depth* (`src/lib/organic-volume.ts`): `liquidityUsd` is the pooled liquidity of
+   the pools that count, and `deepestPoolUsd` is the deepest single one. A token
+   is **real at $2,000** pooled (`MIN_LIQUIDITY_USD`) and **deep at $25,000** with
+   one pool holding at least $5,000 (`DEEP_LIQUIDITY_USD` / `MIN_DEEPEST_POOL_USD`)
+   — twenty $4,000 pools do not add up to depth, because liquidity is the part of a
+   fake token that costs real money to manufacture. `liquidityDepth()` returns
+   `deep` / `shallow` / `unknown`, and the card shows the number: `$41.2k liq ✓`,
+   grey for a real-but-small market, amber when the pools are too thin to trust.
+
+   Both floors hide a token, both are counted in the *Show them* line, and both are
+   re-applied server-side. No answer from DexScreener means *unknown*, which is
+   kept — a rate limit must never hide a real holding.
 
 Each hidden bucket (look-alike, spam, no volume, dust) is counted in the line
 under the scan with its own *Show them* link, so a filter never silently swallows

@@ -445,6 +445,12 @@ export async function importWalletBalances(input: {
    * imports everything; an unknown volume is never a reason to skip.
    */
   minOrganicVolumeUsd?: number;
+  /**
+   * Skip tokens holding less than this much liquidity in their pools. Depth is
+   * the hardest thing for a fake token to manufacture, so the same floor the
+   * dialog uses is re-applied here. Unknown depth is never a reason to skip.
+   */
+  minLiquidityUsd?: number;
   balances: Array<{
     symbol: string;
     name: string;
@@ -459,6 +465,8 @@ export async function importWalletBalances(input: {
     spam?: boolean;
     /** Organic 24h volume measured by the scan, when it had an answer. */
     organicVolumeUsd?: number;
+    /** Pooled liquidity measured by the scan, when it had an answer. */
+    liquidityUsd?: number;
   }>;
 }): Promise<{
   ok: boolean;
@@ -476,6 +484,8 @@ export async function importWalletBalances(input: {
   skippedImpostor?: number;
   /** How many were skipped for having no organic trading volume. */
   skippedThin?: number;
+  /** How many were skipped for having too little pooled liquidity. */
+  skippedShallow?: number;
 }> {
   try {
     await ensureSchema();
@@ -497,8 +507,10 @@ export async function importWalletBalances(input: {
     let skippedSpam = 0;
     let skippedImpostor = 0;
     let skippedThin = 0;
+    let skippedShallow = 0;
     const minVolume =
       Number(input.minOrganicVolumeUsd) > 0 ? Number(input.minOrganicVolumeUsd) : 0;
+    const minLiquidity = Number(input.minLiquidityUsd) > 0 ? Number(input.minLiquidityUsd) : 0;
 
     for (const item of items.slice(0, 50)) {
       const symbol = String(item.symbol ?? "").trim().toUpperCase();
@@ -521,6 +533,13 @@ export async function importWalletBalances(input: {
       const organic = Number(item.organicVolumeUsd);
       if (minVolume > 0 && Number.isFinite(organic) && organic < minVolume) {
         skippedThin += 1;
+        continue;
+      }
+      // Depth: a token with a few hundred dollars of pooled liquidity is not a
+      // market — it is a price someone typed in.
+      const liquidity = Number(item.liquidityUsd);
+      if (minLiquidity > 0 && Number.isFinite(liquidity) && liquidity < minLiquidity) {
+        skippedShallow += 1;
         continue;
       }
       // Spam: checked before the value, because a scam token with a made-up
@@ -612,6 +631,7 @@ export async function importWalletBalances(input: {
       ...(skippedSpam > 0 ? { skippedSpam } : {}),
       ...(skippedImpostor > 0 ? { skippedImpostor } : {}),
       ...(skippedThin > 0 ? { skippedThin } : {}),
+      ...(skippedShallow > 0 ? { skippedShallow } : {}),
     };
   } catch (e) {
     return {

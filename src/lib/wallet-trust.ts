@@ -16,7 +16,15 @@
 
 import { isDust, type DustMeasurable } from "@/lib/wallet-dust";
 import { isSpamToken } from "@/lib/wallet-spam";
-import { MIN_ORGANIC_VOLUME_USD, fetchMarketSignals, isThinMarket } from "@/lib/organic-volume";
+import {
+  MIN_LIQUIDITY_USD,
+  MIN_ORGANIC_VOLUME_USD,
+  fetchMarketSignals,
+  isShallowLiquidity,
+  isThinMarket,
+  liquidityDepth,
+  type LiquidityDepth,
+} from "@/lib/organic-volume";
 import { contractStatusOf, normaliseEvmContract, type ContractStatus } from "@/lib/token-trust";
 
 export type TrustSignals = {
@@ -26,6 +34,10 @@ export type TrustSignals = {
   organicVolumeUsd?: number;
   /** Liquidity of the pools that count, in USD. */
   liquidityUsd?: number;
+  /** Liquidity of the token's single deepest pool. */
+  deepestPoolUsd?: number;
+  /** True when the pools are deep enough to call the token real. */
+  deepLiquidity?: boolean;
   /** How many pairs the token trades in. */
   marketPairs?: number;
   /** A pool traded an implausible multiple of its own liquidity. */
@@ -98,9 +110,20 @@ export async function enrichTokenTrust<T extends TrustableBalance>(
       ...balance,
       organicVolumeUsd: market.organicVolume24hUsd,
       liquidityUsd: market.liquidityUsd,
+      deepestPoolUsd: market.deepestPoolUsd,
+      deepLiquidity: market.deepLiquidity,
       marketPairs: market.pairs,
       washSuspected: market.washSuspected,
     };
+  });
+}
+
+/** The depth verdict for one scanned balance, for a badge or a tooltip. */
+export function depthOf(balance: TrustSignals): LiquidityDepth {
+  if (balance.liquidityUsd === undefined && balance.deepLiquidity === undefined) return "unknown";
+  return liquidityDepth({
+    liquidityUsd: balance.liquidityUsd ?? 0,
+    deepLiquidity: balance.deepLiquidity ?? false,
   });
 }
 
@@ -118,10 +141,15 @@ export type ScanFilters = {
   dustCut?: number;
   /** Hide tokens whose contract is not the official one for their symbol. */
   hideImpostor?: boolean;
-  /** Hide tokens with no organic trading (unknown volume is kept). */
+  /** Hide tokens with no real market (unknown data is always kept). */
   requireMarket?: boolean;
   /** Volume floor for `requireMarket`. */
   minOrganicVolumeUsd?: number;
+  /**
+   * Liquidity floor for `requireMarket`. Depth is what a fake token cannot
+   * cheaply fake, so this is the "is it real?" half of the test.
+   */
+  minLiquidityUsd?: number;
 };
 
 export type ScanSelection<T> = {
@@ -131,7 +159,10 @@ export type ScanSelection<T> = {
   impostor: T[];
   /** Airdrop bait: a website or promo wording in the name. */
   spam: T[];
-  /** Traded less than the floor in the last 24 hours. */
+  /**
+   * No real market: traded less than the volume floor in the last 24 hours, or
+   * holding less liquidity than the depth floor.
+   */
   thin: T[];
   /** Worth less than the dust cut-off. */
   dust: T[];
@@ -169,6 +200,10 @@ export function filterScanBalances<T extends ScannableBalance>(
     Number.isFinite(filters.minOrganicVolumeUsd) && (filters.minOrganicVolumeUsd as number) > 0
       ? (filters.minOrganicVolumeUsd as number)
       : MIN_ORGANIC_VOLUME_USD;
+  const minLiquidity =
+    Number.isFinite(filters.minLiquidityUsd) && (filters.minLiquidityUsd as number) > 0
+      ? (filters.minLiquidityUsd as number)
+      : MIN_LIQUIDITY_USD;
 
   const kept: T[] = [];
   const impostor: T[] = [];
@@ -190,8 +225,11 @@ export function filterScanBalances<T extends ScannableBalance>(
     }
     if (requireMarket) {
       const organic = balance.organicVolumeUsd;
-      const signals = organic === undefined ? undefined : { organicVolume24hUsd: organic };
-      if (isThinMarket(signals, minVolume)) {
+      const liquidity = balance.liquidityUsd;
+      const traded =
+        isThinMarket(organic === undefined ? undefined : { organicVolume24hUsd: organic }, minVolume) ||
+        isShallowLiquidity(liquidity === undefined ? undefined : { liquidityUsd: liquidity }, minLiquidity);
+      if (traded) {
         thin.push(balance);
         continue;
       }

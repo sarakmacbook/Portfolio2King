@@ -9,11 +9,16 @@ import {
   officialContractOf,
 } from "../src/lib/token-trust";
 import {
+  DEEP_LIQUIDITY_USD,
+  MIN_LIQUIDITY_USD,
   MIN_ORGANIC_VOLUME_USD,
   fetchMarketSignals,
+  isShallowLiquidity,
+  liquidityDepth,
+  shortUsd,
   signalsFromPairs,
 } from "../src/lib/organic-volume";
-import { enrichTokenTrust, filterScanBalances } from "../src/lib/wallet-trust";
+import { depthOf, enrichTokenTrust, filterScanBalances } from "../src/lib/wallet-trust";
 
 const USDT_ETH = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 const USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
@@ -128,6 +133,50 @@ test("organic volume ignores dust pools and wash trading", () => {
   assert.equal(twoPools.dexes, 1);
 
   assert.deepEqual(signalsFromPairs([], USDT_ETH).organicVolume24hUsd, 0);
+
+  // Depth: a $50,000 pool is deep, so the token reads as real.
+  assert.equal(deepestOf([pair()]), 50_000);
+  assert.equal(signalsFromPairs([pair()], USDT_ETH).deepLiquidity, true);
+  assert.equal(signalsFromPairs([pair()], USDT_ETH).liquidityUsd, 50_000);
+
+  // Money in a few shallow pools does not add up to depth.
+  const manyShallow = signalsFromPairs(
+    Array.from({ length: 6 }, () => ({ ...pair(), liquidity: { usd: 4_000 }, volume: { h24: 100 } })),
+    USDT_ETH,
+  );
+  assert.equal(manyShallow.liquidityUsd, 24_000);
+  assert.equal(manyShallow.deepestPoolUsd, 4_000);
+  assert.equal(manyShallow.deepLiquidity, false, "no single pool holds real money");
+
+  // One genuinely deep pool is enough, even without a crowd of pairs.
+  const oneDeepPool = signalsFromPairs(
+    [pair({ liquidity: { usd: DEEP_LIQUIDITY_USD + 1 }, volume: { h24: 500 } })],
+    USDT_ETH,
+  );
+  assert.equal(oneDeepPool.deepLiquidity, true);
+});
+
+/** The deepest single pool of a fixture set. */
+function deepestOf(pairs: unknown[]): number {
+  return signalsFromPairs(pairs, USDT_ETH).deepestPoolUsd;
+}
+
+test("the liquidity depth verdict says real, thin or unknown", () => {
+  assert.equal(isShallowLiquidity(undefined), false, "missing data is never shallow");
+  assert.equal(isShallowLiquidity({ liquidityUsd: 0 }), true);
+  assert.equal(isShallowLiquidity({ liquidityUsd: MIN_LIQUIDITY_USD - 1 }), true);
+  assert.equal(isShallowLiquidity({ liquidityUsd: MIN_LIQUIDITY_USD }), false);
+
+  assert.equal(liquidityDepth(undefined), "unknown");
+  assert.equal(liquidityDepth({ liquidityUsd: 300, deepLiquidity: false }), "shallow");
+  assert.equal(liquidityDepth({ liquidityUsd: 8_000, deepLiquidity: false }), "unknown");
+  assert.equal(liquidityDepth({ liquidityUsd: 900_000, deepLiquidity: true }), "deep");
+
+  // The balance-level helper used by the card.
+  assert.equal(depthOf({}), "unknown");
+  assert.equal(depthOf({ liquidityUsd: 120 }), "shallow");
+  assert.equal(depthOf({ liquidityUsd: 80_000, deepLiquidity: true }), "deep");
+  assert.equal(shortUsd(2_000), "$2.0k");
 });
 
 test("the market lookup is best-effort and batched", async () => {
@@ -207,6 +256,8 @@ test("filterScanBalances separates look-alikes, spam, dead markets and dust", ()
     { id: "d", symbol: "NEW", name: "New Token", contract: FAKE, chain: "ethereum", valueUsd: 300, organicVolumeUsd: 0 },
     // Unknown volume: never hidden for that reason.
     { id: "e", symbol: "ZRO", name: "LayerZero", contract: FAKE, chain: "ethereum", valueUsd: 250 },
+    // Traded a little, but the pools are shallow — a price without a market.
+    { id: "g", symbol: "SHALLOW", name: "Shallow Pool", contract: FAKE, chain: "ethereum", valueUsd: 900, organicVolume24hUsd: 5_000, liquidityUsd: 300 },
     { id: "f", symbol: "USDC", name: "USD Coin", contract: USDC_BASE, chain: "base", valueUsd: 0.4, organicVolumeUsd: 9_000_000 },
   ];
 
@@ -214,9 +265,9 @@ test("filterScanBalances separates look-alikes, spam, dead markets and dust", ()
   assert.deepEqual(split.kept.map((r) => r.id), ["a", "e"]);
   assert.deepEqual(split.impostor.map((r) => r.id), ["b"]);
   assert.deepEqual(split.spam.map((r) => r.id), ["c"]);
-  assert.deepEqual(split.thin.map((r) => r.id), ["d"]);
+  assert.deepEqual(split.thin.map((r) => r.id), ["d", "g"]);
   assert.deepEqual(split.dust.map((r) => r.id), ["f"]);
-  assert.equal(split.counts.total, 6);
+  assert.equal(split.counts.total, 7);
   assert.equal(split.dustValue, 0.4);
   assert.equal(split.keptValue, 750);
 
@@ -227,7 +278,7 @@ test("filterScanBalances separates look-alikes, spam, dead markets and dust", ()
     requireMarket: false,
     dustCut: 0,
   });
-  assert.equal(all.kept.length, 6);
+  assert.equal(all.kept.length, 7);
   assert.equal(all.counts.impostor + all.counts.spam + all.counts.thin + all.counts.dust, 0);
 
   // A stricter volume floor moves the mid-sized market out of "kept".
@@ -254,11 +305,15 @@ test("the scan route, the action and the dialog all use the trust checks", () =>
   const dialog = read("components/AddAssetDialog.tsx");
   assert.ok(dialog.includes("filterScanBalances("), "the picker uses the shared rules");
   assert.ok(dialog.includes("Hide look-alike contracts"), "the contract switch exists");
-  assert.ok(dialog.includes("Only tokens with trading volume"), "the volume switch exists");
+  assert.ok(dialog.includes("Only tokens with a real market"), "the market switch exists");
   assert.ok(dialog.includes("Import selected ("), "the button counts what is ticked");
   assert.ok(dialog.includes("toggleWalletChoice("), "each token can be deselected");
   assert.ok(dialog.includes("Select none"), "and the whole list at once");
   assert.ok(dialog.includes("official ✓"), "a matched contract is shown");
   assert.ok(dialog.includes("Skip tokens under"), "the dollar cut-off is still there");
-  assert.ok(MIN_ORGANIC_VOLUME_USD > 0);
+  assert.ok(dialog.includes("minLiquidityUsd: walletRequireMarket ? MIN_LIQUIDITY_USD : 0"), "the depth floor reaches the server");
+  assert.ok(dialog.includes("liq"), "the card shows the depth");
+  assert.ok(body.includes("minLiquidityUsd"), "the action accepts a depth floor");
+  assert.ok(body.includes("skippedShallow"), "and reports what it skipped");
+  assert.ok(MIN_ORGANIC_VOLUME_USD > 0 && MIN_LIQUIDITY_USD > MIN_ORGANIC_VOLUME_USD);
 });
