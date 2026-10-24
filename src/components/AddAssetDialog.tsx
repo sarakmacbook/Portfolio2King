@@ -16,7 +16,7 @@ import { DEFAULT_DUST_THRESHOLD_USD, normaliseDustThreshold } from "@/lib/wallet
 import { MIN_LIQUIDITY_USD, MIN_ORGANIC_VOLUME_USD, shortUsd } from "@/lib/organic-volume";
 import { BLOCKSCAN_CHAINS } from "@/lib/blockscan";
 import { MORALIS_CHAINS } from "@/lib/moralis";
-import { depthOf, filterScanBalances } from "@/lib/wallet-trust";
+import { VERIFIED_LIQUIDITY_USD, depthOf, filterScanBalances } from "@/lib/wallet-trust";
 import { CAMBODIAN_BANKS, CUSTOM_BANK, type CambodianBank } from "@/lib/cambodian-banks";
 import type { DiscoveredStock } from "@/lib/stock-search";
 import {
@@ -174,6 +174,13 @@ function AddAssetForm({
   /** Hide tokens nobody trades (unknown volume is always kept). */
   const [walletRequireMarket, setWalletRequireMarket] = useState(true);
   /**
+   * The strict default: only tokens the scan could *verify* — an official
+   * contract, an indexer's verdict, or a market deep enough to back the price.
+   * Everything else is counted and one click away, so junk airdrops do not fill
+   * the picker while a real holding is never lost.
+   */
+  const [walletRequireVerified, setWalletRequireVerified] = useState(true);
+  /**
    * Tokens the user unticked. Kept as a set of *exclusions* rather than a set of
    * picks, so changing a filter never silently re-selects something they dropped.
    */
@@ -200,8 +207,16 @@ function AddAssetForm({
         dustCut: walletDustCut,
         hideImpostor: walletHideImpostor,
         requireMarket: walletRequireMarket,
+        requireVerified: walletRequireVerified,
       }),
-    [walletBalances, walletHideSpam, walletDustCut, walletHideImpostor, walletRequireMarket],
+    [
+      walletBalances,
+      walletHideSpam,
+      walletDustCut,
+      walletHideImpostor,
+      walletRequireMarket,
+      walletRequireVerified,
+    ],
   );
   const walletVisibleBalances = walletSelection.kept;
   /** What "Import selected" imports: the kept tokens the user left ticked. */
@@ -481,6 +496,7 @@ function AddAssetForm({
         skipImpostor: walletHideImpostor,
         minOrganicVolumeUsd: walletRequireMarket ? MIN_ORGANIC_VOLUME_USD : 0,
         minLiquidityUsd: walletRequireMarket ? MIN_LIQUIDITY_USD : 0,
+        skipUnverified: walletRequireVerified,
         balances: walletChosen.map((item) => ({ ...item, chain: item.chain })),
       });
       if (!result.ok) {
@@ -497,6 +513,9 @@ function AddAssetForm({
         result.skippedThin ? `Skipped ${result.skippedThin} with no trading volume.` : "",
         result.skippedShallow
           ? `Skipped ${result.skippedShallow} with too little liquidity.`
+          : "",
+        result.skippedUnverified
+          ? `Skipped ${result.skippedUnverified} that could not be verified as a real token.`
           : "",
       ]
         .filter(Boolean)
@@ -1063,9 +1082,20 @@ function AddAssetForm({
                 />
                 Only tokens with a real market
               </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-indigo-600"
+                  checked={walletRequireVerified}
+                  onChange={(event) => setWalletRequireVerified(event.target.checked)}
+                />
+                Only real tokens
+              </label>
               <span className="font-normal text-[11px] text-slate-400">
-                Official contract, {shortUsd(MIN_LIQUIDITY_USD)}+ of pooled liquidity and{" "}
-                {shortUsd(MIN_ORGANIC_VOLUME_USD)}+ traded in 24h.
+                Official contract, an indexer&apos;s verification, or{" "}
+                {shortUsd(VERIFIED_LIQUIDITY_USD)}+ of pooled liquidity with{" "}
+                {shortUsd(MIN_ORGANIC_VOLUME_USD)}+ traded in 24h. Unchecked shows every token the
+                scan found, junk included.
               </span>
             </div>
 
@@ -1154,6 +1184,9 @@ function AddAssetForm({
                   {walletSelection.counts.spam > 0
                     ? ` · ${walletSelection.counts.spam} spam-looking hidden`
                     : ""}
+                  {walletSelection.counts.unverified > 0
+                    ? ` · ${walletSelection.counts.unverified} unverified hidden`
+                    : ""}
                   {walletSelection.counts.thin > 0
                     ? ` · ${walletSelection.counts.thin} with no real market hidden`
                     : ""}
@@ -1175,6 +1208,23 @@ function AddAssetForm({
                       type="button"
                       className="font-medium text-indigo-600 hover:underline"
                       onClick={() => setWalletHideImpostor(false)}
+                    >
+                      Show them
+                    </button>
+                  </p>
+                ) : null}
+
+                {walletSelection.counts.unverified > 0 ? (
+                  <p className="text-[11px] text-slate-500">
+                    {walletSelection.counts.unverified} token
+                    {walletSelection.counts.unverified === 1 ? " could" : "s could"} not be verified
+                    as real — no official contract, no indexer check, and no market deep enough
+                    ({shortUsd(VERIFIED_LIQUIDITY_USD)} pooled) to back the price. Airdrop junk
+                    almost always lands here.{" "}
+                    <button
+                      type="button"
+                      className="font-medium text-indigo-600 hover:underline"
+                      onClick={() => setWalletRequireVerified(false)}
                     >
                       Show them
                     </button>

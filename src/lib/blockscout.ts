@@ -104,6 +104,7 @@ export function parseBlockscoutTokenList(payload: unknown): BlockscoutToken[] {
     decimals: number;
     quantity: number;
     spam?: boolean;
+    verified?: boolean;
   }> = [];
 
   for (const raw of result) {
@@ -120,6 +121,7 @@ export function parseBlockscoutTokenList(payload: unknown): BlockscoutToken[] {
       decimals,
       quantity: readQuantity(item.balance ?? item.value, decimals),
       spam: item.reputation === "spam" || item.is_spam === true,
+      verified: item.reputation === "verified" || item.reputation === "ok",
     });
   }
 
@@ -136,6 +138,7 @@ export function parseBlockscoutTokenBalances(payload: unknown): BlockscoutToken[
     decimals: number;
     quantity: number;
     spam?: boolean;
+    verified?: boolean;
   }> = [];
 
   for (const raw of payload) {
@@ -156,6 +159,7 @@ export function parseBlockscoutTokenBalances(payload: unknown): BlockscoutToken[
       decimals,
       quantity: readQuantity(entry.value, decimals),
       spam: reputation === "spam" || reputation === "unverified_scam",
+      verified: reputation === "verified" || reputation === "ok",
     });
   }
 

@@ -40,6 +40,7 @@
 import type { CryptoCategory } from "@/db/schema";
 import { isStablecoinSymbol } from "@/lib/stablecoins";
 import { canonicalChainId, chainMatchesFilter } from "@/lib/wallet-chains";
+import { isSpamToken } from "@/lib/wallet-spam";
 import type { DebankBalance } from "@/lib/debank";
 
 /** Etherscan V2 — the API blockscan.com itself reads. */
@@ -349,6 +350,9 @@ export function parseBlockscanTokenBalances(
       contract,
       // Blockscan does not send artwork; the picker falls back to its own icons.
       logoUrl: "",
+      // Etherscan sends no reputation verdict, so the naming rules are the only
+      // thing that can spot bait here.
+      ...(isSpamToken({ name, symbol }) ? { spam: true } : {}),
     });
   }
 
@@ -583,6 +587,13 @@ export async function fetchBlockscanFreeTokens(
         category: isStablecoinSymbol(ref.symbol) ? "stablecoin" : "volatile",
         contract: ref.contract,
         logoUrl: "",
+        /**
+         * A transfer history is where airdropped bait lives: anyone can send a
+         * token to anyone. Etherscan has no spam verdict on this endpoint, so the
+         * naming rules flag the obvious bait and the picker hides it by default —
+         * counted, never dropped.
+         */
+        ...(isSpamToken({ name: ref.name, symbol: ref.symbol }) ? { spam: true } : {}),
       });
     }
     if (paceMs > 0 && readContracts < maxContracts && now() < deadline) await sleep(paceMs);

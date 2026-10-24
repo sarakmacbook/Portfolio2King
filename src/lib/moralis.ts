@@ -193,6 +193,8 @@ export function parseMoralisTokens(
       contract: isNative ? null : contract,
       logoUrl: text(row.logo ?? row.thumbnail),
       ...(row.possible_spam === true ? { spam: true } : {}),
+      // Moralis' own contract check — the strongest "this is the real token".
+      ...(row.verified_contract === true ? { verified: true } : {}),
     });
   }
 

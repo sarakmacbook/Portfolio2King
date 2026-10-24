@@ -271,6 +271,40 @@ having to be guessed from its name.
   explains itself and the scan uses the other sources.
 - API callers can force it with `?source=moralis` on `/api/wallet/scan`.
 
+### Junk tokens: the strict filter
+
+A wallet that has ever been public attracts airdrops, and a scan of it can return
+dozens of tokens nobody asked for. The picker therefore asks one more question
+than *"is it there?"* — **is it real?** — and defaults to showing only the tokens
+that pass.
+
+Each balance leaves the scan with a verdict (`verificationOf`, in
+`src/lib/wallet-trust.ts`):
+
+| Verdict | Meaning | Shown by default |
+| --- | --- | --- |
+| `verified` | the official-contract table matches, **or** the indexer verified it (DeBank `is_verified`, Moralis `verified_contract`, Blockscout/Routescan `verified` reputation), **or** it trades in a deep market | yes |
+| `unverified` | positive evidence of junk: a spam verdict, or market numbers that cannot back the price — no pairs on a chain DexScreener indexes, or less than $25k pooled with $100 traded | no — counted, one click from *Show them* |
+| `unknown` | nothing could be checked (no explorer, a chain DexScreener does not index, a rate limit) | yes — a missing answer is never evidence |
+
+The switch in the dialog is **Only real tokens**, on by default, next to the
+existing *Hide spam*, *Hide look-alike contracts*, *Only tokens with a real
+market* and dust cut-off. The summary says how many were hidden and why, and
+`Show them` puts them back — nothing is ever deleted. `Import selected` re-checks
+the same rules server-side (`skipUnverified` in `importWalletBalances`), so a
+stale page cannot book junk either.
+
+Two supporting changes make the verdicts worth having:
+
+- **Every source's verdict is read now.** DeBank's `is_verified`, Moralis'
+  `verified_contract` and the Blockscout/Routescan `verified` reputation travel
+  with the balance, so a token an explorer vouches for is not hidden just because
+  DexScreener has not indexed its pool yet.
+- **Blockscan's free transfer-history path flags bait by name.** Etherscan sends
+  no reputation verdict on `tokentx`/`tokenbalance`, so the naming rules
+  (`wallet-spam`) run on those rows — airdrop junk arrives in a transfer history
+  more than anywhere else.
+
 ### Scanner API keys — added in the app, no redeploy
 
 All three scan keys (DeBank, Etherscan/Blockscan, Moralis) can be added from the

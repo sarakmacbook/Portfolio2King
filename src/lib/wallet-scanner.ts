@@ -62,6 +62,12 @@ export type ScannedWalletBalance = {
    */
   spam?: boolean;
   /**
+   * The indexer's own verification verdict (DeBank `is_verified`, Moralis
+   * `verified_contract`, a Blockscout/Routescan `verified` reputation): one more
+   * reason to keep a token that has no DexScreener market yet.
+   */
+  verified?: boolean;
+  /**
    * Trust signals added by the scan route (`wallet-trust`). They are optional
    * because the scanner itself only reads balances — contract matching and
    * organic volume are a second, best-effort pass.
@@ -76,6 +82,8 @@ export type ScannedWalletBalance = {
   deepLiquidity?: boolean;
   marketPairs?: number;
   washSuspected?: boolean;
+  /** The scan route's "is this real?" verdict (see `wallet-trust`). */
+  verification?: "verified" | "unverified" | "unknown";
 };
 
 export type WalletScanResult = {
@@ -422,6 +430,7 @@ async function scanOneEvmChain(
       quantity: token.quantity,
       category: token.stablecoin ? "stablecoin" : "volatile",
       contract: token.contract,
+      ...(token.verified ? { verified: true } : {}),
     });
   }
 
@@ -741,6 +750,7 @@ function fromDebank(balance: DebankBalance): ScannedWalletBalance {
     contract: balance.contract,
     ...(balance.logoUrl ? { logoUrl: balance.logoUrl } : {}),
     ...(balance.spam ? { spam: true } : {}),
+    ...(balance.verified ? { verified: true } : {}),
   };
 }
 
@@ -788,6 +798,7 @@ function asUnpriced(balance: DebankBalance): Omit<ScannedWalletBalance, "price" 
     contract: balance.contract,
     ...(balance.logoUrl ? { logoUrl: balance.logoUrl } : {}),
     ...(balance.spam ? { spam: true } : {}),
+    ...(balance.verified ? { verified: true } : {}),
   };
 }
 
