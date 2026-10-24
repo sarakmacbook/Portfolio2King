@@ -306,7 +306,7 @@ test("the scan route, the action and the dialog all use the trust checks", () =>
 
   const route = read("app/api/wallet/scan/route.ts");
   assert.ok(route.includes("enrichTokenTrust("), "the scan carries the verdicts");
-  assert.ok(route.includes("balances }"), "the enriched balances are what the dialog gets");
+  assert.ok(route.includes("balances,"), "the enriched balances are what the dialog gets");
 
   const actions = read("app/actions.ts");
   const body = actions.slice(actions.indexOf("export async function importWalletBalances"));

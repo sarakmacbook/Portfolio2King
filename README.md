@@ -222,9 +222,17 @@ verification reason (`verifiedBy: ["CoinMarketCap"]`). Everything else stays
 **unknown**, which never hides a token. No key → nothing is asked and the scan
 behaves exactly as before.
 
-Each hidden bucket (look-alike, spam, no volume, dust) is counted in the line
-under the scan with its own *Show them* link, so a filter never silently swallows
-a token.
+**Only tokens CoinMarketCap lists** is the strictest switch in the picker, on by
+default: a token whose contract CMC does not know is hidden (and counted, with
+*Show them* → untick to bring it back), and `importWalletBalances` re-applies the
+same rule server-side so a stale page cannot book it. Two deliberate escapes: a
+native coin has no contract to look up and is always kept, and the filter only
+turns on when the lookup actually answered (`cmcChecked` on the scan response) —
+no key or a rate limit leaves the picker exactly as it was, never empty.
+
+Each hidden bucket (look-alike, spam, no volume, dust, not on CMC) is counted in
+the line under the scan with its own *Show them* link, so a filter never silently
+swallows a token.
 
 The same switch sits on the holdings table (*Hide spam*, on by default): rows
 that look like spam are skipped with a count, a *Show them* link and a **Remove
@@ -392,8 +400,10 @@ because a third party is missing.
    table, a batched **CoinMarketCap** contract lookup (50 addresses per call) and
    one batched DexScreener call (30 contracts each). Failures leave a token
    *unknown*, never hidden.
-5. **Filters in the dialog** — look-alike contracts, spam, no real market and
-   dust are each counted with a *Show them*, and only ticked tokens are imported.
+5. **Filters in the dialog** — look-alike contracts, spam, no real market, ties to
+   CoinMarketCap (only tokens it lists for that contract, skipped entirely when it
+   did not answer) and dust are each counted with a *Show them*, and only ticked
+   tokens are imported.
 
 EVM addresses are read through **[DeBank](https://debank.com)**, which indexes
 **every EVM chain it supports — 100+ of them**, from Ethereum, BNB Chain,

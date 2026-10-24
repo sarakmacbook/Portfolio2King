@@ -480,6 +480,12 @@ export async function importWalletBalances(input: {
   skipUnverified?: boolean;
   /** The indexer's verification verdict, when it sent one. */
   verified?: boolean;
+  /**
+   * Import only tokens CoinMarketCap lists for their contract. Honoured only
+   * together with the per-balance `cmcId` the scan added — a page that never got
+   * a CMC answer sends no ids, and an empty import is worse than a small one.
+   */
+  requireCmc?: boolean;
   balances: Array<{
     symbol: string;
     name: string;
@@ -500,6 +506,8 @@ export async function importWalletBalances(input: {
     deepestPoolUsd?: number;
     /** The index's own verification verdict, when it sent one. */
     verified?: boolean;
+    /** CoinMarketCap's id for the contract, when the trust pass matched it. */
+    cmcId?: number;
   }>;
 }): Promise<{
   ok: boolean;
@@ -521,6 +529,8 @@ export async function importWalletBalances(input: {
   skippedShallow?: number;
   /** How many were skipped for not being verifiable as a real token. */
   skippedUnverified?: number;
+  /** How many were skipped for not being listed on CoinMarketCap. */
+  skippedUnlisted?: number;
 }> {
   try {
     await ensureSchema();
@@ -544,6 +554,12 @@ export async function importWalletBalances(input: {
     let skippedThin = 0;
     let skippedShallow = 0;
     let skippedUnverified = 0;
+    let skippedUnlisted = 0;
+    /**
+     * "Only tokens on CoinMarketCap" needs proof that the lookup ran: without it
+     * every row would look unlisted, and the import would come back empty.
+     */
+    const hasCmcAnswer = items.some((item) => Number(item.cmcId) > 0);
     const minVolume =
       Number(input.minOrganicVolumeUsd) > 0 ? Number(input.minOrganicVolumeUsd) : 0;
     const minLiquidity = Number(input.minLiquidityUsd) > 0 ? Number(input.minLiquidityUsd) : 0;
@@ -576,6 +592,15 @@ export async function importWalletBalances(input: {
       const liquidity = Number(item.liquidityUsd);
       if (minLiquidity > 0 && Number.isFinite(liquidity) && liquidity < minLiquidity) {
         skippedShallow += 1;
+        continue;
+      }
+      /**
+       * CoinMarketCap: the strictest rule the picker offers, and it is only
+       * applied when the balances actually carry a CMC answer (each row has a
+       * `cmcId` or not). A native coin has no contract to look up and is kept.
+       */
+      if (input.requireCmc === true && hasCmcAnswer && item.contract && item.cmcId === undefined) {
+        skippedUnlisted += 1;
         continue;
       }
       // Spam: checked before the value, because a scam token with a made-up
@@ -695,6 +720,8 @@ export async function importWalletBalances(input: {
       ...(skippedImpostor > 0 ? { skippedImpostor } : {}),
       ...(skippedThin > 0 ? { skippedThin } : {}),
       ...(skippedShallow > 0 ? { skippedShallow } : {}),
+      ...(skippedUnverified > 0 ? { skippedUnverified } : {}),
+      ...(skippedUnlisted > 0 ? { skippedUnlisted } : {}),
     };
   } catch (e) {
     return {

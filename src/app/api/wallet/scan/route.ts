@@ -58,11 +58,27 @@ export async function GET(request: Request) {
     // Contract match (local table + CoinMarketCap) and market depth, so the
     // picker can rank real tokens above look-alikes and tokens nobody trades.
     // Never throws, never drops a balance.
+    /**
+     * Whether CoinMarketCap actually answered is reported back with the scan.
+     * "Not listed" and "never asked" look identical on a balance, and the
+     * picker's *only listed on CoinMarketCap* filter must switch itself off when
+     * nothing was asked — a missing key must never empty the list.
+     */
+    let cmcLookup = { ok: false, asked: 0, listed: 0 };
     const balances = await enrichTokenTrust(result.balances, fetch, {
       cmcApiKey: keys.coinmarketcap,
+      onCmcLookup: (report) => {
+        cmcLookup = report;
+      },
     });
     return NextResponse.json(
-      { ok: true, ...result, balances },
+      {
+        ok: true,
+        ...result,
+        balances,
+        cmcChecked: cmcLookup.ok,
+        cmcListed: cmcLookup.listed,
+      },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

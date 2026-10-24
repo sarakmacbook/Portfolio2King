@@ -169,6 +169,14 @@ function AddAssetForm({
   );
   /** Hide tokens that look like airdropped spam (ads, fake tickers). */
   const [walletHideSpam, setWalletHideSpam] = useState(true);
+  /**
+   * Show only tokens CoinMarketCap lists for their contract. On by default, but
+   * only ever active when the lookup actually ran — a missing key leaves the
+   * picker exactly as it was instead of emptying it.
+   */
+  const [walletOnlyCmc, setWalletOnlyCmc] = useState(true);
+  /** Whether CoinMarketCap answered for the last scan (from the API). */
+  const [walletCmcChecked, setWalletCmcChecked] = useState(false);
   /** Hide tokens whose contract is not the official one for their symbol. */
   const [walletHideImpostor, setWalletHideImpostor] = useState(true);
   /** Hide tokens nobody trades (unknown volume is always kept). */
@@ -208,6 +216,9 @@ function AddAssetForm({
         hideImpostor: walletHideImpostor,
         requireMarket: walletRequireMarket,
         requireVerified: walletRequireVerified,
+        // Only when CoinMarketCap actually answered: otherwise every token would
+        // look "unlisted" and the picker would come back empty.
+        onlyCmc: walletOnlyCmc && walletCmcChecked,
       }),
     [
       walletBalances,
@@ -216,6 +227,8 @@ function AddAssetForm({
       walletHideImpostor,
       walletRequireMarket,
       walletRequireVerified,
+      walletOnlyCmc,
+      walletCmcChecked,
     ],
   );
   const walletVisibleBalances = walletSelection.kept;
@@ -336,6 +349,9 @@ function AddAssetForm({
     setScanningWallet(true);
     setWalletScanError("");
     setWalletImportMessage("");
+    // Until *this* scan reports back, no CoinMarketCap answer is assumed — the
+    // filter stays inert instead of reading "not asked" as "not listed".
+    setWalletCmcChecked(false);
     setWalletScanDone(false);
     setScannerKeyPrompt("");
     try {
@@ -357,6 +373,9 @@ function AddAssetForm({
         blockscanFreeUnread?: number;
         blockscanSkippedChains?: number;
         moralisNeedsKey?: boolean;
+        /** CoinMarketCap answered for this scan (so the CMC filter is meaningful). */
+        cmcChecked?: boolean;
+        cmcListed?: number;
         moralisSkippedChains?: number;
       };
       if (!response.ok) {
@@ -368,6 +387,7 @@ function AddAssetForm({
       setWalletDeselected(new Set());
       setWalletScanDone(true);
       setWalletScanSource(data.source ?? null);
+      setWalletCmcChecked(data.cmcChecked === true);
       setScannerKeyPrompt(
         data.source === "moralis" && data.moralisNeedsKey
           ? "moralis"
@@ -498,10 +518,19 @@ function AddAssetForm({
         minValueUsd: walletDustCut,
         skipSpam: walletHideSpam,
         skipImpostor: walletHideImpostor,
+        // The server re-applies the same rule, so a stale page cannot import a
+        // token CoinMarketCap does not know.
+        requireCmc: walletOnlyCmc && walletCmcChecked,
         minOrganicVolumeUsd: walletRequireMarket ? MIN_ORGANIC_VOLUME_USD : 0,
         minLiquidityUsd: walletRequireMarket ? MIN_LIQUIDITY_USD : 0,
         skipUnverified: walletRequireVerified,
-        balances: walletChosen.map((item) => ({ ...item, chain: item.chain })),
+        // `cmcId` rides along so the server can re-apply the CoinMarketCap rule
+        // instead of trusting the page's filter state.
+        balances: walletChosen.map((item) => ({
+          ...item,
+          chain: item.chain,
+          ...(item.cmcId !== undefined ? { cmcId: item.cmcId } : {}),
+        })),
       });
       if (!result.ok) {
         throw new Error(result.error || "Could not import wallet balances.");
@@ -511,6 +540,9 @@ function AddAssetForm({
       const skipped = [
         result.skippedDust ? `Skipped ${result.skippedDust} under ${money(walletDustCut)}.` : "",
         result.skippedSpam ? `Skipped ${result.skippedSpam} that looked like spam.` : "",
+        result.skippedUnlisted
+          ? `Skipped ${result.skippedUnlisted} that CoinMarketCap does not list.`
+          : "",
         result.skippedImpostor
           ? `Skipped ${result.skippedImpostor} with the wrong contract address.`
           : "",
@@ -1095,12 +1127,36 @@ function AddAssetForm({
                 />
                 Only real tokens
               </label>
+              <label
+                className="flex items-center gap-2"
+                title={
+                  walletCmcChecked
+                    ? "Show only tokens CoinMarketCap lists for that exact contract address"
+                    : "CoinMarketCap answered for none of these contracts, so this filter is off"
+                }
+              >
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-indigo-600 disabled:opacity-50"
+                  checked={walletOnlyCmc && walletCmcChecked}
+                  disabled={!walletCmcChecked}
+                  onChange={(event) => setWalletOnlyCmc(event.target.checked)}
+                />
+                Only tokens on CoinMarketCap
+              </label>
               <span className="font-normal text-[11px] text-slate-400">
                 Official contract, an indexer&apos;s verification, or{" "}
                 {shortUsd(VERIFIED_LIQUIDITY_USD)}+ of pooled liquidity with{" "}
                 {shortUsd(MIN_ORGANIC_VOLUME_USD)}+ traded in 24h. Unchecked shows every token the
                 scan found, junk included.
               </span>
+              {!walletCmcChecked && (
+                <span className="font-normal text-[11px] text-slate-400">
+                  No CoinMarketCap answer for this scan, so the list is not filtered by it. Add a key
+                  under Scanner API keys (or set <code className="text-[11px]">CMC_PRO_API_KEY</code>)
+                  to turn that filter on.
+                </span>
+              )}
             </div>
 
             <details className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
@@ -1199,6 +1255,9 @@ function AddAssetForm({
                   {walletSelection.counts.unverified > 0
                     ? ` · ${walletSelection.counts.unverified} unverified hidden`
                     : ""}
+                  {walletSelection.counts.unlisted > 0
+                    ? ` · ${walletSelection.counts.unlisted} not on CoinMarketCap hidden`
+                    : ""}
                   {walletSelection.counts.thin > 0
                     ? ` · ${walletSelection.counts.thin} with no real market hidden`
                     : ""}
@@ -1274,6 +1333,21 @@ function AddAssetForm({
                   </p>
                 ) : null}
 
+                {walletSelection.counts.unlisted > 0 ? (
+                  <p className="text-[11px] text-slate-500">
+                    {walletSelection.counts.unlisted} token
+                    {walletSelection.counts.unlisted === 1 ? " is" : "s are"} not listed on
+                    CoinMarketCap for that contract address.{" "}
+                    <button
+                      type="button"
+                      className="font-medium text-indigo-600 hover:underline"
+                      onClick={() => setWalletOnlyCmc(false)}
+                    >
+                      Show them
+                    </button>
+                  </p>
+                ) : null}
+
                 {walletSelection.counts.dust > 0 ? (
                   <p className="text-[11px] text-slate-500">
                     {walletSelection.counts.dust} token
@@ -1291,8 +1365,8 @@ function AddAssetForm({
 
                 {walletVisibleBalances.length === 0 ? (
                   <p className="rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs text-amber-800">
-                    Nothing in this wallet passed the filters. Untick the boxes above to see everything
-                    the scan found.
+                    Nothing in this wallet passed the filters. Untick the boxes above — including the
+                    CoinMarketCap one — to see everything the scan found.
                   </p>
                 ) : (
                   <>
