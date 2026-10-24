@@ -44,6 +44,8 @@ export const OFFICIAL_CONTRACTS: Record<string, Record<string, string>> = {
     SHIB: "0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce",
     PEPE: "0x6982508145454ce325ddbe47a25d4ec3d2311933",
     STETH: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+    // LayerZero's OFT is deployed at one identical address on every chain.
+    ZRO: "0x6985884c4392d348587b19cb9eaaf157f13271cd",
     WSTETH: "0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
   },
   base: {
@@ -54,6 +56,7 @@ export const OFFICIAL_CONTRACTS: Record<string, Record<string, string>> = {
     CBBTC: "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",
     LINK: "0x88fb150bdc53a65fe94dea0c9ba0a6daf8c6e196",
     AERO: "0x940181a94a35a4569e4529a3cdfb74e38fd98631",
+    ZRO: "0x6985884c4392d348587b19cb9eaaf157f13271cd",
     "USDC.E": "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca",
     USDBC: "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca",
   },
@@ -67,6 +70,7 @@ export const OFFICIAL_CONTRACTS: Record<string, Record<string, string>> = {
     ARB: "0x912ce59144191c1204e64559fe8253a0e49e6548",
     LINK: "0xf97f4df75117a78c1a5a0dbb814af92458539fb4",
     CBBTC: "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",
+    ZRO: "0x6985884c4392d348587b19cb9eaaf157f13271cd",
   },
   optimism: {
     USDC: "0x0b2c639c533813f4aa9d7837caf62653d097ff85",
@@ -76,6 +80,7 @@ export const OFFICIAL_CONTRACTS: Record<string, Record<string, string>> = {
     WETH: "0x4200000000000000000000000000000000000006",
     OP: "0x4200000000000000000000000000000000000042",
     LINK: "0x350a791bfc2c21f9ed5d10980dad2e2638ffa7f6",
+    ZRO: "0x6985884c4392d348587b19cb9eaaf157f13271cd",
   },
   polygon: {
     USDC: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
@@ -87,6 +92,7 @@ export const OFFICIAL_CONTRACTS: Record<string, Record<string, string>> = {
     LINK: "0x53e0bca35ec356bd5dddfebbd1fc0fd03fabad39",
     WPOL: "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270",
     WMATIC: "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270",
+    ZRO: "0x6985884c4392d348587b19cb9eaaf157f13271cd",
   },
   bsc: {
     USDT: "0x55d398326f99059ff775485246999027b3197955",
@@ -97,6 +103,7 @@ export const OFFICIAL_CONTRACTS: Record<string, Record<string, string>> = {
     CAKE: "0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82",
     ETH: "0x2170ed0880ac9a755fd29b2688956bd959f933f8",
     DAI: "0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3",
+    ZRO: "0x6985884c4392d348587b19cb9eaaf157f13271cd",
   },
   avalanche: {
     USDC: "0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e",
@@ -105,6 +112,7 @@ export const OFFICIAL_CONTRACTS: Record<string, Record<string, string>> = {
     WAVAX: "0xb31f66aa3c1e785363f0875a1b74e27b85fd66c7",
     "DAI.E": "0xd586e7f844cea2f87f50152665bcbc2c279d8d70",
     "WBTC.E": "0x50b7545627a5162f82a992c33b87adc75187b218",
+    ZRO: "0x6985884c4392d348587b19cb9eaaf157f13271cd",
   },
 };
 

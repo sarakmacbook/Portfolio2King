@@ -43,6 +43,13 @@ export type ScannedWalletBalance = {
   quantity: number;
   price: number;
   valueUsd: number;
+  /**
+   * Whether the scan could put a price on the balance. `false` means "unknown
+   * price", which is different from "worth nothing" — the picker keeps those
+   * rather than treating them as dust. Optional because the raw per-chain
+   * readers only produce quantity; the pricing pass fills it in.
+   */
+  priced?: boolean;
   category: CryptoCategory;
   contract: string | null;
   /** Token artwork, when the indexer returned one (DeBank does). */
@@ -695,6 +702,7 @@ function fromDebank(balance: DebankBalance): ScannedWalletBalance {
     quantity: balance.quantity,
     price: balance.price,
     valueUsd: balance.valueUsd,
+    priced: balance.price > 0 || balance.valueUsd > 0,
     category: balance.category,
     contract: balance.contract,
     ...(balance.logoUrl ? { logoUrl: balance.logoUrl } : {}),
@@ -853,7 +861,12 @@ async function priceBalances(
   return rawBalances
     .map((item) => {
       const price = prices.get(item.symbol.toUpperCase()) ?? 0;
-      return { ...item, price, valueUsd: Number((item.quantity * price).toFixed(2)) };
+      return {
+        ...item,
+        price,
+        valueUsd: Number((item.quantity * price).toFixed(2)),
+        priced: price > 0,
+      };
     })
     .sort((a, b) => b.valueUsd - a.valueUsd || b.quantity - a.quantity);
 }

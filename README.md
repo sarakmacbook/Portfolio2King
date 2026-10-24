@@ -140,7 +140,10 @@ the form for you (or imports everything it finds):
    line under the scan says how many tokens and how much value were hidden and
    offers a one-click *show them*, and setting the box to `0` turns the filter
    off. The same cut-off is re-applied server-side, so a stale page cannot slip
-   dust into the portfolio, and the import message says what was skipped.
+   dust into the portfolio, and the import message says what was skipped. A token
+   the scan **could not price** is never counted as dust: it is kept, shown as
+   *no price yet*, and imported at price 0 rather than a made-up $1 — otherwise a
+   real holding with a rate-limited price lookup would silently disappear.
 5. **Hide spam tokens** (on by default) keeps airdropped junk out of the list and
    out of *Import all*. Spam is not a value problem — scam tokens carry made-up
    prices, so one "worth" $40,000 would pass any dollar cut-off and sit at the
@@ -160,8 +163,9 @@ the form for you (or imports everything it finds):
    Anyone can deploy a token called `USDT`; what separates it from the real one is
    the contract. `src/lib/token-trust.ts` holds the issuers' own addresses for the
    well-known tokens on the chains this app prices (USDT, USDC, DAI, WETH, WBTC,
-   cbBTC, LINK, UNI, AAVE, ARB, OP, AERO, BNB, AVAX, and the bridged `USDC.e` /
-   `USDBTC` variants), keyed by chain. A scan balance is then:
+   cbBTC, LINK, UNI, AAVE, ARB, OP, AERO, BNB, AVAX, LayerZero's ZRO — which
+   launches at one identical address on all seven of them — and the bridged
+   `USDC.e` / `USDBTC` variants), keyed by chain. A scan balance is then:
    **official** (the address matches, and the card shows *official ✓*),
    **different** (right symbol, wrong contract — hidden and counted as a
    look-alike), or **unknown** (not in the table, which is most real tokens, and

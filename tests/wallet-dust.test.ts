@@ -45,6 +45,28 @@ test("dust is measured in dollars, not in quantity", () => {
   assert.equal(dustValueOf({}), 0);
 });
 
+test("a balance with no price is kept, not called dust", () => {
+  // "We could not price it" is not "it is worth nothing" — a token the market
+  // APIs could not quote must still appear in the wallet.
+  assert.equal(isDust({ valueUsd: 0, priced: false }, 1), false);
+  assert.equal(isDust({ valueUsd: 0, priced: false }, 10_000), false);
+  // A balance that *was* priced at zero is still dust.
+  assert.equal(isDust({ valueUsd: 0, priced: true }, 1), true);
+  // No flag at all keeps the old behaviour (holdings rows do not carry one).
+  assert.equal(isDust({ valueUsd: 0 }, 1), true);
+
+  const split = splitDust(
+    [
+      { symbol: "ZRO", valueUsd: 0, priced: false },
+      { symbol: "DUST", valueUsd: 0.2, priced: true },
+    ],
+    1,
+  );
+  assert.deepEqual(split.kept.map((r) => r.symbol), ["ZRO"]);
+  assert.deepEqual(split.dust.map((r) => r.symbol), ["DUST"]);
+  assert.equal(split.dustCount, 1);
+});
+
 test("splitDust keeps everything above the cut-off and reports what it hid", () => {
   const balances = [
     { symbol: "ETH", valueUsd: 2650 },

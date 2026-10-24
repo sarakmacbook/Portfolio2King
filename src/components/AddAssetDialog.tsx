@@ -1183,8 +1183,17 @@ function AddAssetForm({
                             <span className="mt-1 block text-xs font-medium tabular-nums text-slate-700">
                               {qty(item.quantity)} {item.symbol}
                             </span>
-                            <span className="mt-0.5 block text-xs tabular-nums text-slate-500">
-                              {money(item.valueUsd)} ({money(item.price)})
+                            <span
+                              className="mt-0.5 block text-xs tabular-nums text-slate-500"
+                              title={
+                                item.priced
+                                  ? undefined
+                                  : "No price was found for this token, so it is kept but not counted as dust"
+                              }
+                            >
+                              {item.priced
+                                ? `${money(item.valueUsd)} (${money(item.price)})`
+                                : `no price yet · ${qty(item.quantity)} ${item.symbol}`}
                             </span>
                             <span className="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
                               {item.contractStatus === "official" ? (
