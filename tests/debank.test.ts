@@ -246,26 +246,60 @@ test("a stale endpoint does not end the scan: the next route is tried", async ()
   assert.match(String(result.endpoint), /api\.rabby\.io/);
 });
 
-test("an empty answer is reported as an empty wallet, not as a 404 from a stale route", async () => {
-  let call = 0;
-  const result = await fetchDebankBalances(
-    "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-    "auto",
-    (async () => {
-      call += 1;
-      if (call === 1) {
-        return new Response(JSON.stringify({ data: [] }), {
+test("a keyless empty answer is not treated as an empty wallet", async () => {
+  // DeBank serves `[]` to unauthenticated callers even for a wallet full of
+  // tokens, so an empty keyless answer must never be reported as "the wallet is
+  // empty" — it means "give DeBank a key".
+  const original = process.env.DEBANK_ACCESS_KEY;
+  delete process.env.DEBANK_ACCESS_KEY;
+  try {
+    let call = 0;
+    const result = await fetchDebankBalances(
+      "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+      "auto",
+      (async () => {
+        call += 1;
+        if (call === 1) {
+          return new Response(JSON.stringify({ data: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response("not found", { status: 404 });
+      }) as unknown as typeof fetch,
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.needsAccessKey, true);
+    assert.match(String(result.error), /access key/i);
+    assert.doesNotMatch(String(result.error), /no tokens for that wallet/i);
+  } finally {
+    if (original === undefined) delete process.env.DEBANK_ACCESS_KEY;
+    else process.env.DEBANK_ACCESS_KEY = original;
+  }
+});
+
+test("with a key, an empty answer really does mean an empty wallet", async () => {
+  const original = process.env.DEBANK_ACCESS_KEY;
+  process.env.DEBANK_ACCESS_KEY = "test-key";
+  try {
+    const result = await fetchDebankBalances(
+      "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+      "auto",
+      (async () =>
+        new Response(JSON.stringify({ data: [] }), {
           status: 200,
           headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response("not found", { status: 404 });
-    }) as unknown as typeof fetch,
-  );
-  assert.equal(result.ok, false);
-  assert.equal(result.error, "DeBank reports no tokens for that wallet on any chain it indexes.");
-  // Nothing was refused, so this is not a key problem.
-  assert.equal(result.needsAccessKey, false);
+        })) as unknown as typeof fetch,
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error, "DeBank reports no tokens for that wallet on any chain it indexes.");
+    assert.equal(result.needsAccessKey, false);
+    // The keyed route asks for everything before drawing that conclusion.
+    assert.ok(result.attempts.some((attempt) => attempt.url.includes("is_all=true")));
+  } finally {
+    if (original === undefined) delete process.env.DEBANK_ACCESS_KEY;
+    else process.env.DEBANK_ACCESS_KEY = original;
+  }
 });
 
 test("a refusal inside a 200 is never mistaken for an empty wallet", async () => {

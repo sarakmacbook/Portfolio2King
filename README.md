@@ -164,8 +164,20 @@ Two things follow:
   how to read by itself.
 - Without a key the scan still works, just smaller: it reads balances straight
   from public RPCs and block explorers and the dialog says so quietly — *"Read
-  directly from the chains — … Add a free DEBANK_ACCESS_KEY to cover every chain
-  DeBank indexes."*
+  directly from the chains — DeBank only lists tokens with an access key … Add a
+  free DEBANK_ACCESS_KEY to cover every chain DeBank indexes."* DeBank serves an
+  **empty list** to unauthenticated callers even for a wallet full of tokens, so
+  an empty keyless answer is now reported as "give DeBank a key", never as "this
+  wallet is empty".
+
+The direct read does not just look up a fixed ticker list: for every chain with a
+public **[Blockscout](https://www.blockscout.com)** instance, the wallet's whole
+ERC-20 portfolio is discovered through Blockscout's account API (`tokenlist`,
+with `token-balances` as a second try) — so a token nobody hand-listed still shows
+up, with its name, symbol and quantity. RPC reads the native balance and the
+well-known tickers; Blockscout fills in the rest; spam-marked tokens are skipped.
+Chains without an instance are still scanned, they just cannot discover unknown
+tokens.
 
 A refusal is never reported as an empty wallet. DeBank answers `200 OK` with
 `{ "error_code": 1, "error_message": … }` when it wants a key or is rate-limiting,

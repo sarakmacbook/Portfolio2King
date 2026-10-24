@@ -255,3 +255,72 @@ test("the wallet dialog presents the DeBank note as information, with the fix", 
   assert.ok(dialog.includes("DEBANK_ACCESS_KEY"), "the note names the fix");
   assert.ok(!dialog.includes('text-amber-700">{walletScanNote}'), "the note is not a warning banner");
 });
+
+test("the direct read discovers tokens it has no hard-coded entry for", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("blockscout.com")) {
+      // A wallet holding one known ticker plus a token this app never listed.
+      return new Response(
+        JSON.stringify({
+          status: "1",
+          result: [
+            {
+              contractAddress: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+              tokenName: "Tether USD",
+              symbol: "USDT",
+              decimals: "6",
+              balance: "500000000",
+              type: "ERC-20",
+            },
+            {
+              contractAddress: "0x1111111111111111111111111111111111111111",
+              tokenName: "Long Tail Token",
+              symbol: "TAIL",
+              decimals: "18",
+              balance: "4000000000000000000",
+              type: "ERC-20",
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    if (url.includes("rpc")) {
+      const body = JSON.parse(String(init?.body ?? "[]")) as Array<{ id: number }>;
+      return new Response(
+        JSON.stringify(
+          body.map((req) => ({
+            jsonrpc: "2.0",
+            id: req.id,
+            result: req.id === 0 ? "0x14d1120d7b160000" : req.id === 1 ? "0x1dcd6500" : "0x0",
+          })),
+        ),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    return new Response("Offline", { status: 502 });
+  }) as typeof fetch;
+
+  try {
+    // No DeBank key in this environment, so this is the fallback path the dialog
+    // shows when DeBank answers empty.
+    const original = process.env.DEBANK_ACCESS_KEY;
+    delete process.env.DEBANK_ACCESS_KEY;
+    const scan = await scanWalletAddress("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "ethereum");
+    assert.equal(scan.source, "onchain");
+
+    const symbols = scan.balances.map((balance) => balance.symbol).sort();
+    assert.deepEqual(symbols, ["ETH", "TAIL", "USDT"], "the unknown token is found too");
+    // The known ticker is not duplicated by the Blockscout result.
+    assert.equal(scan.balances.filter((balance) => balance.symbol === "USDT").length, 1);
+    const tail = scan.balances.find((balance) => balance.symbol === "TAIL");
+    assert.equal(tail?.quantity, 4);
+    assert.equal(tail?.chain, "ethereum");
+    assert.equal(tail?.contract, "0x1111111111111111111111111111111111111111");
+    if (original !== undefined) process.env.DEBANK_ACCESS_KEY = original;
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
