@@ -56,6 +56,10 @@ export type ScannedWalletBalance = {
   /** 24h organic DEX volume, when DexScreener answered for this contract. */
   organicVolumeUsd?: number;
   liquidityUsd?: number;
+  /** Liquidity of the token's deepest single pool. */
+  deepestPoolUsd?: number;
+  /** Pools deep enough to call the token real. */
+  deepLiquidity?: boolean;
   marketPairs?: number;
   washSuspected?: boolean;
 };

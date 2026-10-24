@@ -13,6 +13,10 @@
  *     trading (real venues turn over a fraction of their liquidity per day)
  *   - what is left is summed as **organic volume**, and a token only "has a
  *     market" once it clears `MIN_ORGANIC_VOLUME_USD` a day
+ *   - **depth** is judged separately: a token is real at `MIN_LIQUIDITY_USD` of
+ *     pooled liquidity and *deep* at `DEEP_LIQUIDITY_USD` with one pool of
+ *     `MIN_DEEPEST_POOL_USD`. Liquidity is the part of a fake token that costs
+ *     actual money to fake, so it is the strongest "is this real?" signal here.
  *
  * This is a heuristic, not a provider's organic-volume score, and it is treated
  * as such: when the lookup fails or the answer is missing, the token is
@@ -24,6 +28,12 @@ export const DEXSCREENER_BATCH_SIZE = 30;
 export const MIN_PAIR_LIQUIDITY_USD = 500;
 export const MAX_VOLUME_TO_LIQUIDITY = 200;
 export const MIN_ORGANIC_VOLUME_USD = 100;
+/** Pooled liquidity a token needs before it is treated as real. */
+export const MIN_LIQUIDITY_USD = 2_000;
+/** Pooled liquidity that reads as *deep* — the badge on the card. */
+export const DEEP_LIQUIDITY_USD = 25_000;
+/** Deep also needs one pool with real money in it, not twenty dust pools. */
+export const MIN_DEEPEST_POOL_USD = 5_000;
 
 const DEXSCREENER_TOKENS_URL = "https://api.dexscreener.com/latest/dex/tokens";
 const REQUEST_TIMEOUT_MS = 6_000;
@@ -41,8 +51,12 @@ export type MarketSignals = {
   volume24hUsd: number;
   /** 24h USD volume left after dropping dust pools and wash trading. */
   organicVolume24hUsd: number;
-  /** Total liquidity of the pairs that count. */
+  /** Total liquidity of the pairs that count (dust pools excluded). */
   liquidityUsd: number;
+  /** Liquidity of the single deepest pool that counts. */
+  deepestPoolUsd: number;
+  /** Enough depth to be sure the token is real. */
+  deepLiquidity: boolean;
   /** True when a pool's volume was implausibly larger than its liquidity. */
   washSuspected: boolean;
   /** Organic volume clears the floor — i.e. the token is actually traded. */
@@ -56,6 +70,8 @@ const EMPTY: Omit<MarketSignals, "contract"> = {
   volume24hUsd: 0,
   organicVolume24hUsd: 0,
   liquidityUsd: 0,
+  deepestPoolUsd: 0,
+  deepLiquidity: false,
   washSuspected: false,
   hasMarket: false,
 };
@@ -89,6 +105,7 @@ export function signalsFromPairs(pairs: readonly unknown[], contract: string): M
   let washSuspected = false;
   let chain: string | null = null;
   let deepestLiquidity = 0;
+  let deepestPoolUsd = 0;
 
   for (const item of pairs) {
     const pair = record(item);
@@ -111,6 +128,7 @@ export function signalsFromPairs(pairs: readonly unknown[], contract: string): M
 
     if (holdsOnItsOwn) {
       liquidityUsd += liquidity;
+      if (liquidity > deepestPoolUsd) deepestPoolUsd = liquidity;
       // A pool that trades more than a couple of hundred times its own depth in
       // a day is not organic trading; leave that volume out of the total.
       if (plausible) organicVolume24hUsd += volume;
@@ -131,6 +149,9 @@ export function signalsFromPairs(pairs: readonly unknown[], contract: string): M
     volume24hUsd: Number(volume24hUsd.toFixed(2)),
     organicVolume24hUsd: Number(organicVolume24hUsd.toFixed(2)),
     liquidityUsd: Number(liquidityUsd.toFixed(2)),
+    deepestPoolUsd: Number(deepestPoolUsd.toFixed(2)),
+    deepLiquidity:
+      liquidityUsd >= DEEP_LIQUIDITY_USD && deepestPoolUsd >= MIN_DEEPEST_POOL_USD,
     washSuspected,
     hasMarket: organicVolume24hUsd >= MIN_ORGANIC_VOLUME_USD,
   };
@@ -143,6 +164,29 @@ export function isThinMarket(
 ): boolean {
   if (!signals) return false; // unknown is never a reason to hide
   return signals.organicVolume24hUsd < minVolumeUsd;
+}
+
+/**
+ * True when a token's pools hold too little money to call it real. `undefined`
+ * (no answer) is never shallow — missing data must not hide a holding.
+ */
+export function isShallowLiquidity(
+  signals: Pick<MarketSignals, "liquidityUsd"> | undefined,
+  minLiquidityUsd = MIN_LIQUIDITY_USD,
+): boolean {
+  if (!signals) return false;
+  return signals.liquidityUsd < minLiquidityUsd;
+}
+
+/** `deep` / `shallow` / `unknown` — the depth verdict for one contract. */
+export type LiquidityDepth = "deep" | "shallow" | "unknown";
+
+export function liquidityDepth(
+  signals: Pick<MarketSignals, "liquidityUsd" | "deepLiquidity"> | undefined,
+): LiquidityDepth {
+  if (!signals) return "unknown";
+  if (signals.deepLiquidity) return "deep";
+  return isShallowLiquidity(signals) ? "shallow" : "unknown";
 }
 
 /**

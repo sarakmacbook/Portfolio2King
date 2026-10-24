@@ -13,8 +13,8 @@ import type { CryptoCategory } from "@/db/schema";
 import { TYPE_META, money, qty } from "@/lib/format";
 import { playMoneyChimeFromGesture } from "@/lib/sounds";
 import { DEFAULT_DUST_THRESHOLD_USD, normaliseDustThreshold } from "@/lib/wallet-dust";
-import { MIN_ORGANIC_VOLUME_USD, shortUsd } from "@/lib/organic-volume";
-import { filterScanBalances } from "@/lib/wallet-trust";
+import { MIN_LIQUIDITY_USD, MIN_ORGANIC_VOLUME_USD, shortUsd } from "@/lib/organic-volume";
+import { depthOf, filterScanBalances } from "@/lib/wallet-trust";
 import { CAMBODIAN_BANKS, CUSTOM_BANK, type CambodianBank } from "@/lib/cambodian-banks";
 import type { DiscoveredStock } from "@/lib/stock-search";
 import {
@@ -426,6 +426,7 @@ function AddAssetForm({
         skipSpam: walletHideSpam,
         skipImpostor: walletHideImpostor,
         minOrganicVolumeUsd: walletRequireMarket ? MIN_ORGANIC_VOLUME_USD : 0,
+        minLiquidityUsd: walletRequireMarket ? MIN_LIQUIDITY_USD : 0,
         balances: walletChosen.map((item) => ({ ...item, chain: item.chain })),
       });
       if (!result.ok) {
@@ -440,6 +441,9 @@ function AddAssetForm({
           ? `Skipped ${result.skippedImpostor} with the wrong contract address.`
           : "",
         result.skippedThin ? `Skipped ${result.skippedThin} with no trading volume.` : "",
+        result.skippedShallow
+          ? `Skipped ${result.skippedShallow} with too little liquidity.`
+          : "",
       ]
         .filter(Boolean)
         .map((note) => ` ${note}`)
@@ -974,10 +978,11 @@ function AddAssetForm({
                   checked={walletRequireMarket}
                   onChange={(event) => setWalletRequireMarket(event.target.checked)}
                 />
-                Only tokens with trading volume
+                Only tokens with a real market
               </label>
               <span className="font-normal text-[11px] text-slate-400">
-                Contract matched against the official address, then checked for real 24h volume.
+                Official contract, {shortUsd(MIN_LIQUIDITY_USD)}+ of pooled liquidity and{" "}
+                {shortUsd(MIN_ORGANIC_VOLUME_USD)}+ traded in 24h.
               </span>
             </div>
 
@@ -1005,7 +1010,7 @@ function AddAssetForm({
                     ? ` · ${walletSelection.counts.spam} spam-looking hidden`
                     : ""}
                   {walletSelection.counts.thin > 0
-                    ? ` · ${walletSelection.counts.thin} with no trading volume hidden`
+                    ? ` · ${walletSelection.counts.thin} with no real market hidden`
                     : ""}
                   {walletSelection.counts.dust > 0
                     ? ` · ${walletSelection.counts.dust} under ${money(walletDustCut)} hidden (${money(
@@ -1034,9 +1039,10 @@ function AddAssetForm({
                 {walletSelection.counts.thin > 0 ? (
                   <p className="text-[11px] text-slate-500">
                     {walletSelection.counts.thin} token
-                    {walletSelection.counts.thin === 1 ? " has" : "s have"} traded under{" "}
-                    {money(MIN_ORGANIC_VOLUME_USD)} in the last 24 hours across its pools, so its price
-                    is not backed by a market.{" "}
+                    {walletSelection.counts.thin === 1 ? " has" : "s have"} no real market — under{" "}
+                    {shortUsd(MIN_LIQUIDITY_USD)} of pooled liquidity or under{" "}
+                    {shortUsd(MIN_ORGANIC_VOLUME_USD)} traded in 24h — so the price shown is not backed
+                    by anything.{" "}
                     <button
                       type="button"
                       className="font-medium text-indigo-600 hover:underline"
@@ -1106,6 +1112,7 @@ function AddAssetForm({
                       {walletVisibleBalances.map((item) => {
                         const chosen = walletChosenIds.has(item.id);
                         const traded = item.organicVolumeUsd;
+                        const depth = depthOf(item);
                         return (
                           <div
                             key={item.id}
@@ -1152,6 +1159,27 @@ function AddAssetForm({
                                   title="The contract address is the official one for this token"
                                 >
                                   official ✓
+                                </span>
+                              ) : null}
+                              {item.liquidityUsd !== undefined ? (
+                                <span
+                                  className={`rounded-full px-1.5 py-0.5 font-medium ${
+                                    depth === "deep"
+                                      ? "bg-emerald-50 text-emerald-700"
+                                      : depth === "shallow"
+                                        ? "bg-amber-50 text-amber-800"
+                                        : "bg-slate-50 text-slate-600"
+                                  }`}
+                                  title={
+                                    depth === "deep"
+                                      ? `Deep liquidity: ${money(item.liquidityUsd)} pooled, deepest pool ${money(item.deepestPoolUsd ?? 0)}`
+                                      : depth === "shallow"
+                                        ? `Thin: only ${money(item.liquidityUsd)} pooled — a fake token can hold a few hundred dollars of its own liquidity`
+                                        : `Liquidity: ${money(item.liquidityUsd)} pooled across ${item.marketPairs ?? 0} pool(s)`
+                                  }
+                                >
+                                  {shortUsd(item.liquidityUsd)} liq
+                                  {depth === "deep" ? " ✓" : ""}
                                 </span>
                               ) : null}
                               {traded !== undefined ? (
