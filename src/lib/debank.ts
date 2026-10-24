@@ -134,6 +134,12 @@ export type DebankBalance = {
   category: CryptoCategory;
   contract: string | null;
   logoUrl: string;
+  /**
+   * DeBank's own "this is a scam" verdict (`is_scam`). The name of a scam token
+   * is often spelled perfectly ("USDC"), so this flag is the only thing that can
+   * catch it before the user sees it in the picker.
+   */
+  spam?: boolean;
 };
 
 export type DebankRequest = { url: string; headers: Record<string, string> };
@@ -366,6 +372,7 @@ export function parseDebankTokens(
       category: isStablecoinSymbol(symbol) ? "stablecoin" : "volatile",
       contract,
       logoUrl: readString(item.logo_url) || readString(item.logoUrl),
+      ...(item.is_scam === true ? { spam: true } : {}),
     });
   }
 

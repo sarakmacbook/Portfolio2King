@@ -149,10 +149,13 @@ the form for you (or imports everything it finds):
    prices, so one "worth" $40,000 would pass any dollar cut-off and sit at the
    top of the portfolio — so the test is the name itself: a website or `t.me`
    invite, airdrop marketing words (*claim*, *airdrop*, *visit*, *redeem*,
-   *voucher*, *giveaway*), zero-width/bidi characters used to fake a ticker, an
-   impossibly long name or symbol, or a spam flag the explorer sent. Real names
-   are left alone — *Ethena USDe*, *Renzo Restaked ETH*, *First Digital USD* and
-   friends are checked in `tests/wallet-spam.test.ts`. It is a filter, never a
+   *voucher*, *giveaway*, *promo*), a sentence addressed to the holder (*you have
+   won…*, *claim your…*, *receive your…*), an amount of a real ticker printed in
+   the name (*5,000 USDT*), zero-width/bidi characters used to fake a ticker, a
+   name and symbol with no letters at all (*🎁🎁*), an impossibly long name or
+   symbol, or a spam / `is_scam` flag the indexer sent. Real names are left alone
+   — *Ethena USDe*, *Renzo Restaked ETH*, *First Digital USD*, *1inch*, *🐸 Pepe*
+   and friends are checked in `tests/wallet-spam.test.ts`. It is a filter, never a
    delete: the scan line counts what was hidden and *show the suspects* brings
    them back, and unticking the box imports them anyway. Spam is also left out of
    every total — its price is invented, so counting it would put a fake $40,000
@@ -197,10 +200,13 @@ under the scan with its own *Show them* link, so a filter never silently swallow
 a token.
 
 The same switch sits on the holdings table (*Hide spam*, on by default): rows
-that look like spam are skipped with a count and a *Show them* link, and once
-shown each one carries a small **spam?** badge with its value shown as *—* (it is
-not part of the total). Arrange mode ignores the filter so
-nothing becomes impossible to drag into a folder.
+that look like spam are skipped with a count, a *Show them* link and a **Remove
+them** button, and once shown each one carries a small **spam?** badge with its
+value shown as *—* (it is not part of the total). Remove them is the clean-up for
+junk that was imported before the rules existed — it deletes exactly the rows the
+notice counted (same rule, `removeSpamHoldings`), re-records the snapshot and says
+how many went; *Show them* stays, so nothing is deleted by accident. Arrange mode
+ignores the filter so nothing becomes impossible to drag into a folder.
 
 ### How a scan finds tokens
 

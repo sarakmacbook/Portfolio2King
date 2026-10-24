@@ -45,7 +45,7 @@ import {
 import { DEFAULT_DUST_THRESHOLD_USD, normaliseDustThreshold, splitDust } from "@/lib/wallet-dust";
 import { isSpamToken, spamReasonOf, splitSpam } from "@/lib/wallet-spam";
 import { PROVIDER_LABELS, type PriceProvider } from "@/lib/market-prices";
-import { saveHoldingFolderAssignment } from "@/app/actions";
+import { removeSpamHoldings, saveHoldingFolderAssignment } from "@/app/actions";
 import CryptoLogo from "./CryptoLogo";
 import ExchangeIcon, { EXCHANGE_BRAND_COLORS } from "./ExchangeIcon";
 import GripIcon from "./GripIcon";
@@ -176,6 +176,9 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
   const [groupDrop, setGroupDrop] = useState<string | null>(null);
   const [filingError, setFilingError] = useState("");
   const [filing, startFiling] = useTransition();
+  /** Result of the last "Remove them" click, so the clean-up is never silent. */
+  const [spamCleanup, setSpamCleanup] = useState("");
+  const [removingSpam, startRemovingSpam] = useTransition();
   const router = useRouter();
   /** Collapsed groups — a view preference, not part of the saved layout. */
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
@@ -1038,7 +1041,30 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
           >
             Show them
           </button>
+          {" · "}
+          <button
+            type="button"
+            className="font-medium text-indigo-600 hover:underline disabled:opacity-50"
+            disabled={removingSpam}
+            onClick={() =>
+              startRemovingSpam(async () => {
+                const result = await removeSpamHoldings();
+                setSpamCleanup(
+                  result.removed > 0
+                    ? `Removed ${result.removed} spam holding${result.removed === 1 ? "" : "s"}.`
+                    : "Nothing left to remove.",
+                );
+                router.refresh();
+              })
+            }
+          >
+            {removingSpam ? "Removing…" : "Remove them"}
+          </button>
         </p>
+      )}
+
+      {!removingSpam && spamSplit.spamCount === 0 && spamCleanup !== "" && (
+        <p className="mx-4 mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">{spamCleanup}</p>
       )}
 
       {dustSplit.dustCount > 0 && (

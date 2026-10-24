@@ -39,7 +39,7 @@ import { shortWalletAddress } from "@/lib/wallet-chains";
 import { isDust, normaliseDustThreshold } from "@/lib/wallet-dust";
 import { isSpamToken } from "@/lib/wallet-spam";
 import { contractStatusOf } from "@/lib/token-trust";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -347,6 +347,26 @@ export async function deleteAsset(fd: FormData) {
   await recordSnapshot();
   refresh();
   redirect("/");
+}
+
+/**
+ * Deletes every holding that looks like airdropped spam.
+ *
+ * The table already hides spam, but a token imported before the rules existed
+ * (or pasted in by hand) is still in the database — hidden, or worse, counted
+ * nowhere while sitting in the folder list. This is the one-click clean-up: it
+ * uses exactly the same rule as the filter, so what the notice says is hidden is
+ * what gets deleted, and it reports how many it removed.
+ */
+export async function removeSpamHoldings(): Promise<{ removed: number }> {
+  await ensureSchema();
+  const list = await db.select().from(assets);
+  const junk = list.filter((asset) => isSpamToken(asset));
+  if (junk.length === 0) return { removed: 0 };
+  await db.delete(assets).where(inArray(assets.id, junk.map((asset) => asset.id)));
+  await recordSnapshot();
+  refresh();
+  return { removed: junk.length };
 }
 
 export async function saveDashboardLayout(_prev: ActionState, fd: FormData): Promise<ActionState> {
