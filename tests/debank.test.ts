@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   DEBANK_CHAIN_IDS,
+  debankChainListRequests,
+  fetchDebankChainNames,
+  parseDebankChainList,
   DEBANK_TOTAL_BUDGET_MS,
   MAX_DEBANK_TOKENS,
   debankChainIdFor,
@@ -11,6 +14,12 @@ import {
   parseDebankTokens,
   walletChainFromDebankId,
 } from "../src/lib/debank";
+import {
+  canonicalChainId,
+  chainMatchesFilter,
+  debankChainLabel,
+  hasKnownChainLabel,
+} from "../src/lib/wallet-chains";
 
 /** A DeBank `all_token_list` entry, shaped like the real API's response. */
 function token(overrides: Record<string, unknown> = {}) {
@@ -34,11 +43,22 @@ test("DeBank chain ids map both ways", () => {
   assert.equal(DEBANK_CHAIN_IDS.arb, "arbitrum");
   assert.equal(walletChainFromDebankId("arb"), "arbitrum");
   assert.equal(walletChainFromDebankId("BSC"), "bsc");
-  assert.equal(walletChainFromDebankId("unknown-chain"), null);
+  // An id DeBank adds after this release is kept, not dropped: new chains are
+  // the whole point of asking DeBank rather than a hand-written list.
+  assert.equal(walletChainFromDebankId("unknown-chain"), "unknown-chain");
+  assert.equal(walletChainFromDebankId("Sonic"), "sonic");
+  assert.equal(walletChainFromDebankId(""), null);
+  assert.equal(walletChainFromDebankId(null), null);
   assert.equal(walletChainFromDebankId(42), null);
   assert.equal(debankChainIdFor("ethereum"), "eth");
   assert.equal(debankChainIdFor("arbitrum"), "arb");
-  assert.equal(debankChainIdFor("solana"), "solana");
+  // DeBank is EVM-only, so a non-EVM filter sends no chain id at all.
+  assert.equal(debankChainIdFor("solana"), null);
+  assert.equal(debankChainIdFor("bitcoin"), null);
+  // Any chain id beyond the built-in list is passed through as DeBank's own id.
+  assert.equal(debankChainIdFor("sonic"), "sonic");
+  assert.equal(debankChainIdFor("Sonic"), "sonic");
+  assert.equal(debankChainIdFor("ethereum"), "eth");
   // "auto" means "every chain", so no chain id is sent.
   assert.equal(debankChainIdFor("auto"), null);
 });
@@ -278,4 +298,118 @@ test("fetchDebankBalances returns balances, then reports failure instead of thro
   );
   assert.equal(offline.ok, false);
   assert.match(String(offline.error), /DeBank could not be reached \(network down\)/);
+});
+
+test("every EVM chain DeBank reports is kept, not just the ones the app lists", () => {
+  const balances = parseDebankTokens([
+    token({ id: "0x1111111111111111111111111111111111111111", chain: "eth", symbol: "ETH", amount: 1, price: 2650, value_usd: 2650 }),
+    token({ id: "0x2222222222222222222222222222222222222222", chain: "sonic", symbol: "S", amount: 100, price: 0.5, value_usd: 50 }),
+    token({ id: "0x3333333333333333333333333333333333333333", chain: "zora", symbol: "ZORA", amount: 10, price: 2, value_usd: 20 }),
+    // A native token: DeBank identifies it by the chain id, not a contract.
+    token({ id: "eth", chain: "eth", name: "Ether", symbol: "ETH", amount: 1, price: 2650, value_usd: 2650 }),
+    // A chain that did not exist when this code shipped.
+    token({ id: "0x4444444444444444444444444444444444444444", chain: "somebrandnewchain", symbol: "NEWC", amount: 5, price: 3, value_usd: 15 }),
+  ]);
+
+  assert.deepEqual(balances.map((b) => b.chain), [
+    "ethereum",
+    "ethereum",
+    "sonic",
+    "zora",
+    "somebrandnewchain",
+  ]);
+  assert.deepEqual(balances.map((b) => b.chainLabel), [
+    "Ethereum",
+    "Ethereum",
+    "Sonic",
+    "Zora",
+    "SOMEBRANDNEWCHAIN",
+  ]);
+  // The native token has no contract but is still a holding.
+  const native = balances.filter((b) => b.id === "debank:ethereum:ETH")[0];
+  assert.ok(native, "the native token is kept");
+  assert.equal(native.contract, null);
+  // The id is chain-scoped, so the same contract on two chains is two holdings.
+  const sameContract = parseDebankTokens([
+    token({ id: "0x5555555555555555555555555555555555555555", chain: "eth", symbol: "USDC", amount: 10, price: 1, value_usd: 10 }),
+    token({ id: "0x5555555555555555555555555555555555555555", chain: "base", symbol: "USDC", amount: 20, price: 1, value_usd: 20 }),
+  ]);
+  assert.equal(sameContract.length, 2);
+  assert.notEqual(sameContract[0].id, sameContract[1].id);
+});
+
+test("chain filters are alias-aware, so \"ethereum\" matches DeBank's \"eth\"", () => {
+  const payload = [
+    token({ id: "0x00000000000000000000000000000000000000e1", chain: "eth", symbol: "ETH", price: 2650, value_usd: 2650 }),
+    token({ id: "0x00000000000000000000000000000000000000e2", chain: "arb", symbol: "ARB", price: 0.75, value_usd: 75 }),
+    token({ id: "0x00000000000000000000000000000000000000e3", chain: "sdai", symbol: "SONIC", price: 1, value_usd: 1 }),
+  ];
+  assert.deepEqual(parseDebankTokens(payload, { chainFilter: "ethereum" }).map((b) => b.symbol), ["ETH"]);
+  assert.deepEqual(parseDebankTokens(payload, { chainFilter: "arbitrum" }).map((b) => b.symbol), ["ARB"]);
+  // "auto" means every chain DeBank knows about.
+  assert.equal(parseDebankTokens(payload, { chainFilter: "auto" }).length, 3);
+
+  assert.equal(canonicalChainId("Ethereum"), "eth");
+  assert.equal(canonicalChainId("eth"), "eth");
+  assert.equal(canonicalChainId("arbitrum"), "arb");
+  assert.equal(chainMatchesFilter("eth", "ethereum"), true);
+  assert.equal(chainMatchesFilter("arb", "ethereum"), false);
+  assert.equal(chainMatchesFilter("sonic", "auto"), true);
+  assert.equal(chainMatchesFilter("sonic", ""), true);
+  assert.equal(chainMatchesFilter("sonic", "sonic"), true);
+  assert.equal(debankChainLabel("ethereum"), "Ethereum");
+  assert.equal(debankChainLabel("eth"), "Ethereum");
+  assert.equal(hasKnownChainLabel("eth"), true);
+  assert.equal(hasKnownChainLabel("somebrandnewchain"), false);
+});
+
+test("chain names come from DeBank's own list, so new chains get a real label", async () => {
+  const listPayload = [
+    { id: "eth", name: "Ethereum", community_id: 1 },
+    { id: "somebrandnewchain", name: "Brand New Chain", community_id: 999999 },
+  ];
+  assert.deepEqual([...parseDebankChainList(listPayload)], [
+    ["eth", "Ethereum"],
+    ["somebrandnewchain", "Brand New Chain"],
+  ]);
+  assert.deepEqual([...parseDebankChainList({ data: listPayload })].length, 2);
+  assert.deepEqual([...parseDebankChainList("nope")], []);
+
+  const requests = debankChainListRequests("key-123");
+  assert.match(requests[0].url, /pro-openapi\.debank\.com\/v1\/chain\/list/);
+  assert.equal(requests[0].headers.AccessKey, "key-123");
+  const keyless = debankChainListRequests("");
+  assert.match(keyless[0].url, /api\.debank\.com\/v1\/chain\/list/);
+  assert.ok(keyless.some((request) => request.url.includes("api.rabby.io")), "Rabby is the last resort");
+
+  const names = await fetchDebankChainNames(
+    (async () =>
+      new Response(JSON.stringify(listPayload), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof fetch,
+  );
+  assert.equal(names.get("somebrandnewchain"), "Brand New Chain");
+
+  // A scan that meets an unknown chain labels it from that list.
+  const result = await fetchDebankBalances(
+    "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+    "auto",
+    (async () =>
+      new Response(
+        JSON.stringify([
+          token({
+            id: "0x6666666666666666666666666666666666666666",
+            chain: "somebrandnewchain",
+            symbol: "NEWC",
+            amount: 5,
+            price: 3,
+            value_usd: 15,
+          }),
+        ]),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )) as unknown as typeof fetch,
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.balances[0].chainLabel, "Brand New Chain");
 });

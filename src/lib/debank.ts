@@ -1,9 +1,16 @@
 /**
  * DeBank balance detection.
  *
- * DeBank indexes every EVM chain and returns the tokens a wallet holds with
- * their USD price, which is exactly what "Add via wallet address" needs: one
- * call instead of an RPC round-trip per chain and a price lookup per ticker.
+ * DeBank indexes every EVM chain — 100+ of them — and returns the tokens a
+ * wallet holds with their USD price, which is exactly what "Add via wallet
+ * address" needs: one call instead of an RPC round-trip per chain and a price
+ * lookup per ticker.
+ *
+ * Nothing here is limited to a fixed chain list: whatever chain id DeBank
+ * returns is kept, labelled from `DEBANK_CHAIN_LABELS` or — for a chain this app
+ * has never seen — from DeBank's own `/v1/chain/list`, so a wallet on a brand
+ * new rollup still shows up. Only the *fallback* on-chain reader has a fixed
+ * chain list, because that one needs an RPC URL per chain.
  *
  * Two APIs are supported:
  *
@@ -23,7 +30,13 @@
  */
 import type { CryptoCategory } from "@/db/schema";
 import { isStablecoinSymbol } from "@/lib/stablecoins";
-import { WALLET_CHAIN_LABELS, type WalletChain } from "@/lib/wallet-chains";
+import {
+  canonicalChainId,
+  chainMatchesFilter,
+  debankChainLabel,
+  hasKnownChainLabel,
+  type WalletChain,
+} from "@/lib/wallet-chains";
 
 export const DEBANK_TIMEOUT_MS = 6000;
 
@@ -35,12 +48,25 @@ export const DEBANK_TIMEOUT_MS = 6000;
  */
 export const DEBANK_TOTAL_BUDGET_MS = 12000;
 
-/** How many tokens one scan may return (protects the picker from spam airdrops). */
-export const MAX_DEBANK_TOKENS = 100;
+/**
+ * How many tokens one scan may return (protects the picker from spam airdrops).
+ * Generous, because a wallet spread over 100+ chains can legitimately hold a lot
+ * — the list is sorted by USD value, so the tail that gets cut is the dust.
+ */
+export const MAX_DEBANK_TOKENS = 250;
 
-type ScannedChain = Exclude<WalletChain, "auto">;
+/**
+ * A chain as DeBank names it. Known chains keep the app's own id (`ethereum`,
+ * `arbitrum`, …) so the rest of the app reads naturally; every other DeBank
+ * chain keeps its DeBank id (`sonic`, `zora`, …).
+ */
+type ScannedChain = string;
 
-/** DeBank chain id → the chain vocabulary used by the app. */
+/**
+ * DeBank chain id → the chain vocabulary used by the app, for the chains the
+ * direct on-chain reader also covers. Ids outside this map are not rejected:
+ * they are returned as their canonical DeBank id (see `walletChainFromDebankId`).
+ */
 export const DEBANK_CHAIN_IDS: Record<string, ScannedChain> = {
   eth: "ethereum",
   ethereum: "ethereum",
@@ -57,8 +83,10 @@ export const DEBANK_CHAIN_IDS: Record<string, ScannedChain> = {
   avalanche: "avalanche",
   era: "zksync",
   zksync: "zksync",
+  zkscroll: "zksync",
   linea: "linea",
   scr: "scroll",
+  scrl: "scroll",
   scroll: "scroll",
   mnt: "mantle",
   mantle: "mantle",
@@ -67,6 +95,7 @@ export const DEBANK_CHAIN_IDS: Record<string, ScannedChain> = {
   fantom: "fantom",
   gno: "gnosis",
   gnosis: "gnosis",
+  xdai: "gnosis",
   cro: "cronos",
   cronos: "cronos",
 };
@@ -109,16 +138,34 @@ export type DebankBalance = {
 
 export type DebankRequest = { url: string; headers: Record<string, string> };
 
-/** The DeBank chain id for an app chain, or `null` when it is not an EVM chain. */
-export function debankChainIdFor(chain: WalletChain): string | null {
-  if (chain === "auto") return null;
-  return WALLET_CHAIN_TO_DEBANK[chain] ?? null;
+/**
+ * The DeBank chain id to send for a chain filter, or `null` when no chain should
+ * be sent (every chain, or a non-EVM chain DeBank does not index).
+ *
+ * Accepts any chain id — the app's own (`ethereum`) or DeBank's (`eth`), and
+ * chains beyond the built-in list, because DeBank serves far more of them.
+ */
+export function debankChainIdFor(chain: string): string | null {
+  if (!chain || chain === "auto") return null;
+  const key = canonicalChainId(chain);
+  if (!key || key === "solana" || key === "bitcoin" || key === "tron") return null;
+  return WALLET_CHAIN_TO_DEBANK[key as ScannedChain] ?? key;
 }
 
-/** The app chain for a DeBank chain id (accepts both short and long ids). */
+/**
+ * The chain for a DeBank chain id.
+ *
+ * Accepts both vocabularies (`eth` and `ethereum`, `arb` and `arbitrum`) and —
+ * importantly — does **not** reject the ids it does not recognise: DeBank adds
+ * chains constantly, so an unknown id is returned as its canonical DeBank id
+ * instead of dropping the token from the scan. `null` is only returned when the
+ * payload has no usable chain at all.
+ */
 export function walletChainFromDebankId(id: unknown): ScannedChain | null {
   if (typeof id !== "string") return null;
-  return DEBANK_CHAIN_IDS[id.trim().toLowerCase()] ?? null;
+  const key = canonicalChainId(id);
+  if (!key) return null;
+  return DEBANK_CHAIN_IDS[key] ?? key;
 }
 
 function readNumber(value: unknown): number {
@@ -162,13 +209,17 @@ export function debankTokenItems(payload: unknown): unknown[] {
  * Shapes a DeBank token list into balances: drops empty, worthless spam (unless
  * DeBank marks it core/verified), de-duplicates the same token seen twice and
  * sorts by USD value.
+ *
+ * Every chain DeBank returns is kept — the chain is never a reason to drop a
+ * token, because DeBank indexes far more EVM chains than this app lists by hand.
  */
 export function parseDebankTokens(
   payload: unknown,
-  options: { chainFilter?: WalletChain; maxItems?: number } = {},
+  options: { chainFilter?: string; maxItems?: number } = {},
 ): DebankBalance[] {
   const chainFilter =
     options.chainFilter && options.chainFilter !== "auto" ? options.chainFilter : null;
+  const nonEvm = new Set(["solana", "bitcoin", "tron"]);
   const maxItems = Math.max(1, Math.min(MAX_DEBANK_TOKENS, options.maxItems ?? MAX_DEBANK_TOKENS));
   const seen = new Set<string>();
   const balances: DebankBalance[] = [];
@@ -188,9 +239,10 @@ export function parseDebankTokens(
         ? chainFilter
         : null);
     if (!chain) continue;
-    if (chainFilter && chain !== chainFilter) continue;
+    // The filter is alias-aware, so "ethereum" matches DeBank's `eth`.
+    if (chainFilter && !chainMatchesFilter(chain, chainFilter)) continue;
     // DeBank only indexes the EVM side; non-EVM chains cannot appear here.
-    if (chain === "solana" || chain === "bitcoin" || chain === "tron") continue;
+    if (nonEvm.has(canonicalChainId(chain))) continue;
 
     const contractRaw =
       readString(item.id) || readString(item.contract) || readString(item.token_address);
@@ -221,7 +273,7 @@ export function parseDebankTokens(
       symbol: symbol.toUpperCase(),
       name: readString(item.name) || symbol.toUpperCase(),
       chain,
-      chainLabel: WALLET_CHAIN_LABELS[chain],
+      chainLabel: debankChainLabel(chain),
       quantity: Number(quantity.toFixed(8)),
       price,
       valueUsd: Number(valueUsd.toFixed(2)),
@@ -265,7 +317,7 @@ const RABBY_HEADERS: Record<string, string> = {
  */
 export function debankRequests(
   address: string,
-  chain: WalletChain = "auto",
+  chain: string = "auto",
   accessKey = process.env.DEBANK_ACCESS_KEY ?? "",
 ): DebankRequest[] {
   const addr = encodeURIComponent(address.trim());
@@ -304,6 +356,96 @@ export function debankRequests(
   ];
 }
 
+/**
+ * How long DeBank's chain list is cached. New chains appear on DeBank's side
+ * every few weeks, so a long-lived server only needs to ask occasionally.
+ */
+export const DEBANK_CHAIN_LIST_TTL_MS = 6 * 60 * 60 * 1000;
+
+let chainNameCache: { names: Map<string, string>; at: number } | null = null;
+
+/** The requests that ask DeBank for every chain it supports. */
+export function debankChainListRequests(
+  accessKey = process.env.DEBANK_ACCESS_KEY ?? "",
+): DebankRequest[] {
+  const key = accessKey.trim();
+  if (key) {
+    return [
+      {
+        url: "https://pro-openapi.debank.com/v1/chain/list",
+        headers: { Accept: "application/json", AccessKey: key },
+      },
+    ];
+  }
+  return [
+    { url: "https://api.debank.com/v1/chain/list", headers: PUBLIC_HEADERS },
+    { url: "https://api.rabby.io/v1/chain/list", headers: RABBY_HEADERS },
+  ];
+}
+
+/** `[{ id, name, … }]` → `id → name`, ignoring anything malformed. */
+export function parseDebankChainList(payload: unknown): Map<string, string> {
+  const names = new Map<string, string>();
+  const list = Array.isArray(payload)
+    ? payload
+    : payload && typeof payload === "object" && Array.isArray((payload as Record<string, unknown>).data)
+      ? ((payload as Record<string, unknown>).data as unknown[])
+      : [];
+  for (const raw of list) {
+    if (!raw || typeof raw !== "object") continue;
+    const item = raw as Record<string, unknown>;
+    const id = readString(item.id).toLowerCase();
+    const name = readString(item.name);
+    if (!id || !name) continue;
+    names.set(id, name);
+  }
+  return names;
+}
+
+/**
+ * The chain names DeBank reports, cached for a while. Best effort: a failure
+ * leaves unknown chains labelled by their id instead of breaking the scan.
+ */
+export async function fetchDebankChainNames(
+  fetchImpl: typeof fetch = fetch,
+): Promise<Map<string, string>> {
+  if (chainNameCache && Date.now() - chainNameCache.at < DEBANK_CHAIN_LIST_TTL_MS) {
+    return chainNameCache.names;
+  }
+  for (const request of debankChainListRequests()) {
+    try {
+      const response = await fetchImpl(request.url, {
+        method: "GET",
+        cache: "no-store",
+        headers: request.headers,
+        signal: AbortSignal.timeout(DEBANK_TIMEOUT_MS),
+      });
+      if (!response.ok) continue;
+      const names = parseDebankChainList(await response.json());
+      if (names.size > 0) {
+        chainNameCache = { names, at: Date.now() };
+        return names;
+      }
+    } catch {
+      // Try the next route; an unknown chain is not worth failing a scan over.
+    }
+  }
+  return chainNameCache?.names ?? new Map();
+}
+
+/** Re-labels balances whose chain this app has no hand-written name for. */
+function applyChainNames(
+  balances: DebankBalance[],
+  names: Map<string, string>,
+): DebankBalance[] {
+  if (names.size === 0) return balances;
+  return balances.map((balance) => {
+    const key = canonicalChainId(balance.chain);
+    const name = names.get(key);
+    return name ? { ...balance, chainLabel: name } : balance;
+  });
+}
+
 export type DebankFetchResult = {
   ok: boolean;
   balances: DebankBalance[];
@@ -321,7 +463,7 @@ export type DebankFetchResult = {
  */
 export async function fetchDebankBalances(
   address: string,
-  chain: WalletChain = "auto",
+  chain: string = "auto",
   fetchImpl: typeof fetch = fetch,
 ): Promise<DebankFetchResult> {
   const requests = debankRequests(address, chain);
@@ -349,8 +491,18 @@ export async function fetchDebankBalances(
         continue;
       }
       const payload: unknown = await response.json();
-      const balances = parseDebankTokens(payload, { chainFilter: chain });
+      let balances = parseDebankTokens(payload, { chainFilter: chain });
       if (balances.length > 0) {
+        // A chain DeBank added since the last release would only show up as an
+        // id (`aero`); ask DeBank what it is called. Purely cosmetic, so it is
+        // skipped when the scan budget is already spent.
+        if (balances.some((balance) => !hasKnownChainLabel(balance.chain)) && deadline - Date.now() > 1500) {
+          try {
+            balances = applyChainNames(balances, await fetchDebankChainNames(fetchImpl));
+          } catch {
+            // Keep the id-based labels.
+          }
+        }
         return { ok: true, balances, endpoint: request.url, error: null };
       }
       // A 200 with nothing in it means "DeBank knows this wallet and it is
