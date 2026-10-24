@@ -220,13 +220,13 @@ that talks to the network about a wallet.
 | Bitcoin | `mempool.space`, falling back to `blockstream.info`. |
 | Tron | `apilist.tronscanapi.com/api/accountv2`. |
 
-**Blockscan** is the second source you can pick in the dialog (*Scan via
-Blockscan*, next to the chain menu). Blockscan is Etherscan's multichain explorer,
-and its data comes from **Etherscan V2** (`https://api.etherscan.io/v2/api`) —
-one key for 60+ chains, with `chainid` choosing the network. The scan asks
-`module=account&action=addresstokenbalance` per chain (token balances *and*
-`TokenPriceUSD`) and merges the answer with the direct read above, so a refusal
-never turns into an empty wallet:
+**Blockscan** is the second source, and it needs no switch in the UI: Blockscan is
+Etherscan's multichain explorer, its data comes from **Etherscan V2**
+(`https://api.etherscan.io/v2/api`) — one key for 60+ chains, with `chainid`
+choosing the network — and the scan uses it automatically when DeBank cannot
+answer. The sweep asks `module=account&action=addresstokenbalance` per chain
+(token balances *and* `TokenPriceUSD`) and merges the answer with the direct read
+above, so a refusal never turns into an empty wallet:
 
 - **Needs a key.** `ETHERSCAN_API_KEY` (or `BLOCKSCAN_API_KEY`). Without one the
   sweep is skipped, the scan falls back to the direct read, and the dialog says so
@@ -238,9 +238,10 @@ never turns into an empty wallet:
   prices, one token call per chain, 550 ms apart, inside a 12 s budget; chains the
   budget did not reach are counted in the note. A single-chain scan (pick the
   chain in the menu) also reads that chain's native coin.
-- **Automatic fallback.** In a default scan, if DeBank cannot answer and an
-  Etherscan key is configured, the same sweep runs instead of settling for the
-  smaller direct read — the result then says `via Blockscan` and why.
+- **Automatic, not a choice.** In a default scan, if DeBank cannot answer and an
+  Etherscan key is configured, this sweep runs instead of settling for the smaller
+  direct read — the result then says `via Blockscan` and why. API callers can still
+  force it with `?source=blockscan` on `/api/wallet/scan`.
 
 Only chains with a public Blockscout or Routescan instance can be *discovered*
 beyond the hand-listed tickers — today that is 14 Blockscout chains (Ethereum,

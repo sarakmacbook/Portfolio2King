@@ -142,13 +142,6 @@ function AddAssetForm({
   const [walletScanSource, setWalletScanSource] = useState<
     "debank" | "onchain" | "blockscan" | null
   >(null);
-  /**
-   * Which index answers the scan: DeBank (the default, every chain it indexes) or
-   * Blockscan / Etherscan V2. Kept as a choice rather than always asking both —
-   * Etherscan's sweep is paced at 2 calls a second, and most scans do not need a
-   * second opinion.
-   */
-  const [walletSource, setWalletSource] = useState<"auto" | "blockscan">("auto");
   const [walletScanNote, setWalletScanNote] = useState("");
   const [importingWallet, setImportingWallet] = useState(false);
   /** Import the wallet's tokens into a folder, named by the user or by the address. */
@@ -335,11 +328,7 @@ function AddAssetForm({
     setWalletImportMessage("");
     setWalletScanDone(false);
     try {
-      const params = new URLSearchParams({
-        address: trimmed,
-        chain: walletChain,
-        source: walletSource,
-      });
+      const params = new URLSearchParams({ address: trimmed, chain: walletChain });
       const response = await fetch(`/api/wallet/scan?${params.toString()}`);
       const data = (await response.json()) as {
         error?: string;
@@ -924,16 +913,6 @@ function AddAssetForm({
                   </option>
                 ))}
               </select>
-              <select
-                className="input sm:w-44"
-                value={walletSource}
-                onChange={(event) => setWalletSource(event.target.value === "blockscan" ? "blockscan" : "auto")}
-                aria-label="Where to scan for the tokens"
-                title="Which index is asked for the token list"
-              >
-                <option value="auto">Scan via DeBank</option>
-                <option value="blockscan">Scan via Blockscan</option>
-              </select>
               <button
                 type="button"
                 className="btn-primary shrink-0"
@@ -943,16 +922,6 @@ function AddAssetForm({
                 {scanningWallet ? "Scanning…" : "Scan wallet"}
               </button>
             </div>
-
-            {walletSource === "blockscan" && (
-              <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
-                Blockscan is Etherscan&apos;s multichain explorer. Its API (Etherscan V2) reads{" "}
-                {BLOCKSCAN_CHAINS.length} chains with one key, paced at 2 calls a second, so a
-                whole-wallet sweep takes about ten seconds. It needs{" "}
-                <code className="rounded bg-slate-100 px-1">ETHERSCAN_API_KEY</code>; without one the
-                scan still reads the chains directly and says so.
-              </p>
-            )}
 
             <div className="mt-2 flex flex-col gap-2 rounded-xl border border-indigo-100 bg-white/70 p-2 sm:flex-row sm:items-center">
               <label className="flex shrink-0 items-center gap-2 text-xs font-medium text-slate-600">
@@ -1055,12 +1024,13 @@ function AddAssetForm({
                   Avalanche, plus Blockscout then Routescan for every other ERC-20 the wallet holds.
                 </li>
                 <li>
-                  <strong className="font-medium text-slate-600">Blockscan</strong> — pick it in the
-                  scan-source menu to ask Etherscan V2 (the API behind blockscan.com) instead: one
-                  key, {BLOCKSCAN_CHAINS.length} chains, prices included, merged with the direct
-                  read. It is paced at 2 calls a second and needs{" "}
-                  <code className="rounded bg-slate-100 px-1">ETHERSCAN_API_KEY</code>; a free key
-                  reads native balances, token holdings need a paid plan.
+                  <strong className="font-medium text-slate-600">Blockscan</strong> — when DeBank
+                  cannot answer, Etherscan V2 (the API behind blockscan.com) takes the same scan:
+                  one key, {BLOCKSCAN_CHAINS.length} chains, prices included, merged with the direct
+                  read. Nothing to choose — it is used automatically when{" "}
+                  <code className="rounded bg-slate-100 px-1">ETHERSCAN_API_KEY</code> is set, paced
+                  at 2 calls a second; a free key reads native balances, token holdings need a paid
+                  plan.
                 </li>
                 <li>
                   <strong className="font-medium text-slate-600">Solana</strong> — public RPC token
