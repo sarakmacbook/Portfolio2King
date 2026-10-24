@@ -39,6 +39,7 @@ import { shortWalletAddress } from "@/lib/wallet-chains";
 import { isDust, normaliseDustThreshold } from "@/lib/wallet-dust";
 import { isSpamToken } from "@/lib/wallet-spam";
 import { contractStatusOf } from "@/lib/token-trust";
+import { verificationOf } from "@/lib/wallet-trust";
 import { eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -471,6 +472,14 @@ export async function importWalletBalances(input: {
    * dialog uses is re-applied here. Unknown depth is never a reason to skip.
    */
   minLiquidityUsd?: number;
+  /**
+   * Skip tokens the scan judged not real (no verification, no deep market).
+   * Recomputed here from the same rules, so a stale page cannot import junk the
+   * picker would have hidden. An unverifiable token is kept, never skipped.
+   */
+  skipUnverified?: boolean;
+  /** The indexer's verification verdict, when it sent one. */
+  verified?: boolean;
   balances: Array<{
     symbol: string;
     name: string;
@@ -487,6 +496,10 @@ export async function importWalletBalances(input: {
     organicVolumeUsd?: number;
     /** Pooled liquidity measured by the scan, when it had an answer. */
     liquidityUsd?: number;
+    /** Liquidity of the token's deepest single pool, when measured. */
+    deepestPoolUsd?: number;
+    /** The index's own verification verdict, when it sent one. */
+    verified?: boolean;
   }>;
 }): Promise<{
   ok: boolean;
@@ -506,6 +519,8 @@ export async function importWalletBalances(input: {
   skippedThin?: number;
   /** How many were skipped for having too little pooled liquidity. */
   skippedShallow?: number;
+  /** How many were skipped for not being verifiable as a real token. */
+  skippedUnverified?: number;
 }> {
   try {
     await ensureSchema();
@@ -528,6 +543,7 @@ export async function importWalletBalances(input: {
     let skippedImpostor = 0;
     let skippedThin = 0;
     let skippedShallow = 0;
+    let skippedUnverified = 0;
     const minVolume =
       Number(input.minOrganicVolumeUsd) > 0 ? Number(input.minOrganicVolumeUsd) : 0;
     const minLiquidity = Number(input.minLiquidityUsd) > 0 ? Number(input.minLiquidityUsd) : 0;
@@ -567,6 +583,31 @@ export async function importWalletBalances(input: {
       if (input.skipSpam !== false && isSpamToken({ name, symbol, spam: item.spam === true })) {
         skippedSpam += 1;
         continue;
+      }
+      /**
+       * Verification: the picker hides tokens it positively judged not real, so
+       * "Import selected" must not book them either. Recomputed from the same
+       * rules — official contract, indexer verdict, or a deep market. An
+       * `unknown` verdict (no answer) is never a reason to skip.
+       */
+      if (input.skipUnverified !== false) {
+        const verdict = verificationOf({
+          symbol,
+          name,
+          contract: item.contract,
+          chain,
+          spam: item.spam === true,
+          verified: item.verified === true,
+          organicVolumeUsd: Number.isFinite(organic) ? organic : undefined,
+          liquidityUsd: Number.isFinite(liquidity) ? liquidity : undefined,
+          deepestPoolUsd: Number.isFinite(Number(item.deepestPoolUsd))
+            ? Number(item.deepestPoolUsd)
+            : undefined,
+        });
+        if (verdict === "unverified") {
+          skippedUnverified += 1;
+          continue;
+        }
       }
       // Dust: measured on value, not quantity — a million near-worthless tokens
       // are dust just like a fraction of a cent.

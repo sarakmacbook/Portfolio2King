@@ -18,6 +18,8 @@ export type DiscoveredToken = {
   quantity: number;
   /** USD-pegged ticker, filed as a stablecoin rather than volatile. */
   stablecoin: boolean;
+  /** The explorer verified this contract (Blockscout/Routescan reputation). */
+  verified?: boolean;
 };
 
 export type RawDiscoveredToken = {
@@ -28,6 +30,8 @@ export type RawDiscoveredToken = {
   quantity: number;
   /** Explorer's own spam/reputation flag — dropped when true. */
   spam?: boolean;
+  /** Explorer's own "verified contract" verdict. */
+  verified?: boolean;
 };
 
 /** The most tokens one chain will report (spam airdrops can be endless). */
@@ -100,6 +104,7 @@ export function normaliseDiscoveredTokens(
       decimals: Math.max(0, Math.min(36, Math.round(item.decimals) || 18)),
       quantity: Number(item.quantity.toFixed(8)),
       stablecoin: isStablecoinSymbol(symbol),
+      ...(item.verified === true ? { verified: true } : {}),
     });
     if (tokens.length >= maxItems) break;
   }

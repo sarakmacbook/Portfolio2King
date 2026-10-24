@@ -27,6 +27,19 @@ import {
 } from "@/lib/organic-volume";
 import { contractStatusOf, normaliseEvmContract, type ContractStatus } from "@/lib/token-trust";
 
+/**
+ * Where a token stands on being *real*, as opposed to merely present.
+ *
+ *   verified   — an issuer/indexer says so, or it trades in a deep market
+ *   unverified — positive evidence of junk: a spam verdict, or a market known
+ *                to be too thin to back the price it shows
+ *   unknown    — nothing could be checked (no explorer, no market answer)
+ *
+ * The distinction matters: a scan must never hide a real holding because a third
+ * party was down, so only `unverified` is ever hidden by default.
+ */
+export type Verification = "verified" | "unverified" | "unknown";
+
 export type TrustSignals = {
   /** Official-contract match; `unknown` when the token is not in the table. */
   contractStatus?: ContractStatus;
@@ -42,6 +55,10 @@ export type TrustSignals = {
   marketPairs?: number;
   /** A pool traded an implausible multiple of its own liquidity. */
   washSuspected?: boolean;
+  /** The scan's own verdict (see `Verification`). */
+  verification?: Verification;
+  /** Why it was verified — "official contract", "indexer", "deep market". */
+  verifiedBy?: string[];
 };
 
 type TrustableBalance = {
@@ -49,7 +66,72 @@ type TrustableBalance = {
   name?: string | null;
   contract?: string | null;
   chain?: string | null;
+  /** The indexer's spam verdict (DeBank `is_scam`, Moralis `possible_spam`, …). */
+  spam?: boolean | null;
+  /** The indexer's verification (DeBank `is_verified`, Moralis `verified_contract`, …). */
+  verified?: boolean | null;
 };
+
+/**
+ * Liquidity a token needs before its market counts as proof it is real.
+ *
+ * `MIN_LIQUIDITY_USD` ($2k) is the floor for "this has *a* market"; verification
+ * asks for real money, because a spam token only needs a few hundred dollars of
+ * pooled liquidity to show a price. Pooled depth is the part of a fake token that
+ * costs actual money, so this is deliberately the strict half of the test.
+ */
+export const VERIFIED_LIQUIDITY_USD = 25_000;
+/** And one pool, not twenty dust pools. */
+export const VERIFIED_DEEPEST_POOL_USD = 5_000;
+
+/**
+ * The verification verdict for one balance, from what the scan already knows.
+ *
+ * Verified by any of: the official-contract table, the indexer's own verdict, or
+ * a deep market with real organic volume. Unverified only on positive evidence —
+ * a spam flag, or market numbers that show the price is not backed by anything.
+ */
+export function verificationOf(
+  balance: TrustableBalance & TrustSignals,
+  options: { minOrganicVolumeUsd?: number } = {},
+): Verification {
+  if (balance.spam === true) return "unverified";
+
+  const status = balance.contractStatus ?? contractStatusOf(balance);
+  if (status === "official") return "verified";
+  if (balance.verified === true) return "verified";
+
+  const volume = balance.organicVolumeUsd;
+  const liquidity = balance.liquidityUsd;
+  // No market answer at all (or a chain DexScreener does not index): unknown.
+  if (volume === undefined && liquidity === undefined) return "unknown";
+
+  const minVolume =
+    Number.isFinite(options.minOrganicVolumeUsd) && (options.minOrganicVolumeUsd as number) > 0
+      ? (options.minOrganicVolumeUsd as number)
+      : MIN_ORGANIC_VOLUME_USD;
+  const deep =
+    (liquidity ?? 0) >= VERIFIED_LIQUIDITY_USD &&
+    (balance.deepestPoolUsd ?? 0) >= VERIFIED_DEEPEST_POOL_USD &&
+    (volume ?? 0) >= minVolume;
+  return deep ? "verified" : "unverified";
+}
+
+/** Short label for the UI, e.g. `official ✓` already exists — this names the source. */
+export function verifiedByOf(balance: TrustableBalance & TrustSignals): string[] {
+  const reasons: string[] = [];
+  const status = balance.contractStatus ?? contractStatusOf(balance);
+  if (status === "official") reasons.push("official contract");
+  if (balance.verified === true) reasons.push("indexer");
+  if (
+    reasons.length === 0 &&
+    (balance.liquidityUsd ?? 0) >= VERIFIED_LIQUIDITY_USD &&
+    (balance.deepestPoolUsd ?? 0) >= VERIFIED_DEEPEST_POOL_USD
+  ) {
+    reasons.push("deep market");
+  }
+  return reasons;
+}
 
 /**
  * Adds contract status to every balance and market signals to the EVM ones.
@@ -66,16 +148,20 @@ export async function enrichTokenTrust<T extends TrustableBalance>(
     contractStatus: contractStatusOf(balance),
   }));
 
+  /** Every balance leaves with a verdict, even when no lookup was possible. */
+  const withVerdict = <T extends TrustableBalance>(rows: readonly T[]) =>
+    rows.map((row) => ({ ...row, verification: verificationOf(row) }));
+
   const contracts = withStatus
     .map((balance) => normaliseEvmContract(balance.contract))
     .filter((contract): contract is string => Boolean(contract));
-  if (contracts.length === 0) return withStatus;
+  if (contracts.length === 0) return withVerdict(withStatus);
 
   let signals: Awaited<ReturnType<typeof fetchMarketSignals>>;
   try {
     signals = await fetchMarketSignals(contracts, fetchImpl);
   } catch {
-    return withStatus;
+    return withVerdict(withStatus);
   }
 
   /**
@@ -104,9 +190,12 @@ export async function enrichTokenTrust<T extends TrustableBalance>(
   return withStatus.map((balance) => {
     const contract = normaliseEvmContract(balance.contract);
     const market = contract ? signals.get(contract) : undefined;
-    if (!market) return balance;
-    if (blindChains.has(String(balance.chain ?? ""))) return balance;
-    return {
+    // A chain with no pairs anywhere is not indexed by DexScreener: its tokens
+    // stay unknown rather than "no market".
+    if (!market || blindChains.has(String(balance.chain ?? ""))) {
+      return { ...balance, verification: verificationOf(balance) };
+    }
+    const enriched = {
       ...balance,
       organicVolumeUsd: market.organicVolume24hUsd,
       liquidityUsd: market.liquidityUsd,
@@ -114,6 +203,11 @@ export async function enrichTokenTrust<T extends TrustableBalance>(
       deepLiquidity: market.deepLiquidity,
       marketPairs: market.pairs,
       washSuspected: market.washSuspected,
+    };
+    return {
+      ...enriched,
+      verification: verificationOf(enriched),
+      ...(verificationOf(enriched) === "verified" ? { verifiedBy: verifiedByOf(enriched) } : {}),
     };
   });
 }
@@ -137,6 +231,12 @@ export type ScannableBalance = TrustableBalance &
 export type ScanFilters = {
   /** Hide tokens that look like airdrop spam (on by default). */
   hideSpam?: boolean;
+  /**
+   * Hide tokens the scan *positively* judged not real — a spam verdict, or a
+   * market too shallow to back the price shown (on by default). `unknown` is
+   * always kept, so a missing answer never hides a real holding.
+   */
+  requireVerified?: boolean;
   /** Hide balances worth less than this many dollars (0 = show everything). */
   dustCut?: number;
   /** Hide tokens whose contract is not the official one for their symbol. */
@@ -166,7 +266,17 @@ export type ScanSelection<T> = {
   thin: T[];
   /** Worth less than the dust cut-off. */
   dust: T[];
-  counts: { total: number; kept: number; impostor: number; spam: number; thin: number; dust: number };
+  /** Not verified: no issuer, no indexer verdict, and no deep market behind it. */
+  unverified: T[];
+  counts: {
+    total: number;
+    kept: number;
+    impostor: number;
+    spam: number;
+    thin: number;
+    dust: number;
+    unverified: number;
+  };
   /** Combined USD value of the dust bucket. */
   dustValue: number;
   /** Combined USD value of everything that will be imported. */
@@ -195,6 +305,7 @@ export function filterScanBalances<T extends ScannableBalance>(
   const hideSpam = filters.hideSpam !== false;
   const hideImpostor = filters.hideImpostor !== false;
   const requireMarket = filters.requireMarket !== false;
+  const requireVerified = filters.requireVerified !== false;
   const dustCut = Number.isFinite(filters.dustCut) && (filters.dustCut as number) > 0 ? (filters.dustCut as number) : 0;
   const minVolume =
     Number.isFinite(filters.minOrganicVolumeUsd) && (filters.minOrganicVolumeUsd as number) > 0
@@ -210,6 +321,7 @@ export function filterScanBalances<T extends ScannableBalance>(
   const spam: T[] = [];
   const thin: T[] = [];
   const dust: T[] = [];
+  const unverified: T[] = [];
 
   for (const balance of balances) {
     // The scan already answered this; recomputing keeps a hand-built balance
@@ -221,6 +333,15 @@ export function filterScanBalances<T extends ScannableBalance>(
     }
     if (hideSpam && isSpamToken(balance)) {
       spam.push(balance);
+      continue;
+    }
+    /**
+     * The scan's own verdict: the token was judged not real (a spam flag, or a
+     * market that cannot back its price). Only `unverified` is hidden — a token
+     * with no answer stays, because a rate-limited lookup is not evidence.
+     */
+    if (requireVerified && balance.verification === "unverified") {
+      unverified.push(balance);
       continue;
     }
     if (requireMarket) {
@@ -249,6 +370,7 @@ export function filterScanBalances<T extends ScannableBalance>(
     spam,
     thin,
     dust,
+    unverified,
     counts: {
       total: balances.length,
       kept: kept.length,
@@ -256,6 +378,7 @@ export function filterScanBalances<T extends ScannableBalance>(
       spam: spam.length,
       thin: thin.length,
       dust: dust.length,
+      unverified: unverified.length,
     },
     dustValue: sum(dust),
     keptValue: sum(kept),

@@ -134,6 +134,8 @@ export type DebankBalance = {
   category: CryptoCategory;
   contract: string | null;
   logoUrl: string;
+  /** DeBank's own "this is the token it says it is" verdict (`is_verified`). */
+  verified?: boolean;
   /**
    * DeBank's own "this is a scam" verdict (`is_scam`). The name of a scam token
    * is often spelled perfectly ("USDC"), so this flag is the only thing that can
@@ -373,6 +375,8 @@ export function parseDebankTokens(
       contract,
       logoUrl: readString(item.logo_url) || readString(item.logoUrl),
       ...(item.is_scam === true ? { spam: true } : {}),
+      // DeBank's own "this is the token it says it is" verdict.
+      ...(item.is_verified === true || item.is_core === true ? { verified: true } : {}),
     });
   }
 

@@ -159,6 +159,7 @@ export function parseRoutescanTokenBalances(payload: unknown): DiscoveredToken[]
       decimals,
       quantity: divisor > 0 ? readTokenNumber(rawBalance) / divisor : rawTokenQuantity(rawBalance, decimals),
       spam: item.reputation === "spam" || item.is_spam === true || item.isSpam === true,
+      verified: item.reputation === "verified" || item.reputation === "ok",
     });
   }
 
