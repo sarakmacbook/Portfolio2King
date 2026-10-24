@@ -1,5 +1,6 @@
 import type { CryptoCategory } from "@/db/schema";
 import { fetchDebankBalances, type DebankBalance } from "@/lib/debank";
+import { blockscanApiKey, fetchBlockscanBalances } from "@/lib/blockscan";
 import { fetchBlockscoutTokens } from "@/lib/blockscout";
 import { type DiscoveredToken } from "@/lib/discovered-tokens";
 import { fetchRoutescanTokens } from "@/lib/routescan";
@@ -84,10 +85,12 @@ export type WalletScanResult = {
   balances: ScannedWalletBalance[];
   /**
    * Where the balances came from: DeBank (one call, all EVM chains, prices
-   * included) or a direct read of the public RPCs / explorers. The dialog shows
-   * this so it is obvious when DeBank was unavailable.
+   * included), Blockscan / Etherscan V2 (chosen in the dialog, one keyed sweep
+   * across the chains Etherscan indexes) or a direct read of the public RPCs and
+   * explorers. The dialog shows this so it is obvious where the numbers came
+   * from.
    */
-  source: "debank" | "onchain";
+  source: "debank" | "onchain" | "blockscan";
   /** Why DeBank was not used, when it was tried and failed. */
   sourceNote?: string;
   /**
@@ -102,6 +105,16 @@ export type WalletScanResult = {
    * a non-zero count here means DeBank would have missed them.
    */
   directAdditions?: number;
+  /**
+   * Blockscan was the chosen source but no `ETHERSCAN_API_KEY` is configured, so
+   * only the direct on-chain read contributed. The dialog turns this into an
+   * actionable hint (get a key) instead of an empty wallet.
+   */
+  blockscanNeedsKey?: boolean;
+  /** How many chains the Blockscan sweep ran out of time before asking. */
+  blockscanSkippedChains?: number;
+  /** Blockscan answered, but token holdings are a paid-plan endpoint. */
+  blockscanProOnly?: boolean;
 };
 
 const REQUEST_TIMEOUT_MS = 7000;
@@ -738,10 +751,43 @@ async function resolveSymbolPriceUsd(symbol: string): Promise<number> {
   return FALLBACK_PRICES_USD[upper] ?? FALLBACK_PRICES_USD[lookupSymbol] ?? 0;
 }
 
+/**
+ * Which index is asked for the token list.
+ *
+ * `auto` is the default and unchanged behaviour: DeBank plus the direct read.
+ * `blockscan` asks Etherscan V2 — the API behind blockscan.com — instead, and
+ * still merges in the direct read so a keyed rate limit or a paid-plan endpoint
+ * can never leave the scan with nothing.
+ */
+/**
+ * The index's balances first (it has live prices), then whatever only the direct
+ * read saw — added, priced from the market APIs, and sorted together.
+ */
+async function mergeWithDirect(
+  primary: readonly DebankBalance[],
+  directRaw: ReadonlyArray<Omit<ScannedWalletBalance, "price" | "valueUsd">>,
+): Promise<{ balances: ScannedWalletBalance[]; extra: number }> {
+  const known = new Set(
+    primary.map((balance) => balanceKey(balance.chain, balance.contract, balance.symbol)),
+  );
+  const extra = directRaw.filter(
+    (item) => !known.has(balanceKey(item.chain, item.contract, item.symbol)),
+  );
+  const priced = await priceBalances(extra, primary);
+  const balances = [...primary.map(fromDebank), ...priced].sort(
+    (a, b) => b.valueUsd - a.valueUsd || b.quantity - a.quantity,
+  );
+  return { balances, extra: extra.length };
+}
+
+export type WalletScanSource = "auto" | "blockscan";
+
 export async function scanWalletAddress(
   rawAddress: string,
   chainFilter: string = "auto",
+  options: { source?: WalletScanSource } = {},
 ): Promise<WalletScanResult> {
+  const source: WalletScanSource = options.source === "blockscan" ? "blockscan" : "auto";
   const requestedChain = normaliseWalletChain(chainFilter);
   const address = rawAddress.trim();
   const addressKind = detectWalletAddressKind(address);
@@ -766,16 +812,26 @@ export async function scanWalletAddress(
         ? []
         : EXPLORER_CHAINS;
 
+  if (source === "blockscan" && !isEvm) {
+    throw new Error(
+      "Blockscan only indexes EVM addresses — scan Solana, Bitcoin and Tron with the default scan.",
+    );
+  }
+
   /**
-   * DeBank and the direct read run **together**, and their results are merged.
+   * The index and the direct read run **together**, and their results are
+   * merged.
    *
-   * Running only one of them is what used to lose tokens: DeBank answers
-   * quickly with prices but only covers the chains it indexes and filters, and
-   * the direct read sees every ERC-20 on a chain but knows fewer chains. Both
-   * run in parallel so a scan takes as long as the slower one, not both.
+   * Running only one of them is what used to lose tokens: the index answers
+   * quickly with prices but only covers the chains it knows and filters, and the
+   * direct read sees every ERC-20 on a chain but knows fewer chains. Both run in
+   * parallel so a scan takes as long as the slower one, not both.
    */
-  const [debank, directRaw] = await Promise.all([
-    isEvm ? fetchDebankBalances(address, requestedChain) : Promise.resolve(null),
+  const [debank, blockscan, directRaw] = await Promise.all([
+    isEvm && source === "auto" ? fetchDebankBalances(address, requestedChain) : Promise.resolve(null),
+    isEvm && source === "blockscan"
+      ? fetchBlockscanBalances(address, { chainFilter: requestedChain })
+      : Promise.resolve(null),
     isEvm
       ? Promise.all([
           ...chainsToScan.map((spec) => scanOneEvmChain(spec, address)),
@@ -790,6 +846,30 @@ export async function scanWalletAddress(
             : Promise.resolve([]),
   ]);
 
+  /**
+   * Blockscan is the source the user picked, so its answer is the spine of the
+   * result — but the direct read is merged in rather than replaced, because
+   * Etherscan can refuse a whole sweep (no key, a free key on a PRO endpoint,
+   * rate limit) and "nothing found" must never be the answer to that.
+   */
+  if (blockscan) {
+    const { balances, extra } = await mergeWithDirect(blockscan.balances, directRaw);
+    return {
+      address,
+      addressKind,
+      chain: requestedChain,
+      balances,
+      source: "blockscan",
+      ...(blockscan.error ? { sourceNote: blockscan.error } : {}),
+      ...(blockscan.needsKey ? { blockscanNeedsKey: true } : {}),
+      ...(blockscan.proOnly ? { blockscanProOnly: true } : {}),
+      ...(blockscan.skippedChains.length > 0
+        ? { blockscanSkippedChains: blockscan.skippedChains.length }
+        : {}),
+      ...(extra > 0 ? { directAdditions: extra } : {}),
+    };
+  }
+
   const debankBalances: DebankBalance[] =
     debank?.ok && debank.balances.length > 0 ? debank.balances : [];
   const sourceNote = debank && debankBalances.length === 0 ? (debank.error ?? undefined) : undefined;
@@ -799,22 +879,40 @@ export async function scanWalletAddress(
     // DeBank's numbers win for the tokens it knows (it has live prices), and
     // everything it missed — other chains, filtered or unlisted tokens — is
     // added from the direct read and priced here.
-    const known = new Set(debankBalances.map((balance) => balanceKey(balance.chain, balance.contract, balance.symbol)));
-    const extra = directRaw.filter(
-      (item) => !known.has(balanceKey(item.chain, item.contract, item.symbol)),
-    );
-    const priced = await priceBalances(extra, debankBalances);
-    const merged = [...debankBalances.map(fromDebank), ...priced].sort(
-      (a, b) => b.valueUsd - a.valueUsd || b.quantity - a.quantity,
-    );
+    const { balances, extra } = await mergeWithDirect(debankBalances, directRaw);
     return {
       address,
       addressKind,
       chain: requestedChain,
-      balances: merged,
+      balances,
       source: "debank",
-      ...(extra.length > 0 ? { directAdditions: extra.length } : {}),
+      ...(extra > 0 ? { directAdditions: extra } : {}),
     };
+  }
+
+  /**
+   * DeBank could not answer at all (its keyless routes are blocked) — if an
+   * Etherscan key is configured, Blockscan takes over for this scan rather than
+   * leaving the user with the much smaller direct read. Only for the default
+   * source: a Blockscan scan has already been tried above.
+   */
+  if (source === "auto" && blockscanApiKey() !== "" && debankBalances.length === 0) {
+    const fallback = await fetchBlockscanBalances(address, { chainFilter: requestedChain });
+    if (fallback.ok && fallback.balances.length > 0) {
+      const { balances, extra } = await mergeWithDirect(fallback.balances, directRaw);
+      return {
+        address,
+        addressKind,
+        chain: requestedChain,
+        balances,
+        source: "blockscan",
+        sourceNote: "DeBank had no answer, so this scan used Blockscan (Etherscan) instead.",
+        ...(fallback.skippedChains.length > 0
+          ? { blockscanSkippedChains: fallback.skippedChains.length }
+          : {}),
+        ...(extra > 0 ? { directAdditions: extra } : {}),
+      };
+    }
   }
 
   const balances = await priceBalances(directRaw);
@@ -849,8 +947,12 @@ async function priceBalances(
   rawBalances: Array<Omit<ScannedWalletBalance, "price" | "valueUsd">>,
   priced: readonly DebankBalance[] = [],
 ): Promise<ScannedWalletBalance[]> {
+  // Only a real price is reused: a zero from an index that could not price the
+  // token must not stop the market lookup from trying.
   const alreadyPriced = new Map(
-    priced.map((balance) => [balance.symbol.toUpperCase(), balance.price]),
+    priced
+      .filter((balance) => Number.isFinite(balance.price) && balance.price > 0)
+      .map((balance) => [balance.symbol.toUpperCase(), balance.price]),
   );
   const needed = [
     ...new Set(

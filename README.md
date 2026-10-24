@@ -220,6 +220,28 @@ that talks to the network about a wallet.
 | Bitcoin | `mempool.space`, falling back to `blockstream.info`. |
 | Tron | `apilist.tronscanapi.com/api/accountv2`. |
 
+**Blockscan** is the second source you can pick in the dialog (*Scan via
+Blockscan*, next to the chain menu). Blockscan is Etherscan's multichain explorer,
+and its data comes from **Etherscan V2** (`https://api.etherscan.io/v2/api`) —
+one key for 60+ chains, with `chainid` choosing the network. The scan asks
+`module=account&action=addresstokenbalance` per chain (token balances *and*
+`TokenPriceUSD`) and merges the answer with the direct read above, so a refusal
+never turns into an empty wallet:
+
+- **Needs a key.** `ETHERSCAN_API_KEY` (or `BLOCKSCAN_API_KEY`). Without one the
+  sweep is skipped, the scan falls back to the direct read, and the dialog says so
+  and names the fix.
+- **Token holdings are a PRO endpoint.** A free key reads native balances only;
+  Etherscan answers *"not available on your plan"*, which the dialog reports as
+  such instead of *no tokens found*.
+- **2 calls a second.** `src/lib/blockscan.ts` walks the 14 chains this app also
+  prices, one token call per chain, 550 ms apart, inside a 12 s budget; chains the
+  budget did not reach are counted in the note. A single-chain scan (pick the
+  chain in the menu) also reads that chain's native coin.
+- **Automatic fallback.** In a default scan, if DeBank cannot answer and an
+  Etherscan key is configured, the same sweep runs instead of settling for the
+  smaller direct read — the result then says `via Blockscan` and why.
+
 Only chains with a public Blockscout or Routescan instance can be *discovered*
 beyond the hand-listed tickers — today that is 14 Blockscout chains (Ethereum,
 Base, Optimism, Arbitrum, Polygon, Gnosis, zkSync, Scroll, Linea, Mantle, Zora,
@@ -238,10 +260,11 @@ The two reads run together, so a scan takes as long as the slower one:
    (7 s Blockscout / 8 s Routescan, two pages of 100, at most 150 tokens per
    chain, spam-flagged tokens dropped).
 3. **Merge** — the same token found twice is one row (chain + contract), and
-   DeBank's live price wins over a locally looked-up one. Tokens only the direct
+   the index's live price (DeBank's, or Blockscan's `TokenPriceUSD`) wins over a
+   locally looked-up one. Tokens only the direct
    read saw are priced from the market APIs, then from the built-in fallback
-   table. The result says `via DeBank` or `read directly from the chains`, and
-   `directAdditions` counts what DeBank would have missed.
+   table. The result says `via DeBank`, `via Blockscan` or `read directly from
+   the chains`, and `directAdditions` counts what the index would have missed.
 4. **Trust pass** (`/api/wallet/scan` → `wallet-trust`) — official contract
    address, organic 24 h volume and liquidity depth per contract, from the local
    table and one batched DexScreener call (30 contracts each). Failures leave a

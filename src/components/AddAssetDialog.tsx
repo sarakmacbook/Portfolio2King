@@ -14,6 +14,7 @@ import { TYPE_META, money, qty } from "@/lib/format";
 import { playMoneyChimeFromGesture } from "@/lib/sounds";
 import { DEFAULT_DUST_THRESHOLD_USD, normaliseDustThreshold } from "@/lib/wallet-dust";
 import { MIN_LIQUIDITY_USD, MIN_ORGANIC_VOLUME_USD, shortUsd } from "@/lib/organic-volume";
+import { BLOCKSCAN_CHAINS } from "@/lib/blockscan";
 import { depthOf, filterScanBalances } from "@/lib/wallet-trust";
 import { CAMBODIAN_BANKS, CUSTOM_BANK, type CambodianBank } from "@/lib/cambodian-banks";
 import type { DiscoveredStock } from "@/lib/stock-search";
@@ -138,7 +139,16 @@ function AddAssetForm({
   const [scanningWallet, setScanningWallet] = useState(false);
   const [walletScanError, setWalletScanError] = useState("");
   const [walletScanDone, setWalletScanDone] = useState(false);
-  const [walletScanSource, setWalletScanSource] = useState<"debank" | "onchain" | null>(null);
+  const [walletScanSource, setWalletScanSource] = useState<
+    "debank" | "onchain" | "blockscan" | null
+  >(null);
+  /**
+   * Which index answers the scan: DeBank (the default, every chain it indexes) or
+   * Blockscan / Etherscan V2. Kept as a choice rather than always asking both —
+   * Etherscan's sweep is paced at 2 calls a second, and most scans do not need a
+   * second opinion.
+   */
+  const [walletSource, setWalletSource] = useState<"auto" | "blockscan">("auto");
   const [walletScanNote, setWalletScanNote] = useState("");
   const [importingWallet, setImportingWallet] = useState(false);
   /** Import the wallet's tokens into a folder, named by the user or by the address. */
@@ -325,14 +335,21 @@ function AddAssetForm({
     setWalletImportMessage("");
     setWalletScanDone(false);
     try {
-      const params = new URLSearchParams({ address: trimmed, chain: walletChain });
+      const params = new URLSearchParams({
+        address: trimmed,
+        chain: walletChain,
+        source: walletSource,
+      });
       const response = await fetch(`/api/wallet/scan?${params.toString()}`);
       const data = (await response.json()) as {
         error?: string;
         balances?: ScannedWalletBalance[];
-        source?: "debank" | "onchain";
+        source?: "debank" | "blockscan" | "onchain";
         sourceNote?: string;
         debankNeedsKey?: boolean;
+        blockscanNeedsKey?: boolean;
+        blockscanProOnly?: boolean;
+        blockscanSkippedChains?: number;
       };
       if (!response.ok) {
         throw new Error(data.error || "Could not scan that wallet address.");
@@ -349,16 +366,36 @@ function AddAssetForm({
       // a smaller scan, not an error — and when the cause is a missing key, the
       // note says so once and names the fix.
       setWalletScanNote(
-        data.source !== "onchain"
-          ? ""
-          : data.debankNeedsKey
-            ? "Read directly from the chains — DeBank only lists tokens with an access key, so this scan sees fewer of them. Add a free DEBANK_ACCESS_KEY to cover every chain DeBank indexes."
-            : data.sourceNote
-              ? `Read directly from the chains — ${data.sourceNote}`
-              : "",
+        data.source === "blockscan"
+          ? [
+              data.blockscanNeedsKey
+                ? "Blockscan needs an ETHERSCAN_API_KEY — this scan fell back to reading the chains directly, so it sees fewer tokens. Get a key at etherscan.io (the balance endpoint is free, token holdings need a paid plan)."
+                : data.blockscanProOnly
+                  ? "Blockscan answered, but token holdings need a paid Etherscan plan on that key — the tokens below came from the chains directly."
+                  : data.sourceNote
+                    ? data.sourceNote
+                    : "",
+              data.blockscanSkippedChains
+                ? `${data.blockscanSkippedChains} chain${data.blockscanSkippedChains === 1 ? "" : "s"} were not reached before the time limit (Etherscan allows 2 calls a second) — scan again with a single chain to cover them.`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" ")
+          : data.source !== "onchain"
+            ? ""
+            : data.debankNeedsKey
+              ? "Read directly from the chains — DeBank only lists tokens with an access key, so this scan sees fewer of them. Add a free DEBANK_ACCESS_KEY to cover every chain DeBank indexes."
+              : data.sourceNote
+                ? `Read directly from the chains — ${data.sourceNote}`
+                : "",
       );
       if (list.length === 0) {
-        setWalletScanError("No non-zero balances found on that wallet address.");
+        // Never say "empty wallet" when the source itself refused.
+        setWalletScanError(
+          data.sourceNote && data.source === "blockscan"
+            ? data.sourceNote
+            : "No non-zero balances found on that wallet address.",
+        );
       } else if (list.length === 1) {
         chooseWalletBalance(list[0], trimmed);
       }
@@ -887,6 +924,16 @@ function AddAssetForm({
                   </option>
                 ))}
               </select>
+              <select
+                className="input sm:w-44"
+                value={walletSource}
+                onChange={(event) => setWalletSource(event.target.value === "blockscan" ? "blockscan" : "auto")}
+                aria-label="Where to scan for the tokens"
+                title="Which index is asked for the token list"
+              >
+                <option value="auto">Scan via DeBank</option>
+                <option value="blockscan">Scan via Blockscan</option>
+              </select>
               <button
                 type="button"
                 className="btn-primary shrink-0"
@@ -896,6 +943,16 @@ function AddAssetForm({
                 {scanningWallet ? "Scanning…" : "Scan wallet"}
               </button>
             </div>
+
+            {walletSource === "blockscan" && (
+              <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+                Blockscan is Etherscan&apos;s multichain explorer. Its API (Etherscan V2) reads{" "}
+                {BLOCKSCAN_CHAINS.length} chains with one key, paced at 2 calls a second, so a
+                whole-wallet sweep takes about ten seconds. It needs{" "}
+                <code className="rounded bg-slate-100 px-1">ETHERSCAN_API_KEY</code>; without one the
+                scan still reads the chains directly and says so.
+              </p>
+            )}
 
             <div className="mt-2 flex flex-col gap-2 rounded-xl border border-indigo-100 bg-white/70 p-2 sm:flex-row sm:items-center">
               <label className="flex shrink-0 items-center gap-2 text-xs font-medium text-slate-600">
@@ -998,6 +1055,14 @@ function AddAssetForm({
                   Avalanche, plus Blockscout then Routescan for every other ERC-20 the wallet holds.
                 </li>
                 <li>
+                  <strong className="font-medium text-slate-600">Blockscan</strong> — pick it in the
+                  scan-source menu to ask Etherscan V2 (the API behind blockscan.com) instead: one
+                  key, {BLOCKSCAN_CHAINS.length} chains, prices included, merged with the direct
+                  read. It is paced at 2 calls a second and needs{" "}
+                  <code className="rounded bg-slate-100 px-1">ETHERSCAN_API_KEY</code>; a free key
+                  reads native balances, token holdings need a paid plan.
+                </li>
+                <li>
                   <strong className="font-medium text-slate-600">Solana</strong> — public RPC token
                   accounts and known mints. <strong className="font-medium text-slate-600">Bitcoin</strong>{" "}
                   — mempool.space, then blockstream.info.{" "}
@@ -1036,7 +1101,11 @@ function AddAssetForm({
                 <p className="text-xs text-slate-500">
                   Found {walletBalances.length} balance{walletBalances.length === 1 ? "" : "s"}
                   {walletScanChainCount > 1 ? ` on ${walletScanChainCount} chains` : ""}
-                  {walletScanSource === "debank" ? " via DeBank" : ""}
+                  {walletScanSource === "debank"
+                    ? " via DeBank"
+                    : walletScanSource === "blockscan"
+                      ? " via Blockscan"
+                      : ""}
                   {walletSelection.counts.impostor > 0
                     ? ` · ${walletSelection.counts.impostor} look-alike hidden`
                     : ""}
