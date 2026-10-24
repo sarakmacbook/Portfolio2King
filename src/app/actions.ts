@@ -36,6 +36,7 @@ import {
 } from "@/lib/dashboard-order-db";
 import { folderForImport } from "@/lib/holdings-folders";
 import { shortWalletAddress } from "@/lib/wallet-chains";
+import { isDust, normaliseDustThreshold } from "@/lib/wallet-dust";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -419,6 +420,12 @@ export async function importWalletBalances(input: {
   priceSource?: string;
   /** Folder to file the holdings into; omit / empty for the short address, `null` for no folder. */
   folderName?: string | null;
+  /**
+   * Skip balances worth less than this many USD. `0` / omitted imports
+   * everything. Applied here as well as in the dialog so a stale page cannot
+   * slip dust into the portfolio.
+   */
+  minValueUsd?: number;
   balances: Array<{
     symbol: string;
     name: string;
@@ -436,6 +443,8 @@ export async function importWalletBalances(input: {
   folder?: { id: string; name: string };
   /** Set when a folder was asked for but could not be created. */
   folderNote?: string;
+  /** How many balances were skipped for being under `minValueUsd`. */
+  skippedDust?: number;
 }> {
   try {
     await ensureSchema();
@@ -451,6 +460,9 @@ export async function importWalletBalances(input: {
     const d = today();
     const shortAddr = shortWalletAddress(address) || address;
     const importedIds: number[] = [];
+    // Omitted means "no cut-off"; a number is clamped like the dialog's box.
+    const minValueUsd = Number(input.minValueUsd) > 0 ? normaliseDustThreshold(input.minValueUsd) : 0;
+    let skippedDust = 0;
 
     for (const item of items.slice(0, 50)) {
       const symbol = String(item.symbol ?? "").trim().toUpperCase();
@@ -458,6 +470,12 @@ export async function importWalletBalances(input: {
       const quantity = Number(item.quantity);
       const price = Number(item.price);
       if (!symbol || !Number.isFinite(quantity) || quantity <= 0) continue;
+      // Dust: measured on value, not quantity — a million near-worthless tokens
+      // are dust just like a fraction of a cent.
+      if (isDust({ valueUsd: quantity * (Number.isFinite(price) ? price : 0) }, minValueUsd)) {
+        skippedDust += 1;
+        continue;
+      }
       const safePrice = Number.isFinite(price) && price > 0 ? price : 1;
       const cryptoCategory: CryptoCategory =
         CRYPTO_CATEGORIES.includes(item.category) ? item.category : "volatile";
@@ -526,7 +544,13 @@ export async function importWalletBalances(input: {
 
     await recordSnapshot();
     refresh();
-    return { ok: true, importedCount, folder, folderNote };
+    return {
+      ok: true,
+      importedCount,
+      folder,
+      folderNote,
+      ...(skippedDust > 0 ? { skippedDust } : {}),
+    };
   } catch (e) {
     return {
       ok: false,

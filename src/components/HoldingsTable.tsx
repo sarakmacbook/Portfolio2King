@@ -42,6 +42,7 @@ import {
   type FolderFilter,
   type HoldingFolder,
 } from "@/lib/holdings-folders";
+import { DEFAULT_DUST_THRESHOLD_USD, normaliseDustThreshold, splitDust } from "@/lib/wallet-dust";
 import { PROVIDER_LABELS, type PriceProvider } from "@/lib/market-prices";
 import { saveHoldingFolderAssignment } from "@/app/actions";
 import CryptoLogo from "./CryptoLogo";
@@ -139,6 +140,12 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
   const [rowDragging, setRowDragging] = useState<number | null>(null);
   const [rowDrop, setRowDrop] = useState<{ id: number; after: boolean } | null>(null);
   const [folderFilter, setFolderFilter] = useState<FolderFilter>("all");
+  /**
+   * Hide holdings worth less than a dollar (dust). Off by default: a portfolio
+   * should never look like it is missing something the user added.
+   */
+  const [hideDust, setHideDust] = useState(false);
+  const [dustThreshold, setDustThreshold] = useState(String(DEFAULT_DUST_THRESHOLD_USD));
   /** Folder id of the group a holding is hovering over. */
   const [groupDrop, setGroupDrop] = useState<string | null>(null);
   const [filingError, setFilingError] = useState("");
@@ -439,10 +446,22 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
     return { counts, totals };
   }, [folders, assignments, rows]);
 
+  /**
+   * Dust: holdings worth less than the cut-off. Hidden only when asked for, and
+   * always reported (`dustSplit.dustCount`) so the table never silently loses a
+   * row. Arrange mode ignores the filter — hiding rows there would make them
+   * impossible to move.
+   */
+  const dustCut = hideDust && !arranging ? normaliseDustThreshold(dustThreshold) : 0;
+  const dustSplit = useMemo(() => splitDust(shown, dustCut), [shown, dustCut]);
+
   /** The rows the folder filter keeps (category tabs and search apply too). */
   const folderRows = useMemo(
-    () => shown.filter((row) => matchesFolderFilter(folderFilter, row.id, assignments, folderIds)),
-    [shown, folderFilter, assignments, folderIds],
+    () =>
+      dustSplit.kept.filter((row) =>
+        matchesFolderFilter(folderFilter, row.id, assignments, folderIds),
+      ),
+    [dustSplit, folderFilter, assignments, folderIds],
   );
 
   /**
@@ -899,6 +918,32 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
             aria-label="Search holdings"
           />
           {!arranging && (
+            <label
+              className="flex shrink-0 items-center gap-1.5 text-xs text-slate-500"
+              title="Hide holdings worth less than this (dust) from the table"
+            >
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5 accent-indigo-600"
+                checked={hideDust}
+                onChange={(event) => setHideDust(event.target.checked)}
+              />
+              <span className="shrink-0">Hide under</span>
+              <span className="text-slate-400">$</span>
+              <input
+                className="input w-16 py-1 text-xs disabled:opacity-50"
+                type="number"
+                min={0}
+                step="0.5"
+                inputMode="decimal"
+                value={dustThreshold}
+                onChange={(event) => setDustThreshold(event.target.value)}
+                disabled={!hideDust}
+                aria-label="Hide holdings worth less than this many dollars"
+              />
+            </label>
+          )}
+          {!arranging && (
             <label className="flex items-center gap-2 text-xs text-slate-500 md:hidden">
               <span className="shrink-0">Sort</span>
               <select
@@ -924,6 +969,20 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
       {filingError && (
         <p role="alert" className="mx-4 mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">
           {filingError}
+        </p>
+      )}
+
+      {dustSplit.dustCount > 0 && (
+        <p className="mx-4 mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          {dustSplit.dustCount} holding{dustSplit.dustCount === 1 ? "" : "s"} under{" "}
+          {money(dustCut)} hidden ({money(dustSplit.dustValue)}).{" "}
+          <button
+            type="button"
+            className="font-medium text-indigo-600 hover:underline"
+            onClick={() => setHideDust(false)}
+          >
+            Show them
+          </button>
         </p>
       )}
 
