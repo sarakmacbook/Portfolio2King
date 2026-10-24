@@ -147,21 +147,31 @@ kept, listed and imported; its display name is read from DeBank's own
 filters the result, and the filter understands both spellings — `ethereum` and
 DeBank's `eth` are the same chain.
 
-DeBank needs no key, but its keyless routes do get blocked, renamed and
-rate-limited, so three are tried in order before giving up: DeBank's API gateway
+DeBank's keyless routes get blocked, renamed and rate-limited, so three are tried
+in order before giving up: DeBank's API gateway
 (`api.debank.com/v1/user/token_list`), its legacy web route
 (`api.debank.com/token/balance_list?user_id=…`) and Rabby's public API
-(`api.rabby.io`), which reads the same indexer. Two things follow:
+(`api.rabby.io`), which reads the same indexer. If all three answer with an empty
+list, one more call asks for *every* token (`is_all=true`) before the app
+concludes the wallet really holds nothing.
+
+Two things follow:
 
 - Add a free **`DEBANK_ACCESS_KEY`** (from <https://cloud.debank.com>) to use the
   supported Open API and get the reliable path — one request, no fallbacks. See
-  `.env.example`.
-- Without a key — or when every DeBank route is down, blocked or rate-limited —
-  the same scan falls back to reading balances straight from public RPCs and
-  block explorers. The dialog says so quietly ("Read straight from the chains:
-  …") and everything still works; the fallback simply covers fewer tokens per
-  chain. A keyless 404 from one endpoint is not reported as a DeBank outage when
-  another endpoint answers.
+  `.env.example`. **This is now the expected setup**: DeBank increasingly refuses
+  the keyless routes, and then the app can only read the fifteen chains it knows
+  how to read by itself.
+- Without a key the scan still works, just smaller: it reads balances straight
+  from public RPCs and block explorers and the dialog says so quietly — *"Read
+  directly from the chains — … Add a free DEBANK_ACCESS_KEY to cover every chain
+  DeBank indexes."*
+
+A refusal is never reported as an empty wallet. DeBank answers `200 OK` with
+`{ "error_code": 1, "error_message": … }` when it wants a key or is rate-limiting,
+and that body is now read as a refusal (with DeBank's own wording in the note)
+instead of "DeBank returned no tokens for that wallet". Only an explicit empty
+list means the wallet is empty.
 
 Notes:
 

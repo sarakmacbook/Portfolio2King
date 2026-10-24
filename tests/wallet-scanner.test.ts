@@ -217,3 +217,41 @@ test("the wallet dialog offers every chain a scan found, not only the built-in o
   assert.ok(dialog.includes("canonicalChainId(item.chain)"), "chains are compared canonically");
   assert.ok(dialog.includes("walletScanChainCount"), "the result says how many chains were hit");
 });
+
+test("a DeBank refusal reaches the dialog as an explanatory note, not an error", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("debank.com") || url.includes("rabby.io")) {
+      return new Response(JSON.stringify({ error_code: 1, error_message: "AccessKey is required" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    // The direct read: nothing answered either.
+    return new Response("unavailable", { status: 503 });
+  }) as unknown as typeof fetch;
+
+  try {
+    const scan = await scanWalletAddress("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "auto");
+    assert.equal(scan.source, "onchain", "the scan still returns balances to the dialog");
+    assert.match(String(scan.sourceNote), /AccessKey is required/);
+    assert.equal(scan.debankNeedsKey, true, "the dialog is told to suggest DEBANK_ACCESS_KEY");
+
+    const response = await walletScanGET(
+      new Request("http://localhost/api/wallet/scan?address=0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045&chain=auto"),
+    );
+    const body = (await response.json()) as { debankNeedsKey?: boolean; sourceNote?: string };
+    assert.equal(body.debankNeedsKey, true, "the flag is part of the API response");
+    assert.match(String(body.sourceNote), /AccessKey is required/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("the wallet dialog presents the DeBank note as information, with the fix", () => {
+  const dialog = readFileSync(resolve(__dirname, "../src/components/AddAssetDialog.tsx"), "utf8");
+  assert.ok(dialog.includes("Read directly from the chains"), "the note says where the numbers came from");
+  assert.ok(dialog.includes("DEBANK_ACCESS_KEY"), "the note names the fix");
+  assert.ok(!dialog.includes('text-amber-700">{walletScanNote}'), "the note is not a warning banner");
+});

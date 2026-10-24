@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   DEBANK_CHAIN_IDS,
+  debankAllTokensRequest,
   debankChainListRequests,
+  debankErrorText,
   fetchDebankChainNames,
   parseDebankChainList,
+  readDebankAnswer,
   DEBANK_TOTAL_BUDGET_MS,
   MAX_DEBANK_TOKENS,
   debankChainIdFor,
@@ -243,7 +246,7 @@ test("a stale endpoint does not end the scan: the next route is tried", async ()
   assert.match(String(result.endpoint), /api\.rabby\.io/);
 });
 
-test("an empty answer is reported as such, not as a 404 from a stale route", async () => {
+test("an empty answer is reported as an empty wallet, not as a 404 from a stale route", async () => {
   let call = 0;
   const result = await fetchDebankBalances(
     "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
@@ -260,7 +263,95 @@ test("an empty answer is reported as such, not as a 404 from a stale route", asy
     }) as unknown as typeof fetch,
   );
   assert.equal(result.ok, false);
-  assert.equal(result.error, "DeBank returned no tokens for that wallet.");
+  assert.equal(result.error, "DeBank reports no tokens for that wallet on any chain it indexes.");
+  // Nothing was refused, so this is not a key problem.
+  assert.equal(result.needsAccessKey, false);
+});
+
+test("a refusal inside a 200 is never mistaken for an empty wallet", async () => {
+  // DeBank answers 200 OK with an error body when it wants an access key; the
+  // old code read that as "no tokens for that wallet".
+  const result = await fetchDebankBalances(
+    "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+    "auto",
+    (async () =>
+      new Response(
+        JSON.stringify({ error_code: 1, error_message: "AccessKey is required" }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )) as unknown as typeof fetch,
+  );
+  assert.equal(result.ok, false);
+  assert.match(String(result.error), /AccessKey is required/);
+  assert.doesNotMatch(String(result.error), /no tokens/i);
+  assert.equal(result.needsAccessKey, true);
+  assert.ok(result.attempts.length >= 3, "every route is recorded");
+  assert.ok(result.attempts.every((attempt) => attempt.status === 200));
+});
+
+test("readDebankAnswer separates tokens, an empty wallet, a refusal and junk", () => {
+  const tokenPayload = { error_code: 0, data: [token()] };
+  assert.equal(readDebankAnswer(tokenPayload).kind, "tokens");
+  assert.equal(readDebankAnswer([token()]).kind, "tokens");
+  assert.equal(readDebankAnswer({ data: [] }).kind, "empty");
+  assert.equal(readDebankAnswer([]).kind, "empty");
+  assert.equal(readDebankAnswer({ data: { tokens: [] } }).kind, "empty");
+
+  assert.deepEqual(readDebankAnswer({ error_code: 1, error_message: "rate limited" }), {
+    kind: "error",
+    message: "rate limited (code 1)",
+  });
+  assert.deepEqual(readDebankAnswer({ error: { code: 401, message: "bad key" } }), {
+    kind: "error",
+    message: "bad key (code 401)",
+  });
+  assert.equal(readDebankAnswer({ success: false }).kind, "error");
+  assert.equal(readDebankAnswer({ code: 403, msg: "forbidden" }).kind, "error");
+  // A 200 that is not JSON of any known shape (an HTML challenge, `{}`, …).
+  assert.equal(readDebankAnswer({}).kind, "unreadable");
+  assert.equal(readDebankAnswer("<html>").kind, "unreadable");
+  assert.equal(readDebankAnswer(null).kind, "unreadable");
+
+  // A clean body is not an error, even though it has a `data` key.
+  assert.equal(debankErrorText({ error_code: 0, data: [] }), "");
+  assert.equal(debankErrorText({ error: "" }), "");
+});
+
+test("when every route says empty, DeBank is asked once more for every token", async () => {
+  const seen: string[] = [];
+  const result = await fetchDebankBalances(
+    "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+    "auto",
+    (async (url: string) => {
+      seen.push(String(url));
+      // The three `is_all=false` routes report nothing; the `is_all=true` call
+      // has the token the wallet actually holds.
+      if (String(url).includes("is_all=true")) {
+        return new Response(JSON.stringify([token({ symbol: "AERO", amount: 10, price: 1, value_usd: 10 })]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch,
+  );
+
+  assert.equal(seen.length, 4, "three filtered routes plus one everything route");
+  assert.ok(seen[3].includes("is_all=true"));
+  assert.equal(result.ok, true);
+  assert.equal(result.balances[0].symbol, "AERO");
+});
+
+test("debankAllTokensRequest mirrors the normal request with is_all=true", () => {
+  const keyed = debankAllTokensRequest("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "auto", "k");
+  assert.match(keyed.url, /pro-openapi\.debank\.com\/v1\/user\/all_token_list\?id=.+&is_all=true/);
+  assert.equal(keyed.headers.AccessKey, "k");
+
+  const open = debankAllTokensRequest("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "arbitrum", "");
+  assert.match(open.url, /api\.debank\.com\/v1\/user\/token_list\?id=.+&chain_id=arb&is_all=true/);
+  assert.equal(open.headers.AccessKey, undefined);
 });
 
 test("fetchDebankBalances returns balances, then reports failure instead of throwing", async () => {

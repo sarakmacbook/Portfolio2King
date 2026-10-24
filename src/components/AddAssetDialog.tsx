@@ -291,6 +291,7 @@ function AddAssetForm({
         balances?: ScannedWalletBalance[];
         source?: "debank" | "onchain";
         sourceNote?: string;
+        debankNeedsKey?: boolean;
       };
       if (!response.ok) {
         throw new Error(data.error || "Could not scan that wallet address.");
@@ -301,9 +302,15 @@ function AddAssetForm({
       setWalletScanSource(data.source ?? null);
       // Only mention DeBank when it was actually involved, so the picker stays
       // quiet on a plain on-chain read for Solana / Bitcoin / Tron.
+      // Where the numbers came from, said plainly. DeBank being unavailable is
+      // a smaller scan, not an error — and when it is a missing key, say so.
       setWalletScanNote(
         data.source === "onchain" && data.sourceNote
-          ? `Read straight from the chains: ${data.sourceNote}`
+          ? `Read directly from the chains — ${data.sourceNote}${
+              data.debankNeedsKey
+                ? " Add a free DEBANK_ACCESS_KEY to cover every chain DeBank indexes."
+                : ""
+            }`
           : "",
       );
       if (list.length === 0) {
@@ -828,7 +835,7 @@ function AddAssetForm({
               <p className="mt-2 text-xs text-rose-600">{walletScanError}</p>
             )}
             {walletScanNote && (
-              <p className="mt-2 text-xs text-amber-700">{walletScanNote}</p>
+              <p className="mt-2 text-xs text-slate-500">{walletScanNote}</p>
             )}
             {walletImportMessage && (
               <p className="mt-2 text-xs font-medium text-emerald-600">

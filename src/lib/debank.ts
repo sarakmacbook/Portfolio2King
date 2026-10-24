@@ -206,6 +206,92 @@ export function debankTokenItems(payload: unknown): unknown[] {
 }
 
 /**
+ * The explanation DeBank puts *inside* a 200 response.
+ *
+ * Its APIs answer `200 OK` with `{ "error_code": 1, "error_message": "…" }` (or
+ * `{ "error": { "code", "message" } }`, `{ "code": 401, "msg": … }` …) when a
+ * request is refused, which is easy to mistake for "this wallet is empty". That
+ * mistake used to be reported as "DeBank returned no tokens for that wallet".
+ */
+export function debankErrorText(payload: unknown): string {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return "";
+  const record = payload as Record<string, unknown>;
+
+  const direct = readString(record.error_message) || readString(record.errorMessage);
+  let text =
+    direct || readString(record.msg) || readString(record.message) || readString(record.detail);
+  let nestedCode = 0;
+  if (!text) {
+    const error = record.error;
+    if (typeof error === "string") text = error.trim();
+    else if (error && typeof error === "object") {
+      const nested = error as Record<string, unknown>;
+      text = readString(nested.message) || readString(nested.msg) || readString(nested.error);
+      nestedCode = readNumber(nested.code) || readNumber(nested.status);
+    }
+  }
+
+  const code =
+    readNumber(record.error_code) ||
+    readNumber(record.errorCode) ||
+    readNumber(record.status) ||
+    readNumber(record.code) ||
+    nestedCode;
+  const failed = record.success === false || (code !== 0 && code !== 200);
+  if (!failed && !text) return "";
+  if (text) return code && code !== 200 ? `${text} (code ${code})` : text;
+  return `DeBank returned error code ${code}`;
+}
+
+/** What a 200 response from DeBank actually says. */
+export type DebankAnswer =
+  /** DeBank listed tokens (possibly all dust — `parseDebankTokens` decides). */
+  | { kind: "tokens"; items: unknown[] }
+  /** DeBank answered with an empty list: the wallet really holds nothing there. */
+  | { kind: "empty" }
+  /** DeBank answered with an error body — a refusal, not an empty wallet. */
+  | { kind: "error"; message: string }
+  /** A 200 this app cannot interpret (an HTML challenge page, `{}`, …). */
+  | { kind: "unreadable"; message: string };
+
+/** True when the payload carries an empty list under any of DeBank's keys. */
+function hasEmptyList(payload: unknown): boolean {
+  if (Array.isArray(payload)) return payload.length === 0;
+  if (!payload || typeof payload !== "object") return false;
+  const record = payload as Record<string, unknown>;
+  for (const key of ["data", "tokens", "list", "result"]) {
+    const value = record[key];
+    if (Array.isArray(value)) return value.length === 0;
+    if (value && typeof value === "object") {
+      const nested = value as Record<string, unknown>;
+      for (const innerKey of ["tokens", "list", "token_list", "items"]) {
+        if (Array.isArray(nested[innerKey])) return (nested[innerKey] as unknown[]).length === 0;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Classifies a DeBank response so the caller can tell three very different
+ * things apart: "here are the tokens", "this wallet is empty" and "we were
+ * refused". Only the middle one is the wallet's fault.
+ */
+export function readDebankAnswer(payload: unknown): DebankAnswer {
+  const errorText = debankErrorText(payload);
+  if (errorText) return { kind: "error", message: errorText };
+
+  const items = debankTokenItems(payload);
+  if (items.length > 0) return { kind: "tokens", items };
+  if (hasEmptyList(payload)) return { kind: "empty" };
+
+  return {
+    kind: "unreadable",
+    message: "DeBank sent an answer that could not be read (it may now require an access key).",
+  };
+}
+
+/**
  * Shapes a DeBank token list into balances: drops empty, worthless spam (unless
  * DeBank marks it core/verified), de-duplicates the same token seen twice and
  * sorts by USD value.
@@ -302,6 +388,9 @@ const RABBY_HEADERS: Record<string, string> = {
   Accept: "application/json",
   Origin: "https://rabby.io",
   Referer: "https://rabby.io/",
+  // Rabby's gateway is versioned by header; it ignores unknown extra headers,
+  // so sending this costs nothing when it is not needed.
+  "X-API-Version": "v1",
   "User-Agent": PUBLIC_HEADERS["User-Agent"],
 };
 
@@ -354,6 +443,37 @@ export function debankRequests(
       headers: RABBY_HEADERS,
     },
   ];
+}
+
+/**
+ * The same request, but asking DeBank for *every* token it knows about
+ * (`is_all=true`) instead of the filtered core set.
+ *
+ * The scans above use `is_all=false`, which is what keeps a wallet readable —
+ * but a wallet holding only non-core tokens answers that with an empty list. If
+ * every route says "empty", one last call asks for everything before the app
+ * concludes the wallet really holds nothing.
+ */
+export function debankAllTokensRequest(
+  address: string,
+  chain: WalletChain | string = "auto",
+  accessKey = process.env.DEBANK_ACCESS_KEY ?? "",
+): DebankRequest {
+  const addr = encodeURIComponent(address.trim());
+  const key = accessKey.trim();
+  const chainId = debankChainIdFor(chain);
+  if (key) {
+    const url = chainId
+      ? `https://pro-openapi.debank.com/v1/user/token_list?id=${addr}&chain_id=${chainId}&is_all=true`
+      : `https://pro-openapi.debank.com/v1/user/all_token_list?id=${addr}&is_all=true`;
+    return { url, headers: { Accept: "application/json", AccessKey: key } };
+  }
+  return {
+    url: `https://api.debank.com/v1/user/token_list?id=${addr}${
+      chainId ? `&chain_id=${chainId}` : ""
+    }&is_all=true`,
+    headers: PUBLIC_HEADERS,
+  };
 }
 
 /**
@@ -454,6 +574,13 @@ export type DebankFetchResult = {
   error: string | null;
   /** HTTP status of the last rejected endpoint, when there was one. */
   status?: number | null;
+  /**
+   * Set when every keyless route was refused and no `DEBANK_ACCESS_KEY` is
+   * configured: the fix is a (free) access key, not the wallet.
+   */
+  needsAccessKey: boolean;
+  /** Every route that was tried, with what it said — handy in the note/log. */
+  attempts: Array<{ url: string; status: number | null; note: string }>;
 };
 
 /**
@@ -468,13 +595,16 @@ export async function fetchDebankBalances(
 ): Promise<DebankFetchResult> {
   const requests = debankRequests(address, chain);
   const deadline = Date.now() + DEBANK_TOTAL_BUDGET_MS;
+  const attempts: DebankFetchResult["attempts"] = [];
   let lastError: string | null = null;
-  let sawEmptyAnswer = false;
+  let emptyAnswer = false;
+  let refusal: string | null = null;
   let lastStatus: number | null = null;
 
   for (const request of requests) {
     const remaining = deadline - Date.now();
     if (remaining < 500) {
+      attempts.push({ url: request.url, status: null, note: "skipped: out of time" });
       lastError = lastError ?? "DeBank took too long to answer";
       break;
     }
@@ -488,38 +618,117 @@ export async function fetchDebankBalances(
       if (!response.ok) {
         lastStatus = response.status;
         lastError = describeHttpStatus(response.status);
+        attempts.push({ url: request.url, status: response.status, note: lastError });
         continue;
       }
+
       const payload: unknown = await response.json();
-      let balances = parseDebankTokens(payload, { chainFilter: chain });
-      if (balances.length > 0) {
+      const answer = readDebankAnswer(payload);
+
+      if (answer.kind === "tokens") {
+        let balances = parseDebankTokens(payload, { chainFilter: chain });
+        if (balances.length === 0) {
+          // DeBank listed tokens but every one was filtered out as dust/spam.
+          emptyAnswer = true;
+          attempts.push({ url: request.url, status: 200, note: "no spendable tokens" });
+          continue;
+        }
         // A chain DeBank added since the last release would only show up as an
         // id (`aero`); ask DeBank what it is called. Purely cosmetic, so it is
         // skipped when the scan budget is already spent.
-        if (balances.some((balance) => !hasKnownChainLabel(balance.chain)) && deadline - Date.now() > 1500) {
+        if (
+          balances.some((balance) => !hasKnownChainLabel(balance.chain)) &&
+          deadline - Date.now() > 1500
+        ) {
           try {
             balances = applyChainNames(balances, await fetchDebankChainNames(fetchImpl));
           } catch {
             // Keep the id-based labels.
           }
         }
-        return { ok: true, balances, endpoint: request.url, error: null };
+        attempts.push({ url: request.url, status: 200, note: `${balances.length} tokens` });
+        return {
+          ok: true,
+          balances,
+          endpoint: request.url,
+          error: null,
+          needsAccessKey: false,
+          attempts,
+        };
       }
-      // A 200 with nothing in it means "DeBank knows this wallet and it is
-      // empty", which is a better answer than the next endpoint's 404.
-      sawEmptyAnswer = true;
+
+      if (answer.kind === "empty") {
+        // A real answer: DeBank knows the wallet and it holds nothing on the
+        // chains it indexes. Still worth letting the direct read have a go —
+        // DeBank does not cover every chain this app can read.
+        emptyAnswer = true;
+        lastError = "DeBank reports no tokens for that wallet on any chain it indexes.";
+        attempts.push({ url: request.url, status: 200, note: "empty list" });
+        continue;
+      }
+
+      // A refusal or an unreadable body: an error, never "the wallet is empty".
+      refusal = refusal ?? answer.message;
+      lastError = refusal;
+      attempts.push({ url: request.url, status: 200, note: answer.message });
     } catch (error) {
       const detail = error instanceof Error ? error.message : "";
       lastError = detail ? `DeBank could not be reached (${detail})` : "DeBank could not be reached";
+      attempts.push({ url: request.url, status: null, note: lastError });
     }
   }
 
+  // Every route answered with an empty list. That may be the truth, or it may be
+  // `is_all=false` filtering out a wallet that only holds non-core tokens — so
+  // ask once for everything before giving up on DeBank.
+  if (emptyAnswer && !refusal && deadline - Date.now() > 1000) {
+    const request = debankAllTokensRequest(address, chain);
+    try {
+      const response = await fetchImpl(request.url, {
+        method: "GET",
+        cache: "no-store",
+        headers: request.headers,
+        signal: AbortSignal.timeout(Math.min(DEBANK_TIMEOUT_MS, deadline - Date.now())),
+      });
+      if (response.ok) {
+        const payload: unknown = await response.json();
+        const answer = readDebankAnswer(payload);
+        const balances =
+          answer.kind === "tokens" ? parseDebankTokens(payload, { chainFilter: chain }) : [];
+        if (balances.length > 0) {
+          attempts.push({ url: request.url, status: 200, note: `${balances.length} tokens (all)` });
+          return {
+            ok: true,
+            balances,
+            endpoint: request.url,
+            error: null,
+            needsAccessKey: false,
+            attempts,
+          };
+        }
+        attempts.push({ url: request.url, status: 200, note: "empty list (all)" });
+      } else {
+        attempts.push({ url: request.url, status: response.status, note: describeHttpStatus(response.status) });
+      }
+    } catch {
+      attempts.push({ url: request.url, status: null, note: "could not be reached" });
+    }
+  }
+
+  const key = (process.env.DEBANK_ACCESS_KEY ?? "").trim();
+  const emptyMessage = "DeBank reports no tokens for that wallet on any chain it indexes.";
   return {
     ok: false,
     balances: [],
     endpoint: null,
-    error: sawEmptyAnswer ? "DeBank returned no tokens for that wallet." : lastError,
+    // A refusal beats everything; otherwise a real "it is empty" answer beats a
+    // route that merely 404'd.
+    error: refusal ?? (emptyAnswer ? emptyMessage : lastError),
     status: lastStatus,
+    // Keyless routes being refused or retired is exactly what an access key
+    // fixes, so point at it — unless DeBank actually answered "empty".
+    needsAccessKey: !key && !emptyAnswer && (Boolean(refusal) || lastStatus !== null),
+    attempts,
   };
 }
 
