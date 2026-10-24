@@ -1,5 +1,5 @@
 import type { CryptoCategory } from "@/db/schema";
-import { fetchDebankBalances, type DebankBalance } from "@/lib/debank";
+import { debankAccessKey, fetchDebankBalances, type DebankBalance } from "@/lib/debank";
 import { blockscanApiKey, fetchBlockscanBalances } from "@/lib/blockscan";
 import { fetchMoralisBalances, moralisApiKey } from "@/lib/moralis";
 import { fetchBlockscoutTokens } from "@/lib/blockscout";
@@ -790,10 +790,22 @@ async function mergeWithDirect(
 
 export type WalletScanSource = "auto" | "blockscan" | "moralis";
 
+/**
+ * API keys for the indexers, as saved in the app (`scanner-keys`). Anything left
+ * out falls back to the environment, so a scan works with either setup — or with
+ * no keys at all, in which case the chains are read directly.
+ */
+export type WalletScanKeys = {
+  debank?: string;
+  /** Etherscan V2, the API behind Blockscan. */
+  blockscan?: string;
+  moralis?: string;
+};
+
 export async function scanWalletAddress(
   rawAddress: string,
   chainFilter: string = "auto",
-  options: { source?: WalletScanSource } = {},
+  options: { source?: WalletScanSource; keys?: WalletScanKeys } = {},
 ): Promise<WalletScanResult> {
   const source: WalletScanSource =
     options.source === "blockscan" || options.source === "moralis" ? options.source : "auto";
@@ -841,15 +853,27 @@ export async function scanWalletAddress(
    * the only source that labels a token `possible_spam`, so the junk is counted
    * as spam instead of having to be spotted by its name.
    */
+  /**
+   * Keys come from the app settings first (saved in the scan dialog) and from
+   * the environment otherwise — see `scanner-keys`.
+   */
+  const debankKey = (options.keys?.debank ?? debankAccessKey()).trim();
+  const blockscanKey = (options.keys?.blockscan ?? blockscanApiKey()).trim();
+  const moralisKey = (options.keys?.moralis ?? moralisApiKey()).trim();
+
   const wantsMoralis =
-    isEvm && (source === "moralis" || (source === "auto" && moralisApiKey() !== ""));
+    isEvm && (source === "moralis" || (source === "auto" && moralisKey !== ""));
 
   const [debank, blockscan, moralis, directRaw] = await Promise.all([
-    isEvm && source === "auto" ? fetchDebankBalances(address, requestedChain) : Promise.resolve(null),
-    isEvm && source === "blockscan"
-      ? fetchBlockscanBalances(address, { chainFilter: requestedChain })
+    isEvm && source === "auto"
+      ? fetchDebankBalances(address, requestedChain, { accessKey: debankKey })
       : Promise.resolve(null),
-    wantsMoralis ? fetchMoralisBalances(address, { chainFilter: requestedChain }) : Promise.resolve(null),
+    isEvm && source === "blockscan"
+      ? fetchBlockscanBalances(address, { chainFilter: requestedChain, apiKey: blockscanKey })
+      : Promise.resolve(null),
+    wantsMoralis
+      ? fetchMoralisBalances(address, { chainFilter: requestedChain, apiKey: moralisKey })
+      : Promise.resolve(null),
     isEvm
       ? Promise.all([
           ...chainsToScan.map((spec) => scanOneEvmChain(spec, address)),
@@ -936,8 +960,11 @@ export async function scanWalletAddress(
    * leaving the user with the much smaller direct read. Only for the default
    * source: a Blockscan scan has already been tried above.
    */
-  if (source === "auto" && blockscanApiKey() !== "" && debankBalances.length === 0) {
-    const fallback = await fetchBlockscanBalances(address, { chainFilter: requestedChain });
+  if (source === "auto" && blockscanKey !== "" && debankBalances.length === 0) {
+    const fallback = await fetchBlockscanBalances(address, {
+      chainFilter: requestedChain,
+      apiKey: blockscanKey,
+    });
     if (fallback.ok && fallback.balances.length > 0) {
       const { balances, extra } = await mergeWithDirect(fallback.balances, directRaw);
       return {

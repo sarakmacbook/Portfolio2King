@@ -411,10 +411,15 @@ const RABBY_HEADERS: Record<string, string> = {
  * retires and renames keyless endpoints without notice, and a 404 from a stale
  * one should not end the scan.
  */
+/** The access key from the environment, or "". */
+export function debankAccessKey(env: Record<string, string | undefined> = process.env): string {
+  return (env.DEBANK_ACCESS_KEY ?? "").trim();
+}
+
 export function debankRequests(
   address: string,
   chain: string = "auto",
-  accessKey = process.env.DEBANK_ACCESS_KEY ?? "",
+  accessKey = debankAccessKey(),
 ): DebankRequest[] {
   const addr = encodeURIComponent(address.trim());
   const key = accessKey.trim();
@@ -464,7 +469,7 @@ export function debankRequests(
 export function debankAllTokensRequest(
   address: string,
   chain: WalletChain | string = "auto",
-  accessKey = process.env.DEBANK_ACCESS_KEY ?? "",
+  accessKey = debankAccessKey(),
 ): DebankRequest {
   const addr = encodeURIComponent(address.trim());
   const key = accessKey.trim();
@@ -493,7 +498,7 @@ let chainNameCache: { names: Map<string, string>; at: number } | null = null;
 
 /** The requests that ask DeBank for every chain it supports. */
 export function debankChainListRequests(
-  accessKey = process.env.DEBANK_ACCESS_KEY ?? "",
+  accessKey = debankAccessKey(),
 ): DebankRequest[] {
   const key = accessKey.trim();
   if (key) {
@@ -535,11 +540,12 @@ export function parseDebankChainList(payload: unknown): Map<string, string> {
  */
 export async function fetchDebankChainNames(
   fetchImpl: typeof fetch = fetch,
+  accessKey = debankAccessKey(),
 ): Promise<Map<string, string>> {
   if (chainNameCache && Date.now() - chainNameCache.at < DEBANK_CHAIN_LIST_TTL_MS) {
     return chainNameCache.names;
   }
-  for (const request of debankChainListRequests()) {
+  for (const request of debankChainListRequests(accessKey)) {
     try {
       const response = await fetchImpl(request.url, {
         method: "GET",
@@ -594,13 +600,27 @@ export type DebankFetchResult = {
  * Asks DeBank for a wallet's tokens. Never throws: a blocked, rate-limited or
  * malformed response is reported as `ok: false` so the caller can fall back to
  * reading the chains directly.
+ *
+ * The key normally comes from the environment, but `options.accessKey` lets a
+ * caller pass the one saved in the app (see `scanner-keys`). The third argument
+ * still accepts a fetch implementation for the tests.
  */
+export type DebankFetchOptions = {
+  /** Access key saved in the app; falls back to `DEBANK_ACCESS_KEY`. */
+  accessKey?: string;
+  fetchImpl?: typeof fetch;
+};
+
 export async function fetchDebankBalances(
   address: string,
   chain: string = "auto",
-  fetchImpl: typeof fetch = fetch,
+  fetchOrOptions: typeof fetch | DebankFetchOptions = {},
 ): Promise<DebankFetchResult> {
-  const requests = debankRequests(address, chain);
+  const options: DebankFetchOptions =
+    typeof fetchOrOptions === "function" ? { fetchImpl: fetchOrOptions } : fetchOrOptions;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const accessKey = (options.accessKey ?? debankAccessKey()).trim();
+  const requests = debankRequests(address, chain, accessKey);
   const deadline = Date.now() + DEBANK_TOTAL_BUDGET_MS;
   const attempts: DebankFetchResult["attempts"] = [];
   let lastError: string | null = null;
@@ -648,7 +668,7 @@ export async function fetchDebankBalances(
           deadline - Date.now() > 1500
         ) {
           try {
-            balances = applyChainNames(balances, await fetchDebankChainNames(fetchImpl));
+            balances = applyChainNames(balances, await fetchDebankChainNames(fetchImpl, accessKey));
           } catch {
             // Keep the id-based labels.
           }
@@ -689,7 +709,7 @@ export async function fetchDebankBalances(
   // `is_all=false` filtering out a wallet that only holds non-core tokens — so
   // ask once for everything before giving up on DeBank.
   if (emptyAnswer && !refusal && deadline - Date.now() > 1000) {
-    const request = debankAllTokensRequest(address, chain);
+    const request = debankAllTokensRequest(address, chain, accessKey);
     try {
       const response = await fetchImpl(request.url, {
         method: "GET",
@@ -722,7 +742,7 @@ export async function fetchDebankBalances(
     }
   }
 
-  const key = (process.env.DEBANK_ACCESS_KEY ?? "").trim();
+  const key = accessKey;
   // An empty list from a *keyed* call is real information: DeBank looked and the
   // wallet holds nothing. The same answer from a keyless call is not — DeBank
   // serves an empty list to unauthenticated callers even for a wallet full of

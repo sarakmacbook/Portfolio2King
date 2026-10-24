@@ -311,7 +311,8 @@ test("Blockscan is a source the user picks, and the scan route carries it", () =
   const route = read("app/api/wallet/scan/route.ts");
   assert.ok(route.includes('params.get("source")'), "the route reads the source");
   assert.ok(route.includes('"blockscan"'), "and knows the Blockscan value");
-  assert.ok(route.includes("{ source }"), "and passes it to the scanner");
+  assert.ok(route.includes("{ source, keys }"), "and passes it to the scanner with the saved keys");
+  assert.ok(route.includes("getScannerKeys()"), "keys saved in the app are used first");
 
   const scanner = read("lib/wallet-scanner.ts");
   assert.ok(scanner.includes("fetchBlockscanBalances("), "the scanner can read Blockscan");
@@ -343,8 +344,9 @@ test("Blockscan refuses a non-EVM address in words, not with an empty scan", asy
 
 test("an auto scan falls back to Blockscan when DeBank cannot answer", () => {
   const scanner = read("lib/wallet-scanner.ts");
-  const body = scanner.slice(scanner.indexOf("if (source === \"auto\" && blockscanApiKey()"));
+  const body = scanner.slice(scanner.indexOf('if (source === "auto" && blockscanKey !== "" && debankBalances.length === 0)'));
   assert.ok(body.includes("fetchBlockscanBalances("), "the same sweep runs as the fallback");
-  assert.ok(body.includes("source: \"blockscan\""), "and the result says so");
+  assert.ok(body.includes("apiKey: blockscanKey"), "using the key from the app or the environment");
+  assert.ok(body.includes('source: "blockscan"'), "and the result says so");
   assert.ok(body.includes("mergeWithDirect("), "with the direct read still merged in");
 });

@@ -4,6 +4,7 @@ import {
   scanWalletAddress,
   type WalletScanSource,
 } from "@/lib/wallet-scanner";
+import { getScannerKeys } from "@/lib/scanner-keys";
 import { enrichTokenTrust } from "@/lib/wallet-trust";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +25,11 @@ export const dynamic = "force-dynamic";
  * "onchain"` so the dialog can say where the numbers came from. Each balance is then matched against the
  * official contract table and looked up for organic trading volume
  * (`wallet-trust`) — best-effort, so a slow or rate-limited lookup leaves the
- * token "unknown" rather than hidden. Read-only — no keys or signatures.
+ * token "unknown" rather than hidden.
+ *
+ * API keys are read from the app settings (added in the scan dialog) and fall
+ * back to `DEBANK_ACCESS_KEY` / `ETHERSCAN_API_KEY` / `MORALIS_API_KEY`. Read-only
+ * — no wallet keys or signatures.
  */
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
@@ -42,7 +47,13 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await scanWalletAddress(address, chain, { source });
+    /**
+     * API keys: the ones saved in the app first, the environment otherwise. A
+     * missing key is not an error — the scan simply reads fewer sources — but
+     * the response flags it so the dialog can offer the settings panel.
+     */
+    const keys = await getScannerKeys();
+    const result = await scanWalletAddress(address, chain, { source, keys });
     // Contract match + market depth, so the picker can rank real tokens above
     // look-alikes and tokens nobody trades. Never throws, never drops a balance.
     const balances = await enrichTokenTrust(result.balances);
