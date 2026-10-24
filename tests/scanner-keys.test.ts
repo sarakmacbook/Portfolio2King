@@ -21,8 +21,8 @@ import {
 const ETH_KEY = "A1B2C3D4E5F60718293A4B5C6D7E8F9012"; // 34 chars, Etherscan-shaped
 
 test("there is one spec per scan source, with a setting and an env var", () => {
-  assert.deepEqual(SCANNER_PROVIDERS, ["debank", "etherscan", "moralis"]);
-  assert.equal(SCANNER_KEY_SPECS.length, 3);
+  assert.deepEqual(SCANNER_PROVIDERS, ["debank", "etherscan", "moralis", "coinmarketcap"]);
+  assert.equal(SCANNER_KEY_SPECS.length, 4);
   for (const spec of SCANNER_KEY_SPECS) {
     assert.ok(spec.envVars.length > 0, `${spec.id} needs an env var`);
     assert.ok(spec.setting.startsWith("scanner.key."));
@@ -33,6 +33,12 @@ test("there is one spec per scan source, with a setting and an env var", () => {
   assert.deepEqual(scannerKeySpec("etherscan").envVars, ["ETHERSCAN_API_KEY", "BLOCKSCAN_API_KEY"]);
   assert.deepEqual(scannerKeySpec("moralis").envVars, ["MORALIS_API_KEY", "MORALIS_APIKEY"]);
   assert.equal(scannerKeySpec("debank").envVars[0], "DEBANK_ACCESS_KEY");
+  // CoinMarketCap keys the contract lookup that runs *after* a scan.
+  assert.deepEqual(scannerKeySpec("coinmarketcap").envVars, [
+    "CMC_PRO_API_KEY",
+    "COINMARKETCAP_API_KEY",
+  ]);
+  assert.equal(scannerKeySpec("coinmarketcap").setting, "scanner.key.coinmarketcap");
 
   assert.ok(isScannerProvider("moralis"));
   assert.ok(!isScannerProvider("coingecko"));
@@ -109,7 +115,7 @@ test("statuses say where each key came from and what can be removed", () => {
     { debank: { key: "debank-saved-key", savedAt: "2026-02-03T00:00:00.000Z" } },
     { env: { MORALIS_API_KEY: "moralis-env-key" }, canSave: true },
   );
-  assert.equal(statuses.length, 3);
+  assert.equal(statuses.length, 4);
 
   const debank = statuses.find((status) => status.id === "debank")!;
   assert.equal(debank.configured, true);
@@ -143,12 +149,15 @@ test("the scanner gets its keys from the environment when nothing is saved", asy
     process.env.ETHERSCAN_API_KEY = ETH_KEY;
     process.env.MORALIS_API_KEY = "";
     process.env.MORALIS_APIKEY = "moralis-alias-key";
+    process.env.CMC_PRO_API_KEY = "";
+    process.env.COINMARKETCAP_API_KEY = "cmc-alias-key";
 
     const keys = await getScannerKeys();
     assert.deepEqual(keys, {
       debank: "debank-env-key",
       blockscan: ETH_KEY,
       moralis: "moralis-alias-key",
+      coinmarketcap: "cmc-alias-key",
     });
   } finally {
     process.env = saved;

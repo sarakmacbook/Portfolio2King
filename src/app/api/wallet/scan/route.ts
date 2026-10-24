@@ -28,8 +28,9 @@ export const dynamic = "force-dynamic";
  * token "unknown" rather than hidden.
  *
  * API keys are read from the app settings (added in the scan dialog) and fall
- * back to `DEBANK_ACCESS_KEY` / `ETHERSCAN_API_KEY` / `MORALIS_API_KEY`. Read-only
- * — no wallet keys or signatures.
+ * back to `DEBANK_ACCESS_KEY` / `ETHERSCAN_API_KEY` / `MORALIS_API_KEY`, plus
+ * `CMC_PRO_API_KEY` for the CoinMarketCap contract lookup. Read-only — no wallet
+ * keys or signatures.
  */
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
@@ -54,9 +55,12 @@ export async function GET(request: Request) {
      */
     const keys = await getScannerKeys();
     const result = await scanWalletAddress(address, chain, { source, keys });
-    // Contract match + market depth, so the picker can rank real tokens above
-    // look-alikes and tokens nobody trades. Never throws, never drops a balance.
-    const balances = await enrichTokenTrust(result.balances);
+    // Contract match (local table + CoinMarketCap) and market depth, so the
+    // picker can rank real tokens above look-alikes and tokens nobody trades.
+    // Never throws, never drops a balance.
+    const balances = await enrichTokenTrust(result.balances, fetch, {
+      cmcApiKey: keys.coinmarketcap,
+    });
     return NextResponse.json(
       { ok: true, ...result, balances },
       { headers: { "Cache-Control": "no-store" } },

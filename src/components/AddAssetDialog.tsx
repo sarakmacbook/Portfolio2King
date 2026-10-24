@@ -1143,8 +1143,9 @@ function AddAssetForm({
                 </li>
                 <li>
                   <strong className="font-medium text-slate-600">Then the checks</strong> — official
-                  contract table, organic 24h volume and liquidity depth from DexScreener (30
-                  contracts per call).
+                  contract table, a <strong className="font-medium text-slate-600">CoinMarketCap</strong>{" "}
+                  lookup of every contract a scan returns (50 per call), organic 24h volume and
+                  liquidity depth from DexScreener (30 contracts per call).
                 </li>
                 <li>
                   <strong className="font-medium text-slate-600">Limits</strong> — up to 250 tokens
@@ -1360,9 +1361,21 @@ function AddAssetForm({
                               {item.contractStatus === "official" ? (
                                 <span
                                   className="rounded-full bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700"
-                                  title="The contract address is the official one for this token"
+                                  title={
+                                    item.cmcVerified && item.cmcName
+                                      ? `The contract address is the official one for this token, confirmed on CoinMarketCap as ${item.cmcName}`
+                                      : "The contract address is the official one for this token"
+                                  }
                                 >
                                   official ✓
+                                </span>
+                              ) : null}
+                              {item.cmcSymbolMismatch && item.cmcName ? (
+                                <span
+                                  className="rounded-full bg-slate-50 px-1.5 py-0.5 font-medium text-slate-600"
+                                  title={`CoinMarketCap lists this contract as ${item.cmcName}. The ticker shown is the one the wallet scan reported — bridged tokens and renamed tickers differ like this.`}
+                                >
+                                  CMC: {item.cmcName}
                                 </span>
                               ) : null}
                               {item.liquidityUsd !== undefined ? (

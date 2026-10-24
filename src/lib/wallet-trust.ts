@@ -14,6 +14,13 @@
  * "keep" — missing data must never hide a real holding.
  */
 
+import {
+  cmcApiKey,
+  cmcMatchFor,
+  fetchCmcContracts,
+  mergeContractStatus,
+  type CmcMatch,
+} from "@/lib/coinmarketcap";
 import { isDust, type DustMeasurable } from "@/lib/wallet-dust";
 import { isSpamToken } from "@/lib/wallet-spam";
 import {
@@ -57,8 +64,21 @@ export type TrustSignals = {
   washSuspected?: boolean;
   /** The scan's own verdict (see `Verification`). */
   verification?: Verification;
-  /** Why it was verified — "official contract", "indexer", "deep market". */
+  /** Why it was verified — "official contract", "indexer", "deep market", "CoinMarketCap". */
   verifiedBy?: string[];
+  /** CoinMarketCap's id, name and slug for the coin this contract belongs to. */
+  cmcId?: number;
+  cmcName?: string;
+  cmcSlug?: string;
+  /** The contract is listed on CoinMarketCap and its ticker agrees. */
+  cmcVerified?: boolean;
+  /**
+   * Listed, but under a different ticker than the scan showed. A note, never a
+   * reason to hide: `RNDR` → `RENDER` and bridged `USDC.e` are honest renames.
+   */
+  cmcSymbolMismatch?: boolean;
+  /** USD price from CoinMarketCap, used only when nothing else priced the token. */
+  cmcPriceUsd?: number;
 };
 
 type TrustableBalance = {
@@ -70,6 +90,21 @@ type TrustableBalance = {
   spam?: boolean | null;
   /** The indexer's verification (DeBank `is_verified`, Moralis `verified_contract`, …). */
   verified?: boolean | null;
+  /** Enough to be re-priced by CoinMarketCap when nothing else had a price. */
+  quantity?: number;
+  price?: number;
+  valueUsd?: number;
+  priced?: boolean;
+};
+
+export type TrustOptions = {
+  /**
+   * The CoinMarketCap key. Empty disables the contract lookup and leaves every
+   * verdict exactly as it was before CMC existed.
+   */
+  cmcApiKey?: string;
+  /** The fetch used for CoinMarketCap (separate so one can be stubbed alone). */
+  cmcFetchImpl?: typeof fetch;
 };
 
 /**
@@ -99,6 +134,7 @@ export function verificationOf(
 
   const status = balance.contractStatus ?? contractStatusOf(balance);
   if (status === "official") return "verified";
+  if (balance.cmcVerified === true) return "verified";
   if (balance.verified === true) return "verified";
 
   const volume = balance.organicVolumeUsd;
@@ -122,6 +158,7 @@ export function verifiedByOf(balance: TrustableBalance & TrustSignals): string[]
   const reasons: string[] = [];
   const status = balance.contractStatus ?? contractStatusOf(balance);
   if (status === "official") reasons.push("official contract");
+  if (balance.cmcVerified === true) reasons.push("CoinMarketCap");
   if (balance.verified === true) reasons.push("indexer");
   if (
     reasons.length === 0 &&
@@ -142,27 +179,82 @@ export function verifiedByOf(balance: TrustableBalance & TrustSignals): string[]
 export async function enrichTokenTrust<T extends TrustableBalance>(
   balances: readonly T[],
   fetchImpl: typeof fetch = fetch,
+  options: TrustOptions = {},
 ): Promise<Array<T & TrustSignals>> {
-  const withStatus = balances.map((balance) => ({
-    ...balance,
-    contractStatus: contractStatusOf(balance),
-  }));
-
   /** Every balance leaves with a verdict, even when no lookup was possible. */
-  const withVerdict = <T extends TrustableBalance>(rows: readonly T[]) =>
-    rows.map((row) => ({ ...row, verification: verificationOf(row) }));
+  const withVerdict = <R extends TrustableBalance & TrustSignals>(rows: readonly R[]) =>
+    rows.map((row) => ({
+      ...row,
+      verification: verificationOf(row),
+      ...(verificationOf(row) === "verified" ? { verifiedBy: verifiedByOf(row) } : {}),
+    }));
 
-  const contracts = withStatus
+  const contracts = balances
     .map((balance) => normaliseEvmContract(balance.contract))
     .filter((contract): contract is string => Boolean(contract));
-  if (contracts.length === 0) return withVerdict(withStatus);
 
-  let signals: Awaited<ReturnType<typeof fetchMarketSignals>>;
-  try {
-    signals = await fetchMarketSignals(contracts, fetchImpl);
-  } catch {
-    return withVerdict(withStatus);
-  }
+  /**
+   * CoinMarketCap runs *beside* DexScreener: it answers which coin a contract is
+   * (for the long tail the local table has never heard of), whether the ticker is
+   * honest, and a USD price for anything the scan could not price. It never
+   * blocks the market lookup, and a missing key simply skips it.
+   */
+  const cmcKey = (options.cmcApiKey ?? cmcApiKey()).trim();
+  const marketPromise: Promise<Awaited<ReturnType<typeof fetchMarketSignals>> | null> =
+    contracts.length === 0
+      ? Promise.resolve(null)
+      : fetchMarketSignals(contracts, fetchImpl).catch(() => null);
+
+  const [cmc, signals] = await Promise.all([
+    cmcKey && contracts.length > 0
+      ? fetchCmcContracts(contracts, {
+          apiKey: cmcKey,
+          ...(options.cmcFetchImpl ? { fetchImpl: options.cmcFetchImpl } : {}),
+        }).catch(() => null)
+      : Promise.resolve(null),
+    marketPromise,
+  ]);
+
+  const withStatus = balances.map((balance) => {
+    const contract = normaliseEvmContract(balance.contract);
+    const match: CmcMatch | null = contract && cmc ? cmcMatchFor(balance, cmc.info) : null;
+    const local = contractStatusOf(balance);
+    const cmcPriceUsd = match?.token ? cmc?.prices.get(match.token.id) : undefined;
+
+    /**
+     * A token nothing else could price takes CoinMarketCap's price, so it stops
+     * being "no price yet" — and therefore gets a real dust decision. A price the
+     * scan already had is never overwritten.
+     */
+    const quantity = Number(balance.quantity);
+    const unpriced = balance.priced === false || !(Number(balance.price) > 0);
+    const repriced =
+      unpriced && cmcPriceUsd && cmcPriceUsd > 0 && Number.isFinite(quantity) && quantity > 0
+        ? {
+            price: cmcPriceUsd,
+            valueUsd: Number((quantity * cmcPriceUsd).toFixed(2)),
+            priced: true,
+          }
+        : {};
+
+    return {
+      ...balance,
+      ...repriced,
+      contractStatus: mergeContractStatus(local, match),
+      ...(match?.token
+        ? {
+            cmcId: match.token.id,
+            cmcName: match.token.name,
+            cmcSlug: match.token.slug,
+            ...(match.status === "official" ? { cmcVerified: true } : {}),
+            ...(match.symbolMismatch ? { cmcSymbolMismatch: true } : {}),
+          }
+        : {}),
+      ...(cmcPriceUsd && cmcPriceUsd > 0 ? { cmcPriceUsd } : {}),
+    };
+  });
+
+  if (!signals || contracts.length === 0) return withVerdict(withStatus);
 
   /**
    * A chain DexScreener does not index answers "no pairs" for every token on it,
@@ -193,7 +285,11 @@ export async function enrichTokenTrust<T extends TrustableBalance>(
     // A chain with no pairs anywhere is not indexed by DexScreener: its tokens
     // stay unknown rather than "no market".
     if (!market || blindChains.has(String(balance.chain ?? ""))) {
-      return { ...balance, verification: verificationOf(balance) };
+      return {
+        ...balance,
+        verification: verificationOf(balance),
+        ...(verificationOf(balance) === "verified" ? { verifiedBy: verifiedByOf(balance) } : {}),
+      };
     }
     const enriched = {
       ...balance,
