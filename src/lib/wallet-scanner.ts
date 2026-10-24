@@ -47,6 +47,17 @@ export type ScannedWalletBalance = {
   contract: string | null;
   /** Token artwork, when the indexer returned one (DeBank does). */
   logoUrl?: string;
+  /**
+   * Trust signals added by the scan route (`wallet-trust`). They are optional
+   * because the scanner itself only reads balances — contract matching and
+   * organic volume are a second, best-effort pass.
+   */
+  contractStatus?: "official" | "different" | "unknown";
+  /** 24h organic DEX volume, when DexScreener answered for this contract. */
+  organicVolumeUsd?: number;
+  liquidityUsd?: number;
+  marketPairs?: number;
+  washSuspected?: boolean;
 };
 
 export type WalletScanResult = {

@@ -12,12 +12,9 @@ import {
 import type { CryptoCategory } from "@/db/schema";
 import { TYPE_META, money, qty } from "@/lib/format";
 import { playMoneyChimeFromGesture } from "@/lib/sounds";
-import {
-  DEFAULT_DUST_THRESHOLD_USD,
-  normaliseDustThreshold,
-  splitDust,
-} from "@/lib/wallet-dust";
-import { splitSpam } from "@/lib/wallet-spam";
+import { DEFAULT_DUST_THRESHOLD_USD, normaliseDustThreshold } from "@/lib/wallet-dust";
+import { MIN_ORGANIC_VOLUME_USD, shortUsd } from "@/lib/organic-volume";
+import { filterScanBalances } from "@/lib/wallet-trust";
 import { CAMBODIAN_BANKS, CUSTOM_BANK, type CambodianBank } from "@/lib/cambodian-banks";
 import type { DiscoveredStock } from "@/lib/stock-search";
 import {
@@ -154,6 +151,15 @@ function AddAssetForm({
   );
   /** Hide tokens that look like airdropped spam (ads, fake tickers). */
   const [walletHideSpam, setWalletHideSpam] = useState(true);
+  /** Hide tokens whose contract is not the official one for their symbol. */
+  const [walletHideImpostor, setWalletHideImpostor] = useState(true);
+  /** Hide tokens nobody trades (unknown volume is always kept). */
+  const [walletRequireMarket, setWalletRequireMarket] = useState(true);
+  /**
+   * Tokens the user unticked. Kept as a set of *exclusions* rather than a set of
+   * picks, so changing a filter never silently re-selects something they dropped.
+   */
+  const [walletDeselected, setWalletDeselected] = useState<Set<string>>(new Set());
   const [walletImportMessage, setWalletImportMessage] = useState("");
   const [customBankSelected, setCustomBankSelected] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -183,17 +189,26 @@ function AddAssetForm({
   const walletScanChainCount = new Set(walletBalances.map((item) => item.chain)).size;
 
   const walletDustCut = walletHideDust ? normaliseDustThreshold(walletDustThreshold) : 0;
-  /** Spam first: a scam token's made-up price would pass the dollar cut-off. */
-  const walletSpam = useMemo(
-    () => splitSpam(walletBalances, walletHideSpam),
-    [walletBalances, walletHideSpam],
+  /**
+   * What is worth importing, in order of how sure the app is: the right
+   * contract, not airdrop bait, a real market, and worth more than the cut-off.
+   * Every bucket is counted and can be shown again — this is a filter, not a
+   * delete.
+   */
+  const walletSelection = useMemo(
+    () =>
+      filterScanBalances(walletBalances, {
+        hideSpam: walletHideSpam,
+        dustCut: walletDustCut,
+        hideImpostor: walletHideImpostor,
+        requireMarket: walletRequireMarket,
+      }),
+    [walletBalances, walletHideSpam, walletDustCut, walletHideImpostor, walletRequireMarket],
   );
-  /** The balances the picker shows and "Import all" imports (spam + dust removed). */
-  const walletVisible = useMemo(
-    () => splitDust(walletSpam.kept, walletDustCut),
-    [walletSpam, walletDustCut],
-  );
-  const walletVisibleBalances = walletVisible.kept;
+  const walletVisibleBalances = walletSelection.kept;
+  /** What "Import selected" imports: the kept tokens the user left ticked. */
+  const walletChosen = walletVisibleBalances.filter((item) => !walletDeselected.has(item.id));
+  const walletChosenIds = new Set(walletChosen.map((item) => item.id));
   /** Folder the scan would be filed into; blank means "name it after the address". */
   const walletFolderPlaceholder = shortWalletAddress(walletAddress.trim()) || "0x1234…abcd";
   const walletFolderLabel = walletFolderName.trim() || walletFolderPlaceholder;
@@ -324,6 +339,8 @@ function AddAssetForm({
       }
       const list = data.balances || [];
       setWalletBalances(list);
+      // A new scan starts with everything ticked again.
+      setWalletDeselected(new Set());
       setWalletScanDone(true);
       setWalletScanSource(data.source ?? null);
       // Only mention DeBank when it was actually involved, so the picker stays
@@ -372,8 +389,28 @@ function AddAssetForm({
     );
   }
 
+  /** Ticks or unticks one token without touching the form. */
+  function toggleWalletChoice(id: string) {
+    setWalletDeselected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  /** Tick every visible token (after the user unticked some). */
+  function selectAllWalletBalances() {
+    setWalletDeselected(new Set());
+  }
+
+  /** Untick every visible token. */
+  function selectNoWalletBalances() {
+    setWalletDeselected(new Set(walletVisibleBalances.map((item) => item.id)));
+  }
+
   async function handleImportAllWalletBalances() {
-    if (walletVisibleBalances.length === 0) return;
+    if (walletChosen.length === 0) return;
     setImportingWallet(true);
     setWalletScanError("");
     setWalletImportMessage("");
@@ -387,7 +424,9 @@ function AddAssetForm({
         // dust or spam into the portfolio.
         minValueUsd: walletDustCut,
         skipSpam: walletHideSpam,
-        balances: walletVisibleBalances,
+        skipImpostor: walletHideImpostor,
+        minOrganicVolumeUsd: walletRequireMarket ? MIN_ORGANIC_VOLUME_USD : 0,
+        balances: walletChosen.map((item) => ({ ...item, chain: item.chain })),
       });
       if (!result.ok) {
         throw new Error(result.error || "Could not import wallet balances.");
@@ -396,9 +435,11 @@ function AddAssetForm({
       const count = `${result.importedCount} holding${result.importedCount === 1 ? "" : "s"}`;
       const skipped = [
         result.skippedDust ? `Skipped ${result.skippedDust} under ${money(walletDustCut)}.` : "",
-        result.skippedSpam
-          ? `Skipped ${result.skippedSpam} that looked like spam.`
+        result.skippedSpam ? `Skipped ${result.skippedSpam} that looked like spam.` : "",
+        result.skippedImpostor
+          ? `Skipped ${result.skippedImpostor} with the wrong contract address.`
           : "",
+        result.skippedThin ? `Skipped ${result.skippedThin} with no trading volume.` : "",
       ]
         .filter(Boolean)
         .map((note) => ` ${note}`)
@@ -802,13 +843,13 @@ function AddAssetForm({
                   type="button"
                   className="btn-primary text-xs"
                   onClick={() => void handleImportAllWalletBalances()}
-                  disabled={importingWallet}
+                  disabled={importingWallet || walletChosen.length === 0}
                 >
                   {importingWallet
                     ? "Importing…"
                     : walletFileIntoFolder
-                      ? `Import all (${walletVisibleBalances.length}) into “${walletFolderLabel}”`
-                      : `Import all (${walletVisibleBalances.length}) to portfolio`}
+                      ? `Import selected (${walletChosen.length}) into “${walletFolderLabel}”`
+                      : `Import selected (${walletChosen.length}) to portfolio`}
                 </button>
               )}
             </div>
@@ -916,6 +957,30 @@ function AddAssetForm({
               </span>
             </label>
 
+            <div className="mt-2 flex flex-col gap-x-4 gap-y-1 rounded-xl border border-indigo-100 bg-white/70 p-2 text-xs font-medium text-slate-600 sm:flex-row sm:items-center">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-indigo-600"
+                  checked={walletHideImpostor}
+                  onChange={(event) => setWalletHideImpostor(event.target.checked)}
+                />
+                Hide look-alike contracts
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-indigo-600"
+                  checked={walletRequireMarket}
+                  onChange={(event) => setWalletRequireMarket(event.target.checked)}
+                />
+                Only tokens with trading volume
+              </label>
+              <span className="font-normal text-[11px] text-slate-400">
+                Contract matched against the official address, then checked for real 24h volume.
+              </span>
+            </div>
+
             {walletScanError && (
               <p className="mt-2 text-xs text-rose-600">{walletScanError}</p>
             )}
@@ -933,92 +998,191 @@ function AddAssetForm({
                   Found {walletBalances.length} balance{walletBalances.length === 1 ? "" : "s"}
                   {walletScanChainCount > 1 ? ` on ${walletScanChainCount} chains` : ""}
                   {walletScanSource === "debank" ? " via DeBank" : ""}
-                  {walletSpam.spamCount > 0
-                    ? ` · ${walletSpam.spamCount} spam-looking hidden`
+                  {walletSelection.counts.impostor > 0
+                    ? ` · ${walletSelection.counts.impostor} look-alike hidden`
                     : ""}
-                  {walletVisible.dustCount > 0
-                    ? ` · ${walletVisible.dustCount} under ${money(walletDustCut)} hidden (${money(
-                        walletVisible.dustValue,
+                  {walletSelection.counts.spam > 0
+                    ? ` · ${walletSelection.counts.spam} spam-looking hidden`
+                    : ""}
+                  {walletSelection.counts.thin > 0
+                    ? ` · ${walletSelection.counts.thin} with no trading volume hidden`
+                    : ""}
+                  {walletSelection.counts.dust > 0
+                    ? ` · ${walletSelection.counts.dust} under ${money(walletDustCut)} hidden (${money(
+                        walletSelection.dustValue,
                       )})`
                     : ""}
-                  {" · "}click a token to fill the form below, or click{" "}
-                  <strong>Import all</strong> above.
+                  {" · "}tick the ones to import, or click{" "}
+                  <strong>Fill form</strong> on a token to edit it by hand.
                 </p>
-                {walletSpam.spamCount > 0 ? (
+
+                {walletSelection.counts.impostor > 0 ? (
                   <p className="text-[11px] text-slate-500">
-                    Spam is hidden, not dropped:{" "}
+                    {walletSelection.counts.impostor} token
+                    {walletSelection.counts.impostor === 1 ? " uses" : "s use"} the right symbol on the
+                    wrong contract — the usual fake-USDT trick.{" "}
+                    <button
+                      type="button"
+                      className="font-medium text-indigo-600 hover:underline"
+                      onClick={() => setWalletHideImpostor(false)}
+                    >
+                      Show them
+                    </button>
+                  </p>
+                ) : null}
+
+                {walletSelection.counts.thin > 0 ? (
+                  <p className="text-[11px] text-slate-500">
+                    {walletSelection.counts.thin} token
+                    {walletSelection.counts.thin === 1 ? " has" : "s have"} traded under{" "}
+                    {money(MIN_ORGANIC_VOLUME_USD)} in the last 24 hours across its pools, so its price
+                    is not backed by a market.{" "}
+                    <button
+                      type="button"
+                      className="font-medium text-indigo-600 hover:underline"
+                      onClick={() => setWalletRequireMarket(false)}
+                    >
+                      Show them
+                    </button>
+                  </p>
+                ) : null}
+
+                {walletSelection.counts.spam > 0 ? (
+                  <p className="text-[11px] text-slate-500">
+                    {walletSelection.counts.spam} token
+                    {walletSelection.counts.spam === 1 ? " looks" : "s look"} like airdrop spam.{" "}
                     <button
                       type="button"
                       className="font-medium text-indigo-600 hover:underline"
                       onClick={() => setWalletHideSpam(false)}
                     >
-                      show the {walletSpam.spamCount} suspect token
-                      {walletSpam.spamCount === 1 ? "" : "s"}
+                      Show them
                     </button>
-                    {" "}(names carrying a website or promo wording).
                   </p>
                 ) : null}
-                {walletVisible.dustCount > 0 ? (
+
+                {walletSelection.counts.dust > 0 ? (
                   <p className="text-[11px] text-slate-500">
-                    Dust is hidden, not dropped:{" "}
+                    {walletSelection.counts.dust} token
+                    {walletSelection.counts.dust === 1 ? " is" : "s are"} under{" "}
+                    {money(walletDustCut)} ({money(walletSelection.dustValue)} in total).{" "}
                     <button
                       type="button"
                       className="font-medium text-indigo-600 hover:underline"
                       onClick={() => setWalletHideDust(false)}
                     >
-                      show the {walletVisible.dustCount} token
-                      {walletVisible.dustCount === 1 ? "" : "s"} under {money(walletDustCut)}
-                    </button>{" "}
-                    (or set the cut-off to $0).
+                      Show them
+                    </button>
                   </p>
                 ) : null}
+
                 {walletVisibleBalances.length === 0 ? (
                   <p className="rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs text-amber-800">
-                    {walletSpam.kept.length === 0
-                      ? "Every balance in this wallet looks like spam. Untick “Hide spam tokens” to import them anyway."
-                      : `Every balance left in this wallet is under ${money(
-                          walletDustCut,
-                        )}. Lower the cut-off, or untick it, to import them anyway.`}
+                    Nothing in this wallet passed the filters. Untick the boxes above to see everything
+                    the scan found.
                   </p>
                 ) : (
-                <div className="flex gap-2 overflow-x-auto pb-1">
-                  {walletVisibleBalances.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => chooseWalletBalance(item)}
-                      className={`min-w-36 rounded-xl border px-3 py-2 text-left transition ${
-                        symbol === item.symbol && q === String(item.quantity)
-                          ? "border-indigo-500 bg-white ring-2 ring-indigo-100"
-                          : "border-slate-200 bg-white hover:border-indigo-300"
-                      }`}
-                    >
-                      <span className="flex items-center gap-2">
-                        <CryptoLogo
-                          symbol={item.symbol}
-                          name={item.name}
-                          wallet={walletLogo}
-                          logo={item.logoUrl}
-                          className="h-8 w-8 rounded-lg"
-                        />
-                        <span className="min-w-0">
-                          <span className="block text-[10px] text-slate-400">
-                            {item.chainLabel}
-                          </span>
-                          <span className="block truncate font-semibold text-slate-900">
-                            {item.symbol}
-                          </span>
-                        </span>
+                  <>
+                    <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
+                      <span>
+                        {walletChosen.length} of {walletVisibleBalances.length} selected
                       </span>
-                      <span className="mt-1 block text-xs font-medium tabular-nums text-slate-700">
-                        {qty(item.quantity)} {item.symbol}
-                      </span>
-                      <span className="mt-0.5 block text-xs tabular-nums text-slate-500">
-                        {money(item.valueUsd)} ({money(item.price)})
-                      </span>
-                    </button>
-                  ))}
-                </div>
+                      <button
+                        type="button"
+                        className="font-medium text-indigo-600 hover:underline"
+                        onClick={selectAllWalletBalances}
+                      >
+                        Select all
+                      </button>
+                      <button
+                        type="button"
+                        className="font-medium text-indigo-600 hover:underline"
+                        onClick={selectNoWalletBalances}
+                      >
+                        Select none
+                      </button>
+                    </div>
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {walletVisibleBalances.map((item) => {
+                        const chosen = walletChosenIds.has(item.id);
+                        const traded = item.organicVolumeUsd;
+                        return (
+                          <div
+                            key={item.id}
+                            className={`w-44 shrink-0 rounded-xl border p-2 text-left transition ${
+                              chosen
+                                ? "border-indigo-500 bg-white ring-2 ring-indigo-100"
+                                : "border-slate-200 bg-white hover:border-indigo-300"
+                            }`}
+                          >
+                            <label className="flex cursor-pointer items-center gap-2">
+                              <input
+                                type="checkbox"
+                                className="h-3.5 w-3.5 shrink-0 accent-indigo-600"
+                                checked={chosen}
+                                onChange={() => toggleWalletChoice(item.id)}
+                                aria-label={`Import ${item.symbol}`}
+                              />
+                              <CryptoLogo
+                                symbol={item.symbol}
+                                name={item.name}
+                                wallet={walletLogo}
+                                logo={item.logoUrl}
+                                className="h-7 w-7 rounded-lg"
+                              />
+                              <span className="min-w-0">
+                                <span className="block truncate text-[10px] text-slate-400">
+                                  {item.chainLabel}
+                                </span>
+                                <span className="block truncate font-semibold text-slate-900">
+                                  {item.symbol}
+                                </span>
+                              </span>
+                            </label>
+                            <span className="mt-1 block text-xs font-medium tabular-nums text-slate-700">
+                              {qty(item.quantity)} {item.symbol}
+                            </span>
+                            <span className="mt-0.5 block text-xs tabular-nums text-slate-500">
+                              {money(item.valueUsd)} ({money(item.price)})
+                            </span>
+                            <span className="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
+                              {item.contractStatus === "official" ? (
+                                <span
+                                  className="rounded-full bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700"
+                                  title="The contract address is the official one for this token"
+                                >
+                                  official ✓
+                                </span>
+                              ) : null}
+                              {traded !== undefined ? (
+                                <span
+                                  className={`rounded-full px-1.5 py-0.5 font-medium ${
+                                    traded >= MIN_ORGANIC_VOLUME_USD
+                                      ? "bg-slate-50 text-slate-600"
+                                      : "bg-amber-50 text-amber-800"
+                                  }`}
+                                  title={
+                                    item.washSuspected
+                                      ? "Some pools traded implausibly more than their liquidity; that volume was left out"
+                                      : "Organic 24h volume, ignoring dust pools and wash trading"
+                                  }
+                                >
+                                  {shortUsd(traded)}/24h
+                                </span>
+                              ) : null}
+                            </span>
+                            <button
+                              type="button"
+                              className="mt-1 text-[11px] font-medium text-indigo-600 hover:underline"
+                              onClick={() => chooseWalletBalance(item)}
+                            >
+                              Fill form
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
                 )}
               </div>
             )}

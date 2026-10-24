@@ -94,10 +94,10 @@ test("splitDust honours a higher cut-off and the row shape used by holdings", ()
 test("the wallet picker and the holdings table both offer the cut-off", () => {
   const dialog = readFileSync(resolve(__dirname, "../src/components/AddAssetDialog.tsx"), "utf8");
   assert.ok(dialog.includes("Skip tokens under"), "the wallet scan offers it");
-  assert.ok(dialog.includes("walletVisibleBalances"), "the picker uses the filtered list");
-  assert.ok(dialog.includes("balances: walletVisibleBalances"), "import uses the filtered list");
+  assert.ok(dialog.includes("filterScanBalances("), "the picker uses the shared rules");
+  assert.ok(dialog.includes("balances: walletChosen"), "import uses the filtered, ticked list");
   assert.ok(dialog.includes("minValueUsd: walletDustCut"), "the server gets the same cut-off");
-  assert.ok(dialog.includes("show the"), "hidden dust can be revealed");
+  assert.ok(dialog.includes("Show them"), "hidden dust can be revealed");
 
   const table = readFileSync(resolve(__dirname, "../src/components/HoldingsTable.tsx"), "utf8");
   assert.ok(table.includes("Hide under"), "the holdings table offers it");

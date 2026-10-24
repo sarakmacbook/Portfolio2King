@@ -38,6 +38,7 @@ import { folderForImport } from "@/lib/holdings-folders";
 import { shortWalletAddress } from "@/lib/wallet-chains";
 import { isDust, normaliseDustThreshold } from "@/lib/wallet-dust";
 import { isSpamToken } from "@/lib/wallet-spam";
+import { contractStatusOf } from "@/lib/token-trust";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -433,16 +434,31 @@ export async function importWalletBalances(input: {
    * import junk.
    */
   skipSpam?: boolean;
+  /**
+   * Skip tokens whose contract is not the official one for their symbol — the
+   * fake-`USDT` problem. Checked here as well as in the dialog, from the same
+   * table, so a stale page cannot import a look-alike.
+   */
+  skipImpostor?: boolean;
+  /**
+   * Skip tokens with less than this much organic 24h volume. `0` / omitted
+   * imports everything; an unknown volume is never a reason to skip.
+   */
+  minOrganicVolumeUsd?: number;
   balances: Array<{
     symbol: string;
     name: string;
     chainLabel: string;
+    /** Chain id the balance sits on, for the official-contract lookup. */
+    chain?: string;
     quantity: number;
     price: number;
     category: CryptoCategory;
     contract: string | null;
     /** Spam flag from the indexer, when one was passed along. */
     spam?: boolean;
+    /** Organic 24h volume measured by the scan, when it had an answer. */
+    organicVolumeUsd?: number;
   }>;
 }): Promise<{
   ok: boolean;
@@ -456,6 +472,10 @@ export async function importWalletBalances(input: {
   skippedDust?: number;
   /** How many balances were skipped for looking like spam. */
   skippedSpam?: number;
+  /** How many had a non-official contract for their symbol. */
+  skippedImpostor?: number;
+  /** How many were skipped for having no organic trading volume. */
+  skippedThin?: number;
 }> {
   try {
     await ensureSchema();
@@ -475,6 +495,10 @@ export async function importWalletBalances(input: {
     const minValueUsd = Number(input.minValueUsd) > 0 ? normaliseDustThreshold(input.minValueUsd) : 0;
     let skippedDust = 0;
     let skippedSpam = 0;
+    let skippedImpostor = 0;
+    let skippedThin = 0;
+    const minVolume =
+      Number(input.minOrganicVolumeUsd) > 0 ? Number(input.minOrganicVolumeUsd) : 0;
 
     for (const item of items.slice(0, 50)) {
       const symbol = String(item.symbol ?? "").trim().toUpperCase();
@@ -482,6 +506,23 @@ export async function importWalletBalances(input: {
       const quantity = Number(item.quantity);
       const price = Number(item.price);
       if (!symbol || !Number.isFinite(quantity) || quantity <= 0) continue;
+      // Contract first: a look-alike `USDT` is the one token that can quietly
+      // become the biggest holding in the portfolio.
+      const chain = String(item.chain ?? item.chainLabel ?? "");
+      if (
+        input.skipImpostor !== false &&
+        contractStatusOf({ symbol, contract: item.contract, chain }) === "different"
+      ) {
+        skippedImpostor += 1;
+        continue;
+      }
+      // Tokens nobody trades: the price is whatever the minter typed in. Only
+      // skipped when the scan actually measured a volume.
+      const organic = Number(item.organicVolumeUsd);
+      if (minVolume > 0 && Number.isFinite(organic) && organic < minVolume) {
+        skippedThin += 1;
+        continue;
+      }
       // Spam: checked before the value, because a scam token with a made-up
       // price is the one a dollar cut-off cannot catch.
       if (input.skipSpam !== false && isSpamToken({ name, symbol, spam: item.spam === true })) {
@@ -569,6 +610,8 @@ export async function importWalletBalances(input: {
       folderNote,
       ...(skippedDust > 0 ? { skippedDust } : {}),
       ...(skippedSpam > 0 ? { skippedSpam } : {}),
+      ...(skippedImpostor > 0 ? { skippedImpostor } : {}),
+      ...(skippedThin > 0 ? { skippedThin } : {}),
     };
   } catch (e) {
     return {
