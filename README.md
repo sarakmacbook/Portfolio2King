@@ -198,6 +198,47 @@ shown each one carries a small **spam?** badge with its value shown as *—* (it
 not part of the total). Arrange mode ignores the filter so
 nothing becomes impossible to drag into a folder.
 
+### How a scan finds tokens
+
+The address decides the method; `src/lib/wallet-scanner.ts` is the only place
+that talks to the network about a wallet.
+
+| Address | How the tokens are found |
+| --- | --- |
+| `0x…` (EVM) | **Two reads in parallel, then merged.** DeBank covers every chain it indexes in one call; at the same time the direct read asks the public RPCs on Ethereum, BNB Chain, Arbitrum, Base, Polygon, Optimism and Avalanche for the native coin plus the known tickers, and asks **Blockscout → Routescan** for *every other ERC-20* the wallet holds (that is where the long tail comes from). |
+| Solana | The public Solana RPC (`solana-rpc.publicnode.com`, then `api.mainnet-beta.solana.com`) reads the wallet's token accounts and the known mints. |
+| Bitcoin | `mempool.space`, falling back to `blockstream.info`. |
+| Tron | `apilist.tronscanapi.com/api/accountv2`. |
+
+Only chains with a public Blockscout or Routescan instance can be *discovered*
+beyond the hand-listed tickers — today that is 14 Blockscout chains (Ethereum,
+Base, Optimism, Arbitrum, Polygon, Gnosis, zkSync, Scroll, Linea, Mantle, Zora,
+Mode, Celo, Aurora) and 56 Routescan ones, with Routescan as the fallback where
+Blockscout has no public instance (Base, for example). A chain that has neither
+still reports its native coin and the listed tickers over RPC; nothing is hidden
+because a third party is missing.
+
+The two reads run together, so a scan takes as long as the slower one:
+
+1. **DeBank** (EVM only) — `pro-openapi.debank.com` with `DEBANK_ACCESS_KEY` when
+   one is set, otherwise the keyless `api.debank.com` and `api.rabby.io` routes
+   in turn. 6 s per request, 12 s total budget, at most 250 tokens.
+2. **Direct read** — per chain, in parallel: `eth_getBalance` plus batched
+   `balanceOf` calls for the known tickers, and the explorer discovery call
+   (7 s Blockscout / 8 s Routescan, two pages of 100, at most 150 tokens per
+   chain, spam-flagged tokens dropped).
+3. **Merge** — the same token found twice is one row (chain + contract), and
+   DeBank's live price wins over a locally looked-up one. Tokens only the direct
+   read saw are priced from the market APIs, then from the built-in fallback
+   table. The result says `via DeBank` or `read directly from the chains`, and
+   `directAdditions` counts what DeBank would have missed.
+4. **Trust pass** (`/api/wallet/scan` → `wallet-trust`) — official contract
+   address, organic 24 h volume and liquidity depth per contract, from the local
+   table and one batched DexScreener call (30 contracts each). Failures leave a
+   token *unknown*, never hidden.
+5. **Filters in the dialog** — look-alike contracts, spam, no real market and
+   dust are each counted with a *Show them*, and only ticked tokens are imported.
+
 EVM addresses are read through **[DeBank](https://debank.com)**, which indexes
 **every EVM chain it supports — 100+ of them**, from Ethereum, BNB Chain,
 Arbitrum, Base and Polygon to Sonic, Zora, Berachain, Unichain, Ink, HyperEVM and

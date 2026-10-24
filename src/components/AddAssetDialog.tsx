@@ -986,6 +986,40 @@ function AddAssetForm({
               </span>
             </div>
 
+            <details className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              <summary className="cursor-pointer font-medium text-slate-600">
+                How the scan finds tokens
+              </summary>
+              <ul className="mt-2 space-y-1.5 text-[11px] leading-relaxed text-slate-500">
+                <li>
+                  <strong className="font-medium text-slate-600">0x… (EVM)</strong> — DeBank for
+                  every chain it indexes, prices included, <em>at the same time as</em> a direct
+                  read: public RPC on Ethereum, BNB Chain, Arbitrum, Base, Polygon, Optimism and
+                  Avalanche, plus Blockscout then Routescan for every other ERC-20 the wallet holds.
+                </li>
+                <li>
+                  <strong className="font-medium text-slate-600">Solana</strong> — public RPC token
+                  accounts and known mints. <strong className="font-medium text-slate-600">Bitcoin</strong>{" "}
+                  — mempool.space, then blockstream.info.{" "}
+                  <strong className="font-medium text-slate-600">Tron</strong> — Tronscan.
+                </li>
+                <li>
+                  <strong className="font-medium text-slate-600">Merge</strong> — DeBank&apos;s price
+                  wins for the tokens it knows; anything only the direct read saw is added and priced
+                  from the market APIs.
+                </li>
+                <li>
+                  <strong className="font-medium text-slate-600">Then the checks</strong> — official
+                  contract table, organic 24h volume and liquidity depth from DexScreener (30
+                  contracts per call).
+                </li>
+                <li>
+                  <strong className="font-medium text-slate-600">Limits</strong> — up to 250 tokens
+                  from DeBank, 150 per chain from the explorers, 6–8 s per request.
+                </li>
+              </ul>
+            </details>
+
             {walletScanError && (
               <p className="mt-2 text-xs text-rose-600">{walletScanError}</p>
             )}
