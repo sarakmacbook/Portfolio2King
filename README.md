@@ -121,8 +121,9 @@ whose tags record the original currency.
 the form for you (or imports everything it finds):
 
 1. Paste the address — `0x…` for any EVM chain, a Solana base58 address, a
-   Bitcoin `bc1…` / `1…` address, or a Tron `T…` address — and pick a chain, or
-   leave **All chains (DeBank)**.
+   Bitcoin `bc1…` / `1…` address, or a Tron `T…` address — and choose where to
+   scan: **DeBank** (the default) or **Blockscan** (Etherscan). Every chain the
+   chosen source knows is covered; there is no chain filter to set.
 2. Click **Scan wallet**. Every non-zero balance comes back with its quantity,
    USD price, value, chain and logo — across every chain DeBank indexes, not
    just the popular ones this app can read by itself.
@@ -220,13 +221,13 @@ that talks to the network about a wallet.
 | Bitcoin | `mempool.space`, falling back to `blockstream.info`. |
 | Tron | `apilist.tronscanapi.com/api/accountv2`. |
 
-**Blockscan** is the second source, and it needs no switch in the UI: Blockscan is
-Etherscan's multichain explorer, its data comes from **Etherscan V2**
-(`https://api.etherscan.io/v2/api`) — one key for 60+ chains, with `chainid`
-choosing the network — and the scan uses it automatically when DeBank cannot
-answer. The sweep asks `module=account&action=addresstokenbalance` per chain
-(token balances *and* `TokenPriceUSD`) and merges the answer with the direct read
-above, so a refusal never turns into an empty wallet:
+**Blockscan** is the other choice in the scan menu (*Scan via Blockscan*).
+Blockscan is Etherscan's multichain explorer and its data comes from **Etherscan
+V2** (`https://api.etherscan.io/v2/api`) — one key for 60+ chains, with `chainid`
+choosing the network. The sweep asks
+`module=account&action=addresstokenbalance` per chain (token balances *and*
+`TokenPriceUSD`) and merges the answer with the direct read above, so a refusal
+never turns into an empty wallet:
 
 - **Needs a key.** `ETHERSCAN_API_KEY` (or `BLOCKSCAN_API_KEY`). Without one the
   sweep is skipped, the scan falls back to the direct read, and the dialog says so
@@ -238,10 +239,10 @@ above, so a refusal never turns into an empty wallet:
   prices, one token call per chain, 550 ms apart, inside a 12 s budget; chains the
   budget did not reach are counted in the note. A single-chain scan (pick the
   chain in the menu) also reads that chain's native coin.
-- **Automatic, not a choice.** In a default scan, if DeBank cannot answer and an
-  Etherscan key is configured, this sweep runs instead of settling for the smaller
-  direct read — the result then says `via Blockscan` and why. API callers can still
-  force it with `?source=blockscan` on `/api/wallet/scan`.
+- **Also automatic.** In a DeBank scan, if DeBank cannot answer and an Etherscan
+  key is configured, this sweep runs instead of settling for the smaller direct
+  read — the result then says `via Blockscan` and why. API callers can force it
+  with `?source=blockscan` on `/api/wallet/scan`.
 
 Only chains with a public Blockscout or Routescan instance can be *discovered*
 beyond the hand-listed tickers — today that is 14 Blockscout chains (Ethereum,
@@ -284,9 +285,9 @@ the numbers came from.
 That list is not hard-coded here. A chain id this app has never seen is still
 kept, listed and imported; its display name is read from DeBank's own
 `/v1/chain/list` (cached for six hours) and falls back to the upper-cased id
-(`AERO`) if even that is unavailable. Choosing a specific chain in the dropdown
-filters the result, and the filter understands both spellings — `ethereum` and
-DeBank's `eth` are the same chain.
+(`AERO`) if even that is unavailable. A scan always covers every chain; API
+callers can still narrow it with `?chain=` on `/api/wallet/scan`, and that filter
+understands both spellings — `ethereum` and DeBank's `eth` are the same chain.
 
 DeBank's keyless routes get blocked, renamed and rate-limited, so three are tried
 in order before giving up: DeBank's API gateway
@@ -329,7 +330,7 @@ another chain, a filtered token, a token it does not index — is added from the
 direct read and priced by the app. That is what stops a scan from quietly
 dropping a holding DeBank did not mention.
 
-Every chain the dropdown offers is scanned, including the ones with no RPC token
+Every chain either scan covers is read, including the ones with no RPC token
 list (zkSync, Linea, Scroll, Mantle, Blast, Fantom, Gnosis, Cronos, plus Zora,
 Sonic, Celo, Mode, Unichain and Berachain): they are read through the explorers,
 so they report ERC-20s but not their native coin.
