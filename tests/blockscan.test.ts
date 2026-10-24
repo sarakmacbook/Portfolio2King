@@ -322,9 +322,13 @@ test("Blockscan is a source the user picks, and the scan route carries it", () =
   );
 
   const dialog = read("components/AddAssetDialog.tsx");
-  assert.ok(dialog.includes("Scan via Blockscan"), "the picker offers it");
-  assert.ok(dialog.includes("source: walletSource"), "the choice is sent with the scan");
-  assert.ok(dialog.includes("via Blockscan"), "the result says it was used");
+  // There is deliberately no source menu: one scan button, and Blockscan joins
+  // in on its own when DeBank cannot answer.
+  assert.equal(dialog.includes("Scan via Blockscan"), false, "no source menu in the picker");
+  assert.equal(dialog.includes("walletSource"), false, "no source state either");
+  assert.equal(dialog.includes("source:"), false, "the dialog sends no source parameter");
+  assert.ok(dialog.includes("Blockscan"), "but the panel explains where it fits");
+  assert.ok(dialog.includes("via Blockscan"), "and the result says when it was used");
   assert.ok(dialog.includes("ETHERSCAN_API_KEY"), "and the key requirement is explained");
 });
 
