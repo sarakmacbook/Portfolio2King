@@ -17,7 +17,15 @@
  * and the RPC read still runs. Everything that shapes a response is a pure
  * function — see tests/blockscout.test.ts.
  */
-import { isStablecoinSymbol } from "@/lib/stablecoins";
+import {
+  type DiscoveredToken,
+  isTokenContract,
+  MAX_DISCOVERED_TOKENS,
+  normaliseDiscoveredTokens,
+  rawTokenQuantity,
+  readTokenNumber,
+  readTokenString,
+} from "@/lib/discovered-tokens";
 
 /**
  * Public Blockscout instances, keyed by the app's chain ids.
@@ -47,18 +55,23 @@ export const BLOCKSCOUT_INSTANCES: Record<string, string> = {
 export const BLOCKSCOUT_TIMEOUT_MS = 7000;
 
 /** The most tokens one chain will report (spam airdrops can be endless). */
-export const MAX_BLOCKSCOUT_TOKENS = 150;
+export const MAX_BLOCKSCOUT_TOKENS = MAX_DISCOVERED_TOKENS;
 
-export type BlockscoutToken = {
-  /** Contract address (lower-case for comparison, original casing for display). */
-  contract: string;
-  symbol: string;
-  name: string;
-  decimals: number;
-  /** Whole-token quantity, ready to use. */
-  quantity: number;
-  stablecoin: boolean;
-};
+/** Kept as the module's public alias; the shared type lives in discovered-tokens. */
+export type BlockscoutToken = DiscoveredToken;
+
+/** Local aliases so the parsers below read like the API they document. */
+const readString = readTokenString;
+const readNumber = readTokenNumber;
+const readQuantity = rawTokenQuantity;
+
+/**
+ * Splits a raw integer balance by its decimals. Kept as a named export because
+ * it is the one conversion callers ask about.
+ */
+export function blockscoutQuantity(raw: unknown, decimals: number): number {
+  return rawTokenQuantity(raw, decimals);
+}
 
 export function blockscoutBaseUrl(chain: string): string | null {
   const base = BLOCKSCOUT_INSTANCES[chain.trim().toLowerCase()];
@@ -73,81 +86,6 @@ export function blockscoutTokenListUrl(base: string, address: string): string {
 export function blockscoutTokenBalancesUrl(base: string, address: string): string {
   const root = base.replace(/\/+$/, "");
   return `${root}/api/v2/addresses/${encodeURIComponent(address.trim())}/token-balances`;
-}
-
-function readString(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function readNumber(value: unknown): number {
-  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-  if (typeof value === "string") {
-    const parsed = Number(value.replace(/,/g, ""));
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
-}
-
-function isContract(value: string): boolean {
-  return /^0x[a-fA-F0-9]{40}$/.test(value);
-}
-
-/** Splits a raw integer balance (`"12345"` or `"0x3039"`) by its decimals. */
-export function blockscoutQuantity(raw: unknown, decimals: number): number {
-  // `0` decimals is legitimate (some tokens have none), so it must not fall
-  // back to 18 the way `|| 18` would.
-  const rounded = Number.isFinite(decimals) ? Math.round(decimals) : 18;
-  const digits = Math.max(0, Math.min(36, rounded));
-  if (typeof raw === "string" && raw.startsWith("0x")) {
-    try {
-      const value = BigInt(raw);
-      if (value <= BigInt(0)) return 0;
-      return Number(value) / 10 ** digits;
-    } catch {
-      return 0;
-    }
-  }
-  const value = readNumber(raw);
-  if (!Number.isFinite(value) || value <= 0) return 0;
-  return value / 10 ** digits;
-}
-
-/** Shared shaping: drop non-ERC-20 entries, spam, empty balances and duplicates. */
-function toTokens(
-  items: Array<{
-    contract: string;
-    symbol: string;
-    name: string;
-    decimals: number;
-    quantity: number;
-    spam?: boolean;
-  }>,
-): BlockscoutToken[] {
-  const seen = new Set<string>();
-  const tokens: BlockscoutToken[] = [];
-
-  // Biggest first, so the cap keeps what is worth importing.
-  for (const item of items.sort((a, b) => b.quantity - a.quantity)) {
-    if (item.spam) continue;
-    if (!isContract(item.contract)) continue;
-    if (!Number.isFinite(item.quantity) || item.quantity <= 0) continue;
-    const key = item.contract.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    const symbol = (item.symbol || item.name || `${item.contract.slice(0, 6)}…`).toUpperCase();
-    tokens.push({
-      contract: item.contract,
-      symbol,
-      name: item.name || symbol,
-      decimals: Math.max(0, Math.min(36, Math.round(item.decimals) || 18)),
-      quantity: Number(item.quantity.toFixed(8)),
-      stablecoin: isStablecoinSymbol(symbol),
-    });
-    if (tokens.length >= MAX_BLOCKSCOUT_TOKENS) break;
-  }
-
-  return tokens;
 }
 
 /**
@@ -180,12 +118,12 @@ export function parseBlockscoutTokenList(payload: unknown): BlockscoutToken[] {
       symbol: readString(item.symbol),
       name: readString(item.tokenName) || readString(item.name),
       decimals,
-      quantity: blockscoutQuantity(item.balance ?? item.value, decimals),
+      quantity: readQuantity(item.balance ?? item.value, decimals),
       spam: item.reputation === "spam" || item.is_spam === true,
     });
   }
 
-  return toTokens(items);
+  return normaliseDiscoveredTokens(items, MAX_BLOCKSCOUT_TOKENS);
 }
 
 /** Shapes the v2 `token-balances` response (which carries spam reputation). */
@@ -216,12 +154,12 @@ export function parseBlockscoutTokenBalances(payload: unknown): BlockscoutToken[
       symbol: readString(token.symbol),
       name: readString(token.name),
       decimals,
-      quantity: blockscoutQuantity(entry.value, decimals),
+      quantity: readQuantity(entry.value, decimals),
       spam: reputation === "spam" || reputation === "unverified_scam",
     });
   }
 
-  return toTokens(items);
+  return normaliseDiscoveredTokens(items, MAX_BLOCKSCOUT_TOKENS);
 }
 
 /**

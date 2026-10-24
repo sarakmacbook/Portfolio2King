@@ -163,21 +163,35 @@ Two things follow:
   the keyless routes, and then the app can only read the fifteen chains it knows
   how to read by itself.
 - Without a key the scan still works, just smaller: it reads balances straight
-  from public RPCs and block explorers and the dialog says so quietly — *"Read
+  from public RPCs and the Blockscout / Routescan explorers and the dialog says so quietly — *"Read
   directly from the chains — DeBank only lists tokens with an access key … Add a
   free DEBANK_ACCESS_KEY to cover every chain DeBank indexes."* DeBank serves an
   **empty list** to unauthenticated callers even for a wallet full of tokens, so
   an empty keyless answer is now reported as "give DeBank a key", never as "this
   wallet is empty".
 
-The direct read does not just look up a fixed ticker list: for every chain with a
-public **[Blockscout](https://www.blockscout.com)** instance, the wallet's whole
-ERC-20 portfolio is discovered through Blockscout's account API (`tokenlist`,
-with `token-balances` as a second try) — so a token nobody hand-listed still shows
-up, with its name, symbol and quantity. RPC reads the native balance and the
-well-known tickers; Blockscout fills in the rest; spam-marked tokens are skipped.
-Chains without an instance are still scanned, they just cannot discover unknown
-tokens.
+The direct read does not just look up a fixed ticker list. Each chain is read from
+two sides at once:
+
+- **RPC** gives the native coin balance and the handful of well-known tickers.
+- **Explorers** give the wallet's whole ERC-20 portfolio — including tokens nobody
+  hand-listed, such as LayerZero (`ZRO`) on Base. Two keyless sources are used per
+  chain: public **[Blockscout](https://www.blockscout.com)** instances (`tokenlist`
+  first, then `token-balances`), and **[Routescan](https://routescan.io)**'s
+  Etherscan-compatible `addresstokenbalance` API, which covers chains Blockscout
+  has no public instance for (BNB Chain, Avalanche, …) and steps in when
+  Blockscout is rate-limited. Spam-marked tokens are dropped.
+
+DeBank and the direct read run **together and are merged**, not "DeBank or
+nothing": DeBank's prices win for the tokens it reports, and anything it missed —
+another chain, a filtered token, a token it does not index — is added from the
+direct read and priced by the app. That is what stops a scan from quietly
+dropping a holding DeBank did not mention.
+
+Every chain the dropdown offers is scanned, including the ones with no RPC token
+list (zkSync, Linea, Scroll, Mantle, Blast, Fantom, Gnosis, Cronos, plus Zora,
+Sonic, Celo, Mode, Unichain and Berachain): they are read through the explorers,
+so they report ERC-20s but not their native coin.
 
 A refusal is never reported as an empty wallet. DeBank answers `200 OK` with
 `{ "error_code": 1, "error_message": … }` when it wants a key or is rate-limiting,

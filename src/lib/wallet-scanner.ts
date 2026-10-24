@@ -1,9 +1,12 @@
 import type { CryptoCategory } from "@/db/schema";
 import { fetchDebankBalances, type DebankBalance } from "@/lib/debank";
 import { fetchBlockscoutTokens } from "@/lib/blockscout";
+import { type DiscoveredToken } from "@/lib/discovered-tokens";
+import { fetchRoutescanTokens } from "@/lib/routescan";
 import { fetchPreferredMarketPrice } from "@/lib/market-prices";
 import { STABLECOIN_SYMBOLS } from "@/lib/stablecoins";
 import {
+  WALLET_CHAIN_LABELS,
   detectWalletAddressKind,
   normaliseWalletChain,
   type WalletAddressKind,
@@ -66,6 +69,12 @@ export type WalletScanResult = {
    * into an actionable hint instead of a scary error.
    */
   debankNeedsKey?: boolean;
+  /**
+   * How many holdings the direct read found that DeBank did not report. DeBank
+   * covers the chains it indexes; the explorers see every ERC-20 on a chain, so
+   * a non-zero count here means DeBank would have missed them.
+   */
+  directAdditions?: number;
 };
 
 const REQUEST_TIMEOUT_MS = 7000;
@@ -216,6 +225,54 @@ const EVM_CHAINS: EvmChainSpec[] = [
   },
 ];
 
+/**
+ * Chains the direct read reaches through an explorer only.
+ *
+ * The RPC read needs a hand-written token list per chain, which is why it covers
+ * a handful of chains. Discovery does not: Blockscout and Routescan report the
+ * token *and* the balance, so the chains the chain dropdown offers but the RPC
+ * list does not cover are still scanned — they just cannot read a native coin
+ * balance. Without this, picking "zkSync" or "Linea" quietly returned nothing.
+ */
+const EXPLORER_CHAINS: Array<{ chain: string; label: string }> = [
+  { chain: "zksync", label: WALLET_CHAIN_LABELS.zksync },
+  { chain: "linea", label: WALLET_CHAIN_LABELS.linea },
+  { chain: "scroll", label: WALLET_CHAIN_LABELS.scroll },
+  { chain: "mantle", label: WALLET_CHAIN_LABELS.mantle },
+  { chain: "blast", label: WALLET_CHAIN_LABELS.blast },
+  { chain: "fantom", label: WALLET_CHAIN_LABELS.fantom },
+  { chain: "gnosis", label: WALLET_CHAIN_LABELS.gnosis },
+  { chain: "cronos", label: WALLET_CHAIN_LABELS.cronos },
+  // Chains DeBank indexes that this app's dropdown does not list (yet).
+  { chain: "zora", label: "Zora" },
+  { chain: "sonic", label: "Sonic" },
+  { chain: "celo", label: "Celo" },
+  { chain: "mode", label: "Mode" },
+  { chain: "unichain", label: "Unichain" },
+  { chain: "berachain", label: "Berachain" },
+];
+
+/**
+ * Reads one explorer-only chain: every ERC-20 the wallet holds, with the balance
+ * the explorer reports. No native-coin balance, because that needs an RPC.
+ */
+async function scanOneExplorerChain(
+  spec: { chain: string; label: string },
+  address: string,
+): Promise<Array<Omit<ScannedWalletBalance, "price" | "valueUsd">>> {
+  const tokens = await discoverChainTokens(spec.chain, address);
+  return tokens.map((token) => ({
+    id: `${spec.chain}:${token.symbol}:${token.contract}`,
+    symbol: token.symbol,
+    name: token.name,
+    chain: spec.chain,
+    chainLabel: spec.label,
+    quantity: token.quantity,
+    category: token.stablecoin ? ("stablecoin" as const) : ("volatile" as const),
+    contract: token.contract,
+  }));
+}
+
 const SOLANA_MINTS: Record<string, { symbol: string; name: string }> = {
   EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: { symbol: "USDC", name: "USD Coin (Solana)" },
   Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: { symbol: "USDT", name: "Tether USD (Solana)" },
@@ -254,8 +311,30 @@ export function encodeBalanceOfCall(evmAddress: string): string {
 }
 
 /**
+ * Every ERC-20 a wallet holds on one chain, from whichever explorer answers.
+ *
+ * Blockscout first (rich data, many big chains), then Routescan — which covers
+ * chains with no public Blockscout instance and steps in when Blockscout is
+ * rate-limited. Both are keyless and both are best effort, so this returns `[]`
+ * rather than failing a scan.
+ */
+async function discoverChainTokens(chain: string, address: string): Promise<DiscoveredToken[]> {
+  try {
+    const blockscout = await fetchBlockscoutTokens(chain, address);
+    if (blockscout.length > 0) return blockscout;
+  } catch {
+    // Fall through to Routescan.
+  }
+  try {
+    return await fetchRoutescanTokens(chain, address);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Reads a chain: the native balance plus the known tickers over RPC, and every
- * other ERC-20 the wallet holds via Blockscout's account API.
+ * other ERC-20 the wallet holds via an explorer's account API.
  *
  * RPC alone can only answer "how much of *this* token do you hold", so a wallet
  * would otherwise show only the hand-listed tickers. Blockscout contributes the
@@ -267,7 +346,7 @@ async function scanOneEvmChain(
 ): Promise<Array<Omit<ScannedWalletBalance, "price" | "valueUsd">>> {
   const [known, discovered] = await Promise.all([
     scanEvmChainRpc(spec, address),
-    fetchBlockscoutTokens(spec.chain, address).catch(() => []),
+    discoverChainTokens(spec.chain, address),
   ]);
 
   const seen = new Set(
@@ -643,72 +722,73 @@ export async function scanWalletAddress(
     );
   }
 
-  let rawBalances: Array<Omit<ScannedWalletBalance, "price" | "valueUsd">> = [];
-  let debankBalances: DebankBalance[] = [];
-  let sourceNote: string | undefined;
+  const isEvm = addressKind === "evm";
+  const filtered = requestedChain !== "auto";
+  const chainsToScan =
+    filtered && EVM_CHAINS.some((c) => c.chain === requestedChain)
+      ? EVM_CHAINS.filter((c) => c.chain === requestedChain)
+      : filtered
+        ? []
+        : EVM_CHAINS;
+  const explorerChainsToScan =
+    filtered && EXPLORER_CHAINS.some((c) => c.chain === requestedChain)
+      ? EXPLORER_CHAINS.filter((c) => c.chain === requestedChain)
+      : filtered
+        ? []
+        : EXPLORER_CHAINS;
 
-  // DeBank indexes every EVM chain in one call and already knows USD prices, so
-  // it is asked first. When it is unavailable (no key, rate limit, outage) the
-  // same scan continues against the public RPCs below.
-  let debankNeedsKey = false;
-  if (addressKind === "evm") {
-    const debank = await fetchDebankBalances(address, requestedChain);
-    if (debank.ok && debank.balances.length > 0) {
-      debankBalances = debank.balances;
-    } else {
-      // DeBank is a bonus, not a dependency: whatever it says ends up as a note
-      // next to the direct read, never as a failed scan.
-      sourceNote = debank.error ?? undefined;
-      debankNeedsKey = debank.needsAccessKey;
-    }
-  }
+  /**
+   * DeBank and the direct read run **together**, and their results are merged.
+   *
+   * Running only one of them is what used to lose tokens: DeBank answers
+   * quickly with prices but only covers the chains it indexes and filters, and
+   * the direct read sees every ERC-20 on a chain but knows fewer chains. Both
+   * run in parallel so a scan takes as long as the slower one, not both.
+   */
+  const [debank, directRaw] = await Promise.all([
+    isEvm ? fetchDebankBalances(address, requestedChain) : Promise.resolve(null),
+    isEvm
+      ? Promise.all([
+          ...chainsToScan.map((spec) => scanOneEvmChain(spec, address)),
+          ...explorerChainsToScan.map((spec) => scanOneExplorerChain(spec, address)),
+        ]).then((perChain) => perChain.flat())
+      : addressKind === "solana"
+        ? scanSolanaWallet(address)
+        : addressKind === "bitcoin"
+          ? scanBitcoinWallet(address)
+          : addressKind === "tron"
+            ? scanTronWallet(address)
+            : Promise.resolve([]),
+  ]);
+
+  const debankBalances: DebankBalance[] =
+    debank?.ok && debank.balances.length > 0 ? debank.balances : [];
+  const sourceNote = debank && debankBalances.length === 0 ? (debank.error ?? undefined) : undefined;
+  const debankNeedsKey = Boolean(debank && debankBalances.length === 0 && debank.needsAccessKey);
 
   if (debankBalances.length > 0) {
+    // DeBank's numbers win for the tokens it knows (it has live prices), and
+    // everything it missed — other chains, filtered or unlisted tokens — is
+    // added from the direct read and priced here.
+    const known = new Set(debankBalances.map((balance) => balanceKey(balance.chain, balance.contract, balance.symbol)));
+    const extra = directRaw.filter(
+      (item) => !known.has(balanceKey(item.chain, item.contract, item.symbol)),
+    );
+    const priced = await priceBalances(extra, debankBalances);
+    const merged = [...debankBalances.map(fromDebank), ...priced].sort(
+      (a, b) => b.valueUsd - a.valueUsd || b.quantity - a.quantity,
+    );
     return {
       address,
       addressKind,
       chain: requestedChain,
-      balances: debankBalances.map(fromDebank),
+      balances: merged,
       source: "debank",
+      ...(extra.length > 0 ? { directAdditions: extra.length } : {}),
     };
   }
 
-  if (addressKind === "evm") {
-    const chainsToScan =
-      requestedChain !== "auto" &&
-      EVM_CHAINS.some((c) => c.chain === requestedChain)
-        ? EVM_CHAINS.filter((c) => c.chain === requestedChain)
-        : EVM_CHAINS;
-    const perChain = await Promise.all(
-      chainsToScan.map((spec) => scanOneEvmChain(spec, address)),
-    );
-    rawBalances = perChain.flat();
-  } else if (addressKind === "solana") {
-    rawBalances = await scanSolanaWallet(address);
-  } else if (addressKind === "bitcoin") {
-    rawBalances = await scanBitcoinWallet(address);
-  } else if (addressKind === "tron") {
-    rawBalances = await scanTronWallet(address);
-  }
-
-  // Price unique symbols in parallel.
-  const uniqueSymbols = [...new Set(rawBalances.map((b) => b.symbol.toUpperCase()))];
-  const priceEntries = await Promise.all(
-    uniqueSymbols.map(async (sym) => [sym, await resolveSymbolPriceUsd(sym)] as const),
-  );
-  const priceMap = new Map<string, number>(priceEntries);
-
-  const balances: ScannedWalletBalance[] = rawBalances
-    .map((item) => {
-      const price = priceMap.get(item.symbol.toUpperCase()) ?? 0;
-      const valueUsd = Number((item.quantity * price).toFixed(2));
-      return {
-        ...item,
-        price,
-        valueUsd,
-      };
-    })
-    .sort((a, b) => b.valueUsd - a.valueUsd || b.quantity - a.quantity);
+  const balances = await priceBalances(directRaw);
 
   return {
     address,
@@ -719,4 +799,46 @@ export async function scanWalletAddress(
     ...(sourceNote ? { sourceNote } : {}),
     ...(debankNeedsKey ? { debankNeedsKey: true } : {}),
   };
+}
+
+/**
+ * Identity of one holding across sources: chain + contract, or chain + symbol
+ * for a native coin (which has no contract).
+ */
+function balanceKey(chain: string, contract: string | null, symbol: string): string {
+  const chainKey = chain.trim().toLowerCase();
+  return contract
+    ? `${chainKey}:${contract.toLowerCase()}`
+    : `${chainKey}:sym:${symbol.toUpperCase()}`;
+}
+
+/**
+ * Fills in the USD price of holdings that DeBank did not price, reusing DeBank's
+ * price for a symbol it already quoted so one token never shows two prices.
+ */
+async function priceBalances(
+  rawBalances: Array<Omit<ScannedWalletBalance, "price" | "valueUsd">>,
+  priced: readonly DebankBalance[] = [],
+): Promise<ScannedWalletBalance[]> {
+  const alreadyPriced = new Map(
+    priced.map((balance) => [balance.symbol.toUpperCase(), balance.price]),
+  );
+  const needed = [
+    ...new Set(
+      rawBalances
+        .map((balance) => balance.symbol.toUpperCase())
+        .filter((symbol) => !alreadyPriced.has(symbol)),
+    ),
+  ];
+  const entries = await Promise.all(
+    needed.map(async (symbol) => [symbol, await resolveSymbolPriceUsd(symbol)] as const),
+  );
+  const prices = new Map<string, number>([...alreadyPriced, ...entries]);
+
+  return rawBalances
+    .map((item) => {
+      const price = prices.get(item.symbol.toUpperCase()) ?? 0;
+      return { ...item, price, valueUsd: Number((item.quantity * price).toFixed(2)) };
+    })
+    .sort((a, b) => b.valueUsd - a.valueUsd || b.quantity - a.quantity);
 }
