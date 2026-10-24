@@ -59,6 +59,12 @@ export type WalletScanResult = {
   source: "debank" | "onchain";
   /** Why DeBank was not used, when it was tried and failed. */
   sourceNote?: string;
+  /**
+   * DeBank refused the keyless routes and no `DEBANK_ACCESS_KEY` is set, so the
+   * scan is running on the (much smaller) direct read. The dialog turns this
+   * into an actionable hint instead of a scary error.
+   */
+  debankNeedsKey?: boolean;
 };
 
 const REQUEST_TIMEOUT_MS = 7000;
@@ -603,12 +609,16 @@ export async function scanWalletAddress(
   // DeBank indexes every EVM chain in one call and already knows USD prices, so
   // it is asked first. When it is unavailable (no key, rate limit, outage) the
   // same scan continues against the public RPCs below.
+  let debankNeedsKey = false;
   if (addressKind === "evm") {
     const debank = await fetchDebankBalances(address, requestedChain);
     if (debank.ok && debank.balances.length > 0) {
       debankBalances = debank.balances;
     } else {
+      // DeBank is a bonus, not a dependency: whatever it says ends up as a note
+      // next to the direct read, never as a failed scan.
       sourceNote = debank.error ?? undefined;
+      debankNeedsKey = debank.needsAccessKey;
     }
   }
 
@@ -666,5 +676,6 @@ export async function scanWalletAddress(
     balances,
     source: "onchain",
     ...(sourceNote ? { sourceNote } : {}),
+    ...(debankNeedsKey ? { debankNeedsKey: true } : {}),
   };
 }
