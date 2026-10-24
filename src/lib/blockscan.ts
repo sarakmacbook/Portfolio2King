@@ -1,0 +1,449 @@
+/**
+ * Blockscan balances — the multichain holdings behind <https://blockscan.com>.
+ *
+ * Blockscan is Etherscan's cross-chain explorer, and the API underneath it is
+ * Etherscan **V2** (`api.etherscan.io/v2/api`): one key, one base URL, and a
+ * `chainid` parameter to choose the network — the same pattern this app already
+ * uses for Routescan. That makes it a genuine second opinion next to DeBank:
+ * different indexing, different token lists, and a USD price from Etherscan's own
+ * feed instead of DeBank's.
+ *
+ * Two kinds of call per chain:
+ *
+ * - `module=account&action=addresstokenbalance` — every ERC-20 the address holds,
+ *   with `TokenPriceUSD`
+ * - `module=account&action=balance` — the native coin, in wei
+ *
+ * Etherscan allows **2 requests per second** on a key, so the sweep is
+ * sequential with a ~550 ms gap and a total budget; chains the budget did not
+ * reach are reported back, never silently dropped. `addresstokenbalance` is also
+ * a **PRO** endpoint: with a free key Etherscan answers "not available on your
+ * plan", which this module reports as such instead of showing an empty wallet.
+ *
+ * Everything that shapes a response is a pure function, so it is testable
+ * without a network — see tests/blockscan.test.ts.
+ */
+
+import type { CryptoCategory } from "@/db/schema";
+import { isStablecoinSymbol } from "@/lib/stablecoins";
+import { canonicalChainId, chainMatchesFilter } from "@/lib/wallet-chains";
+import type { DebankBalance } from "@/lib/debank";
+
+/** Etherscan V2 — the API blockscan.com itself reads. */
+export const BLOCKSCAN_API_BASE = "https://api.etherscan.io/v2/api";
+
+/** Timeout for one request (Etherscan answers slowly under load). */
+export const BLOCKSCAN_TIMEOUT_MS = 8_000;
+
+/**
+ * Gap between two calls. Etherscan's limit is 2 calls/second, so 550 ms keeps a
+ * whole sweep under it without a retry loop.
+ */
+export const BLOCKSCAN_PACE_MS = 550;
+
+/** How long one sweep may spend in total before the remaining chains are skipped. */
+export const BLOCKSCAN_TOTAL_BUDGET_MS = 12_000;
+
+/** `addresstokenbalance` page size. */
+export const BLOCKSCAN_PAGE_SIZE = 100;
+
+/** How many tokens one scan returns, biggest first (a picker, not an archive). */
+export const MAX_BLOCKSCAN_TOKENS = 250;
+
+export type BlockscanChain = {
+  /** The app's own chain id, so the rest of the app reads naturally. */
+  chain: string;
+  label: string;
+  /** Etherscan V2's numeric chain id. */
+  id: number;
+  nativeSymbol: string;
+  nativeName: string;
+};
+
+/**
+ * The chains a Blockscan sweep covers.
+ *
+ * Etherscan V2 lists 60+ chains; these are the ones this app also prices, reads
+ * and shows elsewhere, so a scan does not fan out to networks the portfolio
+ * cannot display. Adding one here is a one-line change — the id is Etherscan's.
+ */
+export const BLOCKSCAN_CHAINS: BlockscanChain[] = [
+  { chain: "ethereum", label: "Ethereum", id: 1, nativeSymbol: "ETH", nativeName: "Ethereum" },
+  { chain: "bsc", label: "BNB Chain", id: 56, nativeSymbol: "BNB", nativeName: "BNB" },
+  { chain: "arbitrum", label: "Arbitrum", id: 42161, nativeSymbol: "ETH", nativeName: "Ethereum (Arbitrum)" },
+  { chain: "base", label: "Base", id: 8453, nativeSymbol: "ETH", nativeName: "Ethereum (Base)" },
+  { chain: "polygon", label: "Polygon", id: 137, nativeSymbol: "POL", nativeName: "Polygon (POL)" },
+  { chain: "optimism", label: "Optimism", id: 10, nativeSymbol: "ETH", nativeName: "Ethereum (Optimism)" },
+  { chain: "avalanche", label: "Avalanche", id: 43114, nativeSymbol: "AVAX", nativeName: "Avalanche" },
+  { chain: "linea", label: "Linea", id: 59144, nativeSymbol: "ETH", nativeName: "Ethereum (Linea)" },
+  { chain: "scroll", label: "Scroll", id: 534352, nativeSymbol: "ETH", nativeName: "Ethereum (Scroll)" },
+  { chain: "zksync", label: "zkSync", id: 324, nativeSymbol: "ETH", nativeName: "Ethereum (zkSync)" },
+  { chain: "mantle", label: "Mantle", id: 5000, nativeSymbol: "MNT", nativeName: "Mantle" },
+  { chain: "blast", label: "Blast", id: 81457, nativeSymbol: "ETH", nativeName: "Ethereum (Blast)" },
+  { chain: "gnosis", label: "Gnosis", id: 100, nativeSymbol: "XDAI", nativeName: "Gnosis (xDAI)" },
+  { chain: "celo", label: "Celo", id: 42220, nativeSymbol: "CELO", nativeName: "Celo" },
+];
+
+/** The chains one sweep should ask about, respecting the dialog's chain filter. */
+export function blockscanChainsFor(chainFilter: string): BlockscanChain[] {
+  if (!chainFilter || chainFilter === "auto") return BLOCKSCAN_CHAINS;
+  return BLOCKSCAN_CHAINS.filter((spec) => chainMatchesFilter(spec.chain, chainFilter));
+}
+
+/** `addresstokenbalance` URL for one account on one chain. */
+export function blockscanTokenUrl(
+  chainId: number,
+  address: string,
+  apiKey: string,
+  page = 1,
+): string {
+  return `${BLOCKSCAN_API_BASE}?chainid=${chainId}&module=account&action=addresstokenbalance&address=${encodeURIComponent(
+    address,
+  )}&page=${page}&offset=${BLOCKSCAN_PAGE_SIZE}&apikey=${encodeURIComponent(apiKey)}`;
+}
+
+/** Native-balance URL for one account on one chain. */
+export function blockscanNativeUrl(chainId: number, address: string, apiKey: string): string {
+  return `${BLOCKSCAN_API_BASE}?chainid=${chainId}&module=account&action=balance&address=${encodeURIComponent(
+    address,
+  )}&tag=latest&apikey=${encodeURIComponent(apiKey)}`;
+}
+
+function text(value: unknown): string {
+  if (typeof value === "string") return value;
+  return typeof value === "number" ? String(value) : "";
+}
+
+function numberOf(value: unknown): number {
+  const raw = typeof value === "string" ? value.replace(/,/g, "") : value;
+  const parsed = typeof raw === "number" ? raw : Number(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** A 0x-prefixed 40-hex contract, else `null`. */
+function evmContract(value: unknown): string | null {
+  const candidate = text(value).trim();
+  return /^0x[0-9a-fA-F]{40}$/.test(candidate) ? candidate : null;
+}
+
+/** The `result` array of a successful answer, or an empty list. */
+function resultItems(payload: unknown): unknown[] {
+  if (!payload || typeof payload !== "object") return [];
+  const result = (payload as Record<string, unknown>).result;
+  return Array.isArray(result) ? result : [];
+}
+
+/**
+ * Why Etherscan refused, in words. Their errors are terse strings in `message`
+ * and `result` ("NOTOK", "Max rate limit reached", …).
+ */
+export function blockscanErrorText(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "";
+  const record = payload as Record<string, unknown>;
+  const message = text(record.message);
+  const result = typeof record.result === "string" ? record.result : "";
+  const joined = [message, result].filter(Boolean).join(" — ");
+  return joined.replace(/^NOTOK\s*—\s*/, "");
+}
+
+/** Shapes one chain's `addresstokenbalance` answer into balances. */
+export function parseBlockscanTokenBalances(
+  payload: unknown,
+  spec: Pick<BlockscanChain, "chain" | "label">,
+  maxItems = MAX_BLOCKSCAN_TOKENS,
+): DebankBalance[] {
+  const balances: DebankBalance[] = [];
+  const seen = new Set<string>();
+
+  for (const raw of resultItems(payload)) {
+    if (!raw || typeof raw !== "object") continue;
+    const row = raw as Record<string, unknown>;
+
+    const contract = evmContract(row.TokenAddress ?? row.tokenAddress ?? row.contractAddress);
+    const symbol = text(row.TokenSymbol ?? row.tokenSymbol).trim().toUpperCase();
+    if (!contract || !symbol) continue;
+
+    const divisor = Math.max(
+      0,
+      Math.min(36, Math.round(numberOf(row.TokenDivisor ?? row.tokenDivisor) || 18)),
+    );
+    const quantity = numberOf(row.TokenQuantity ?? row.tokenQuantity) / 10 ** divisor;
+    if (!Number.isFinite(quantity) || quantity <= 0) continue;
+
+    const key = contract.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const price = numberOf(row.TokenPriceUSD ?? row.tokenPriceUSD);
+    const name = text(row.TokenName ?? row.tokenName).trim() || symbol;
+    const category: CryptoCategory = isStablecoinSymbol(symbol) ? "stablecoin" : "volatile";
+
+    balances.push({
+      id: `blockscan:${spec.chain}:${key}`,
+      symbol,
+      name,
+      chain: spec.chain,
+      chainLabel: spec.label,
+      quantity: Number(quantity.toFixed(8)),
+      price,
+      valueUsd: Number((quantity * price).toFixed(2)),
+      category,
+      contract,
+      // Blockscan does not send artwork; the picker falls back to its own icons.
+      logoUrl: "",
+    });
+  }
+
+  return balances.sort((a, b) => b.valueUsd - a.valueUsd).slice(0, maxItems);
+}
+
+export type BlockscanAnswer = {
+  ok: boolean;
+  balances: DebankBalance[];
+  error?: string;
+  /** The key is missing or rejected. */
+  needsKey?: boolean;
+  /** The key is fine, but `addresstokenbalance` is not in the plan. */
+  proOnly?: boolean;
+};
+
+/**
+ * Reads one chain's answer.
+ *
+ * "No tokens found" is an answer, not a failure — this wallet holds nothing on
+ * that chain. A missing key, a free key hitting a PRO endpoint and a rate limit
+ * are failures, and each one is named so the dialog can explain it.
+ */
+export function readBlockscanAnswer(
+  payload: unknown,
+  spec: Pick<BlockscanChain, "chain" | "label">,
+  maxItems = MAX_BLOCKSCAN_TOKENS,
+): BlockscanAnswer {
+  if (!payload || typeof payload !== "object") {
+    return { ok: false, balances: [], error: "Blockscan sent no answer." };
+  }
+
+  const record = payload as Record<string, unknown>;
+  const status = text(record.status);
+  const reason = blockscanErrorText(payload);
+  const lower = reason.toLowerCase();
+
+  if (/invalid api key|missing.*api key|api key.*(?:invalid|missing|required)|apikey.*(?:invalid|missing)/.test(lower)) {
+    return { ok: false, balances: [], error: "Blockscan rejected the API key.", needsKey: true };
+  }
+  if (/not (?:available|supported) on your plan|upgrade|pro plan|pro endpoint|subscription|paid plan/.test(lower)) {
+    return {
+      ok: false,
+      balances: [],
+      error: "Token holdings need a paid Etherscan plan on this key.",
+      proOnly: true,
+    };
+  }
+  // A wallet that holds nothing on this chain — not a failure.
+  if (status === "0" && /no (?:token|tokens|record|records|transaction)/i.test(lower)) {
+    return { ok: true, balances: [] };
+  }
+  if (status === "0" && reason) {
+    return { ok: false, balances: [], error: reason };
+  }
+
+  return { ok: true, balances: parseBlockscanTokenBalances(payload, spec, maxItems) };
+}
+
+/** The native coin from an `action=balance` answer, or 0. */
+export function parseBlockscanNativeBalance(payload: unknown, decimals = 18): number {
+  if (!payload || typeof payload !== "object") return 0;
+  const result = (payload as Record<string, unknown>).result;
+  const wei = typeof result === "string" || typeof result === "number" ? Number(result) : 0;
+  if (!Number.isFinite(wei) || wei <= 0) return 0;
+  return wei / 10 ** decimals;
+}
+
+/** The key, from either name this app accepts. */
+export function blockscanApiKey(env: Record<string, string | undefined> = process.env): string {
+  return (env.ETHERSCAN_API_KEY ?? env.BLOCKSCAN_API_KEY ?? "").trim();
+}
+
+export const BLOCKSCAN_NEEDS_KEY_MESSAGE =
+  "Blockscan needs an Etherscan API key (ETHERSCAN_API_KEY). A free key from etherscan.io reads native balances; token holdings need a paid plan.";
+
+const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+async function getJson(
+  url: string,
+  fetchImpl: typeof fetch,
+  timeoutMs: number,
+): Promise<unknown> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(url, {
+      signal: controller.signal,
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    // A 403/429 body still carries Etherscan's explanation, so try to read it.
+    return (await response.json()) as unknown;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export type BlockscanScan = {
+  /** True when at least one chain answered with data. */
+  ok: boolean;
+  balances: DebankBalance[];
+  error?: string;
+  needsKey?: boolean;
+  proOnly?: boolean;
+  /** Chains that answered. */
+  answeredChains: number;
+  /** Chains that were asked. */
+  checkedChains: string[];
+  /** Chains the time budget or the chain filter left out. */
+  skippedChains: string[];
+};
+
+/**
+ * Sweeps every chain for one address.
+ *
+ * Sequential and paced on purpose: Etherscan allows 2 calls/second on a key, so
+ * firing fourteen chains at once would earn a rate limit instead of balances.
+ * The native coin is read only when the scan is narrowed to one chain — on a
+ * whole-wallet sweep the direct on-chain read already supplies native balances,
+ * and spending the budget on them would halve the token coverage.
+ */
+export async function fetchBlockscanBalances(
+  address: string,
+  options: {
+    chainFilter?: string;
+    apiKey?: string;
+    fetchImpl?: typeof fetch;
+    timeoutMs?: number;
+    paceMs?: number;
+    budgetMs?: number;
+    maxItems?: number;
+    chains?: BlockscanChain[];
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
+  } = {},
+): Promise<BlockscanScan> {
+  const chainFilter = options.chainFilter ?? "auto";
+  const chains = options.chains ?? blockscanChainsFor(chainFilter);
+  const apiKey = (options.apiKey ?? blockscanApiKey()).trim();
+
+  if (!apiKey) {
+    return {
+      ok: false,
+      balances: [],
+      answeredChains: 0,
+      checkedChains: [],
+      skippedChains: chains.map((spec) => spec.chain),
+      needsKey: true,
+      error: BLOCKSCAN_NEEDS_KEY_MESSAGE,
+    };
+  }
+
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const timeoutMs = options.timeoutMs ?? BLOCKSCAN_TIMEOUT_MS;
+  const paceMs = options.paceMs ?? BLOCKSCAN_PACE_MS;
+  const budgetMs = options.budgetMs ?? BLOCKSCAN_TOTAL_BUDGET_MS;
+  const maxItems = options.maxItems ?? MAX_BLOCKSCAN_TOKENS;
+  const sleep = options.sleep ?? defaultSleep;
+  const now = options.now ?? Date.now;
+  const wantsNative = chains.length === 1;
+
+  const balances: DebankBalance[] = [];
+  const checkedChains: string[] = [];
+  const skippedChains: string[] = [];
+  let answeredChains = 0;
+  let needsKey = false;
+  let proOnly = false;
+  let firstError = "";
+  const started = now();
+
+  for (const spec of chains) {
+    if (now() - started >= budgetMs) {
+      skippedChains.push(spec.chain);
+      continue;
+    }
+
+    const tokenPayload = await getJson(
+      blockscanTokenUrl(spec.id, address, apiKey),
+      fetchImpl,
+      timeoutMs,
+    );
+    checkedChains.push(spec.chain);
+
+    const answer = readBlockscanAnswer(tokenPayload, spec, maxItems);
+    if (answer.ok) answeredChains += 1;
+    if (answer.needsKey) needsKey = true;
+    if (answer.proOnly) proOnly = true;
+    if (!answer.ok && answer.error && !firstError) firstError = answer.error;
+    balances.push(...answer.balances);
+
+    if (paceMs > 0) await sleep(paceMs);
+
+    if (wantsNative) {
+      const nativePayload = await getJson(
+        blockscanNativeUrl(spec.id, address, apiKey),
+        fetchImpl,
+        timeoutMs,
+      );
+      const native = parseBlockscanNativeBalance(nativePayload);
+      if (native > 0) {
+        balances.push({
+          id: `blockscan:${spec.chain}:native`,
+          symbol: spec.nativeSymbol,
+          name: spec.nativeName,
+          chain: spec.chain,
+          chainLabel: spec.label,
+          quantity: native,
+          // Priced by the scanner's market lookup, like any unpriced balance.
+          price: 0,
+          valueUsd: 0,
+          category: "volatile",
+          contract: null,
+          logoUrl: "",
+        });
+      }
+    }
+  }
+
+  const sorted = balances.sort((a, b) => b.valueUsd - a.valueUsd).slice(0, maxItems);
+
+  if (answeredChains === 0) {
+    return {
+      ok: false,
+      balances: sorted,
+      answeredChains,
+      checkedChains,
+      skippedChains,
+      ...(needsKey ? { needsKey: true } : {}),
+      ...(proOnly ? { proOnly: true } : {}),
+      error: needsKey
+        ? "Blockscan rejected the API key. Check ETHERSCAN_API_KEY."
+        : proOnly
+          ? "Blockscan answered, but token holdings need a paid Etherscan plan on this key."
+          : firstError || "Blockscan did not answer for any chain.",
+    };
+  }
+
+  return {
+    ok: true,
+    balances: sorted,
+    answeredChains,
+    checkedChains,
+    skippedChains,
+    ...(proOnly ? { proOnly: true } : {}),
+    ...(firstError && sorted.length === 0 ? { error: firstError } : {}),
+  };
+}
+
+/** The Blockscan chain id for the app's chain vocabulary, for a one-chain read. */
+export function blockscanChainId(chain: string): number | null {
+  const wanted = canonicalChainId(chain);
+  return BLOCKSCAN_CHAINS.find((spec) => canonicalChainId(spec.chain) === wanted)?.id ?? null;
+}

@@ -1,17 +1,25 @@
 import { NextResponse } from "next/server";
-import { normaliseWalletChain, scanWalletAddress } from "@/lib/wallet-scanner";
+import {
+  normaliseWalletChain,
+  scanWalletAddress,
+  type WalletScanSource,
+} from "@/lib/wallet-scanner";
 import { enrichTokenTrust } from "@/lib/wallet-trust";
 
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/wallet/scan?address=0x...&chain=auto
+ * GET /api/wallet/scan?address=0x...&chain=auto&source=auto
  *
  * Returns the tokens a wallet holds. EVM addresses are read through DeBank
  * (every chain it indexes, prices included) when available, and through the
  * public RPCs and block explorers otherwise; Solana, Bitcoin and Tron always use
  * the direct read. `chain` may be `auto` (every chain) or any chain id DeBank
- * knows — the filter is alias-aware, so `ethereum` and `eth` are the same. The response carries `source: "debank" | "onchain"` so the dialog can
+ * knows — the filter is alias-aware, so `ethereum` and `eth` are the same.
+ * `source=blockscan` swaps the index for Etherscan V2 — the API behind
+ * blockscan.com — and merges the direct read into it, so a missing key or a
+ * paid-plan endpoint still answers with whatever the chains themselves say. The
+ * response carries `source: "debank" | "blockscan" | "onchain"` so the dialog can
  * say where the numbers came from. Each balance is then matched against the
  * official contract table and looked up for organic trading volume
  * (`wallet-trust`) — best-effort, so a slow or rate-limited lookup leaves the
@@ -21,6 +29,7 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const address = (params.get("address") ?? "").trim();
   const chain = normaliseWalletChain(params.get("chain"));
+  const source: WalletScanSource = params.get("source") === "blockscan" ? "blockscan" : "auto";
 
   if (!address) {
     return NextResponse.json(
@@ -30,7 +39,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await scanWalletAddress(address, chain);
+    const result = await scanWalletAddress(address, chain, { source });
     // Contract match + market depth, so the picker can rank real tokens above
     // look-alikes and tokens nobody trades. Never throws, never drops a balance.
     const balances = await enrichTokenTrust(result.balances);
