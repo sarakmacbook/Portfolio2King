@@ -39,7 +39,16 @@ export function normaliseDustThreshold(value: unknown): number {
  * (and transactions being checked server-side) call it `value`. One helper so
  * both can be filtered with the same rule.
  */
-export type DustMeasurable = { valueUsd?: number; value?: number };
+export type DustMeasurable = {
+  valueUsd?: number;
+  value?: number;
+  /**
+   * `false` when the scan could not price the balance at all. An unpriced
+   * holding is **not** dust: "no price yet" is not "worth nothing", and hiding
+   * it would make a real token vanish from the wallet.
+   */
+  priced?: boolean;
+};
 
 export function dustValueOf(item: DustMeasurable): number {
   const value =
@@ -50,10 +59,12 @@ export function dustValueOf(item: DustMeasurable): number {
 /** True when a balance is worth less than the threshold. */
 export function isDust(balance: DustMeasurable, threshold: number): boolean {
   const cut = normaliseDustThreshold(threshold);
-  const value = dustValueOf(balance);
   // A threshold of 0 hides nothing — "show everything" must stay possible.
   if (cut <= 0) return false;
-  return value < cut;
+  // A balance the scan could not price has no value *yet*; it is kept and shown
+  // with "price unavailable" instead of being quietly filed under "under $1".
+  if (balance.priced === false) return false;
+  return dustValueOf(balance) < cut;
 }
 
 export type DustSplit<T> = {

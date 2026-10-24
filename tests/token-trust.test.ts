@@ -76,10 +76,25 @@ test("the official table matches the real contract, on the right chain", () => {
   );
 
   // Anything the table cannot answer is unverified, never fake.
-  assert.equal(contractStatusOf({ symbol: "ZRO", contract: FAKE, chain: "ethereum" }), "unknown");
+  assert.equal(contractStatusOf({ symbol: "WIF", contract: FAKE, chain: "ethereum" }), "unknown");
   assert.equal(contractStatusOf({ symbol: "USDT", contract: FAKE, chain: "zksync" }), "unknown");
   assert.equal(contractStatusOf({ symbol: "BTC", contract: null, chain: "bitcoin" }), "unknown");
   assert.equal(contractStatusOf({ symbol: "SOL", contract: "So11111111111111111111111111111111111111112", chain: "solana" }), "unknown");
+
+  // LayerZero's OFT sits at one address on every chain it launched on.
+  const ZRO = "0x6985884C4392D348587B19cb9eAAf157F13271cd";
+  for (const chain of ["ethereum", "base", "arbitrum", "optimism", "polygon", "bsc", "avalanche", "eth", "arb"]) {
+    assert.equal(
+      contractStatusOf({ symbol: "ZRO", contract: ZRO, chain }),
+      "official",
+      `ZRO on ${chain}`,
+    );
+  }
+  assert.equal(
+    contractStatusOf({ symbol: "ZRO", contract: FAKE, chain: "base" }),
+    "different",
+    "a ZRO look-alike is caught",
+  );
 
   assert.equal(officialContractOf("USDT", "ethereum"), USDT_ETH.toLowerCase());
   assert.equal(officialContractOf("NOPE", "ethereum"), null);
@@ -254,8 +269,8 @@ test("filterScanBalances separates look-alikes, spam, dead markets and dust", ()
     { id: "c", symbol: "JUNK", name: "Claim your airdrop", contract: FAKE, chain: "ethereum", valueUsd: 200 },
     // Real token, no market at all.
     { id: "d", symbol: "NEW", name: "New Token", contract: FAKE, chain: "ethereum", valueUsd: 300, organicVolumeUsd: 0 },
-    // Unknown volume: never hidden for that reason.
-    { id: "e", symbol: "ZRO", name: "LayerZero", contract: FAKE, chain: "ethereum", valueUsd: 250 },
+    // Unknown volume and no price at all: kept, never filed as dust.
+    { id: "e", symbol: "WIF", name: "dogwifhat", contract: FAKE, chain: "ethereum", valueUsd: 0, priced: false },
     // Traded a little, but the pools are shallow — a price without a market.
     { id: "g", symbol: "SHALLOW", name: "Shallow Pool", contract: FAKE, chain: "ethereum", valueUsd: 900, organicVolume24hUsd: 5_000, liquidityUsd: 300 },
     { id: "f", symbol: "USDC", name: "USD Coin", contract: USDC_BASE, chain: "base", valueUsd: 0.4, organicVolumeUsd: 9_000_000 },
@@ -269,7 +284,7 @@ test("filterScanBalances separates look-alikes, spam, dead markets and dust", ()
   assert.deepEqual(split.dust.map((r) => r.id), ["f"]);
   assert.equal(split.counts.total, 7);
   assert.equal(split.dustValue, 0.4);
-  assert.equal(split.keptValue, 750);
+  assert.equal(split.keptValue, 500);
 
   // Everything off: the scan is shown exactly as it came back.
   const all = filterScanBalances(rows, {
@@ -313,6 +328,10 @@ test("the scan route, the action and the dialog all use the trust checks", () =>
   assert.ok(dialog.includes("Skip tokens under"), "the dollar cut-off is still there");
   assert.ok(dialog.includes("minLiquidityUsd: walletRequireMarket ? MIN_LIQUIDITY_USD : 0"), "the depth floor reaches the server");
   assert.ok(dialog.includes("liq"), "the card shows the depth");
+  assert.ok(dialog.includes("no price yet"), "an unpriced token says so instead of $0.00");
+
+  const actionsBody = body;
+  assert.ok(actionsBody.includes("price > 0 ? price : 0"), "an unpriced token is imported at 0, not $1");
   assert.ok(body.includes("minLiquidityUsd"), "the action accepts a depth floor");
   assert.ok(body.includes("skippedShallow"), "and reports what it skipped");
   assert.ok(MIN_ORGANIC_VOLUME_USD > 0 && MIN_LIQUIDITY_USD > MIN_ORGANIC_VOLUME_USD);

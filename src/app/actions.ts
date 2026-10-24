@@ -554,7 +554,9 @@ export async function importWalletBalances(input: {
         skippedDust += 1;
         continue;
       }
-      const safePrice = Number.isFinite(price) && price > 0 ? price : 1;
+      // An unpriced token is booked at 0, not at $1: the scan did not know the
+      // price, and inventing one would put fake value in the portfolio.
+      const safePrice = Number.isFinite(price) && price > 0 ? price : 0;
       const cryptoCategory: CryptoCategory =
         CRYPTO_CATEGORIES.includes(item.category) ? item.category : "volatile";
       const notes = `Wallet: ${address} (${shortAddr}) · Chain: ${item.chainLabel}${
