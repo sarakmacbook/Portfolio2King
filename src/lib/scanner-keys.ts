@@ -65,7 +65,7 @@ export const SCANNER_KEY_SPECS: ScannerKeySpec[] = [
     setting: "scanner.key.etherscan",
     docsUrl: "https://etherscan.io/myapikey",
     usedFor:
-      "“Scan via Blockscan” — Etherscan V2 reads every chain it supports with one key. A free key reads native balances; token holdings need a paid plan.",
+      "“Scan via Blockscan” — Etherscan V2 reads every chain it supports with one key. A free key finds tokens through the wallet's transfer history (tokentx → tokenbalance); a paid key reads holdings in one call per chain.",
     format: "34-character key from etherscan.io/myapikey",
   },
   {

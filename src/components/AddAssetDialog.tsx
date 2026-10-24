@@ -338,6 +338,8 @@ function AddAssetForm({
         debankNeedsKey?: boolean;
         blockscanNeedsKey?: boolean;
         blockscanProOnly?: boolean;
+        blockscanFreeFallback?: boolean;
+        blockscanFreeUnread?: number;
         blockscanSkippedChains?: number;
         moralisNeedsKey?: boolean;
         moralisSkippedChains?: number;
@@ -382,12 +384,14 @@ function AddAssetForm({
           : data.source === "blockscan"
           ? [
               data.blockscanNeedsKey
-                ? "Blockscan needs an Etherscan API key — this scan fell back to reading the chains directly, so it sees fewer tokens. Add one under Scanner API keys below (or set ETHERSCAN_API_KEY); the balance endpoint is free, token holdings need a paid plan."
-                : data.blockscanProOnly
-                  ? "Blockscan answered, but token holdings need a paid Etherscan plan on that key — the tokens below came from the chains directly."
-                  : data.sourceNote
-                    ? data.sourceNote
-                    : "",
+                ? "Blockscan needs an Etherscan API key — this scan fell back to reading the chains directly, so it sees fewer tokens. Add one under Scanner API keys below (or set ETHERSCAN_API_KEY); the key from etherscan.io is free."
+                : data.blockscanFreeFallback
+                  ? `This Etherscan key is on the free plan, so token holdings came from the wallet's transfer history (tokentx → tokenbalance) rather than the paid holdings endpoint — fewer tokens than a paid key sees, but real balances. Prices were looked up separately.${data.blockscanFreeUnread ? ` ${data.blockscanFreeUnread} more token${data.blockscanFreeUnread === 1 ? "" : "s"} were in that history but past the time limit; scan again to cover them.` : ""}`
+                  : data.blockscanProOnly
+                    ? "Blockscan answered, but token holdings need a paid Etherscan plan on that key, and the free transfer history had no tokens either — the tokens below came from the chains directly."
+                    : data.sourceNote
+                      ? data.sourceNote
+                      : "",
               data.blockscanSkippedChains
                 ? `${data.blockscanSkippedChains} chain${data.blockscanSkippedChains === 1 ? "" : "s"} were not reached before the time limit (Etherscan allows 2 calls a second); scan again in a moment to cover the rest.`
                 : "",
@@ -958,7 +962,9 @@ function AddAssetForm({
                 whole-wallet sweep takes about ten seconds. It needs{" "}
                 <code className="rounded bg-slate-100 px-1">ETHERSCAN_API_KEY</code> — add it in{" "}
                 <strong className="font-medium text-slate-600">Scanner API keys</strong> below; without
-                one the scan still reads the chains directly and says so.
+                one the scan still reads the chains directly and says so. A free key falls back to the
+                wallet&apos;s transfer history, so it still finds tokens — that is the cheapest way to
+                scan.
               </p>
             )}
 
@@ -1088,7 +1094,10 @@ function AddAssetForm({
                   {BLOCKSCAN_CHAINS.length} chains, prices included, merged with the direct read. It
                   is paced at 2 calls a second and needs{" "}
                   <code className="rounded bg-slate-100 px-1">ETHERSCAN_API_KEY</code> or a key saved
-                  in Scanner API keys; a free key reads native balances, token holdings need a paid plan. DeBank scans fall back to
+                  in Scanner API keys. A free key reads token holdings through the wallet&apos;s
+                  transfer history (<code className="rounded bg-slate-100 px-1">tokentx</code> →{" "}
+                  <code className="rounded bg-slate-100 px-1">tokenbalance</code>); a paid key reads them
+                  in one call per chain, with prices. DeBank scans fall back to
                   it automatically when DeBank cannot answer and a key is set.
                 </li>
                 <li>

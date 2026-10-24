@@ -117,6 +117,14 @@ export type WalletScanResult = {
   /** Blockscan answered, but token holdings are a paid-plan endpoint. */
   blockscanProOnly?: boolean;
   /**
+   * The key's plan has no holdings endpoint, so the tokens came from the free
+   * transfer history (`tokentx` → `tokenbalance`) instead. Fewer than a full
+   * sweep would see, but real balances rather than native only.
+   */
+  blockscanFreeFallback?: boolean;
+  /** Contracts the free path could not read before its budget ran out. */
+  blockscanFreeUnread?: number;
+  /**
    * Moralis was the chosen source but no `MORALIS_API_KEY` is configured, so the
    * scan is running on the other sources. The dialog turns this into a hint.
    */
@@ -767,9 +775,30 @@ async function resolveSymbolPriceUsd(symbol: string): Promise<number> {
  * still merges in the direct read so a keyed rate limit or a paid-plan endpoint
  * can never leave the scan with nothing.
  */
+/** A source balance in the shape the pricing pass wants: no price, no value. */
+function asUnpriced(balance: DebankBalance): Omit<ScannedWalletBalance, "price" | "valueUsd"> {
+  return {
+    id: balance.id,
+    symbol: balance.symbol,
+    name: balance.name,
+    chain: balance.chain,
+    chainLabel: balance.chainLabel,
+    quantity: balance.quantity,
+    category: balance.category,
+    contract: balance.contract,
+    ...(balance.logoUrl ? { logoUrl: balance.logoUrl } : {}),
+    ...(balance.spam ? { spam: true } : {}),
+  };
+}
+
 /**
  * The index's balances first (it has live prices), then whatever only the direct
  * read saw — added, priced from the market APIs, and sorted together.
+ *
+ * An index does not always price what it returns: Blockscan's free
+ * transfer-history path reports balances only. Those rows go through the same
+ * market lookup as the direct read, so a real token is never shown — or filtered
+ * away — as $0 dust.
  */
 async function mergeWithDirect(
   primary: readonly DebankBalance[],
@@ -781,10 +810,20 @@ async function mergeWithDirect(
   const extra = directRaw.filter(
     (item) => !known.has(balanceKey(item.chain, item.contract, item.symbol)),
   );
+  const unpriced = primary.filter((balance) => !(balance.price > 0));
+  const pricedPrimary = unpriced.length
+    ? new Map(
+        (await priceBalances(unpriced.map(asUnpriced), primary)).map((balance) => [
+          balance.id,
+          balance,
+        ]),
+      )
+    : null;
   const priced = await priceBalances(extra, primary);
-  const balances = [...primary.map(fromDebank), ...priced].sort(
-    (a, b) => b.valueUsd - a.valueUsd || b.quantity - a.quantity,
-  );
+  const balances = [
+    ...primary.map((balance) => pricedPrimary?.get(balance.id) ?? fromDebank(balance)),
+    ...priced,
+  ].sort((a, b) => b.valueUsd - a.valueUsd || b.quantity - a.quantity);
   return { balances, extra: extra.length };
 }
 
@@ -905,6 +944,8 @@ export async function scanWalletAddress(
       ...(blockscan.error ? { sourceNote: blockscan.error } : {}),
       ...(blockscan.needsKey ? { blockscanNeedsKey: true } : {}),
       ...(blockscan.proOnly ? { blockscanProOnly: true } : {}),
+      ...(blockscan.freeFallbackChains?.length ? { blockscanFreeFallback: true } : {}),
+      ...(blockscan.freeUnreadContracts ? { blockscanFreeUnread: blockscan.freeUnreadContracts } : {}),
       ...(blockscan.skippedChains.length > 0
         ? { blockscanSkippedChains: blockscan.skippedChains.length }
         : {}),
@@ -977,6 +1018,8 @@ export async function scanWalletAddress(
         ...(fallback.skippedChains.length > 0
           ? { blockscanSkippedChains: fallback.skippedChains.length }
           : {}),
+        ...(fallback.freeFallbackChains?.length ? { blockscanFreeFallback: true } : {}),
+        ...(fallback.proOnly ? { blockscanProOnly: true } : {}),
         ...(extra > 0 ? { directAdditions: extra } : {}),
       };
     }

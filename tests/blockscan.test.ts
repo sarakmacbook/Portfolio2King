@@ -5,18 +5,27 @@ import { test } from "node:test";
 import {
   BLOCKSCAN_API_BASE,
   BLOCKSCAN_CHAINS,
+  BLOCKSCAN_FREE_MAX_CONTRACTS,
+  BLOCKSCAN_FREE_MAX_PAGES,
   BLOCKSCAN_PACE_MS,
   BLOCKSCAN_TOTAL_BUDGET_MS,
+  BLOCKSCAN_TRANSFERS_PER_PAGE,
   MAX_BLOCKSCAN_TOKENS,
   blockscanChainId,
   blockscanChainsFor,
   blockscanErrorText,
   blockscanNativeUrl,
+  blockscanTokenBalanceUrl,
+  blockscanTokenTransfersUrl,
   blockscanTokenUrl,
   fetchBlockscanBalances,
+  fetchBlockscanFreeTokens,
   parseBlockscanNativeBalance,
   parseBlockscanTokenBalances,
+  parseBlockscanTokenQuantity,
+  parseBlockscanTokenTransfers,
   readBlockscanAnswer,
+  readBlockscanTransfers,
 } from "../src/lib/blockscan";
 import { scanWalletAddress } from "../src/lib/wallet-scanner";
 
@@ -349,4 +358,222 @@ test("an auto scan falls back to Blockscan when DeBank cannot answer", () => {
   assert.ok(body.includes("apiKey: blockscanKey"), "using the key from the app or the environment");
   assert.ok(body.includes('source: "blockscan"'), "and the result says so");
   assert.ok(body.includes("mergeWithDirect("), "with the direct read still merged in");
+});
+
+// ---------------------------------------------------------------------------
+// The free-tier path: `addresstokenbalance` is PRO, `tokentx` + `tokenbalance`
+// are not — so a free key still finds the tokens a wallet holds.
+// ---------------------------------------------------------------------------
+
+/** A row shaped like Etherscan's `tokentx` sends it. */
+function transfer(overrides: Record<string, unknown> = {}) {
+  return {
+    blockNumber: "19000000",
+    timeStamp: "1710000000",
+    hash: "0x" + "ab".repeat(32),
+    from: "0x00000000000000000000000000000000000000ff",
+    contractAddress: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+    to: "0xAbC0000000000000000000000000000000000001",
+    value: "2500000",
+    tokenName: "Tether USD",
+    tokenSymbol: "USDT",
+    tokenDecimal: "6",
+    ...overrides,
+  };
+}
+
+const PRO_ANSWER = {
+  status: "0",
+  message: "NOTOK",
+  result: "This endpoint is not available on your plan. Please upgrade.",
+};
+
+test("the free endpoints are Etherscan's tokentx and tokenbalance", () => {
+  const transfers = blockscanTokenTransfersUrl(1, "0xAbC0000000000000000000000000000000000001", "KEY", 2);
+  assert.ok(transfers.startsWith(`${BLOCKSCAN_API_BASE}?`));
+  assert.ok(transfers.includes("chainid=1"));
+  assert.ok(transfers.includes("action=tokentx"));
+  assert.ok(transfers.includes("sort=desc"), "newest first: the tokens held now");
+  assert.ok(transfers.includes("page=2"));
+  assert.ok(transfers.includes(`offset=${BLOCKSCAN_TRANSFERS_PER_PAGE}`));
+  assert.ok(transfers.includes("apikey=KEY"));
+
+  const balance = blockscanTokenBalanceUrl(8453, "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "0xAbC0000000000000000000000000000000000001", "KEY");
+  assert.ok(balance.includes("chainid=8453"));
+  assert.ok(balance.includes("action=tokenbalance"));
+  assert.ok(balance.includes("contractaddress=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"));
+  assert.ok(balance.includes("tag=latest"));
+});
+
+test("a transfer history collapses to its distinct tokens, with decimals", () => {
+  const tokens = parseBlockscanTokenTransfers({
+    status: "1",
+    message: "OK",
+    result: [
+      transfer(),
+      // The same token again — one entry, from the first (newest) row.
+      transfer({ value: "1", tokenSymbol: "usdt" }),
+      transfer({
+        contractAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        tokenSymbol: "USDC",
+        tokenName: "USD Coin",
+        tokenDecimal: "6",
+      }),
+      // Rows that cannot be a token are skipped, not guessed at.
+      transfer({ contractAddress: "not-a-contract", tokenSymbol: "JUNK" }),
+      transfer({ contractAddress: "", tokenSymbol: "JUNK" }),
+    ],
+  });
+
+  assert.deepEqual(
+    tokens.map((token) => [token.symbol, token.contract, token.decimals]),
+    [
+      ["USDT", "0xdAC17F958D2ee523a2206206994597C13D831ec7", 6],
+      ["USDC", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", 6],
+    ],
+  );
+  // A missing symbol still yields a usable row instead of being dropped.
+  const anonymous = parseBlockscanTokenTransfers({ result: [transfer({ tokenSymbol: "" })] });
+  assert.equal(anonymous[0].symbol, "TOKEN");
+});
+
+test("a tokenbalance answer is read in the token's own decimals", () => {
+  assert.equal(parseBlockscanTokenQuantity({ status: "1", result: "1250500000" }, 6), 1250.5);
+  assert.equal(parseBlockscanTokenQuantity({ status: "1", result: "1000000000000000000" }, 18), 1);
+  assert.equal(parseBlockscanTokenQuantity({ status: "1", result: "0" }), 0);
+  assert.equal(parseBlockscanTokenQuantity({ status: "0", result: "Max rate limit reached" }), 0);
+  assert.equal(parseBlockscanTokenQuantity(null), 0);
+});
+
+test("the transfer reader names a rejected key and a plan restriction", () => {
+  const rejected = readBlockscanTransfers({ status: "0", message: "NOTOK", result: "Invalid API Key" });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.needsKey, true);
+
+  const restricted = readBlockscanTransfers(PRO_ANSWER);
+  assert.equal(restricted.ok, false);
+  assert.equal(restricted.proOnly, true);
+
+  const empty = readBlockscanTransfers({ status: "0", message: "No transactions found", result: [] });
+  assert.equal(empty.ok, true);
+  assert.deepEqual(empty.tokens, []);
+});
+
+test("a free key finds tokens through the transfer history", async () => {
+  const USDT = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
+  const USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+  const { impl, calls } = stubFetch((url) => {
+    if (url.includes("action=addresstokenbalance")) return PRO_ANSWER;
+    if (url.includes("action=tokentx")) {
+      return { status: "1", message: "OK", result: [transfer(), transfer({ contractAddress: USDC, tokenSymbol: "USDC" })] };
+    }
+    if (url.includes("action=tokenbalance")) {
+      if (url.includes(`contractaddress=${USDT}`)) return { status: "1", message: "OK", result: "1250500000" };
+      if (url.includes(`contractaddress=${USDC}`)) return { status: "1", message: "OK", result: "0" };
+    }
+    return { status: "0", message: "NOTOK", result: "unexpected" };
+  });
+
+  const scan = await fetchBlockscanBalances("0xAbC0000000000000000000000000000000000001", {
+    apiKey: "FREEKEY",
+    fetchImpl: impl,
+    chainFilter: "ethereum",
+    paceMs: 0,
+  });
+
+  assert.equal(scan.ok, true);
+  assert.equal(scan.proOnly, true, "the plan restriction is still reported");
+  assert.deepEqual(scan.freeFallbackChains, ["ethereum"]);
+  assert.equal(scan.answeredChains, 1, "the free path counts as an answer");
+  const usdt = scan.balances.find((balance) => balance.symbol === "USDT");
+  assert.ok(usdt, "the held token is found");
+  assert.equal(usdt.quantity, 1250.5);
+  assert.equal(usdt.contract, USDT);
+  assert.equal(usdt.chain, "ethereum");
+  // Both free endpoints are price-free: the scanner prices these rows later.
+  assert.equal(usdt.price, 0);
+  assert.equal(usdt.valueUsd, 0);
+  assert.equal(scan.balances.find((balance) => balance.symbol === "USDC"), undefined, "a zero balance is not a token");
+
+  // One holdings call, one transfer call, one balance call per contract.
+  assert.equal(calls.filter((url) => url.includes("action=tokentx")).length, 1);
+  assert.equal(calls.filter((url) => url.includes("action=tokenbalance")).length, 2);
+});
+
+test("the free path is capped and paced, and does not run without a key", async () => {
+  const calls: string[] = [];
+  const waits: number[] = [];
+  const impl = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    calls.push(url);
+    const body = url.includes("action=tokentx")
+      ? {
+          status: "1",
+          result: Array.from({ length: BLOCKSCAN_TRANSFERS_PER_PAGE }, (_, index) =>
+            transfer({ contractAddress: `0x${(index + 16).toString(16).padStart(40, "0")}` }),
+          ),
+        }
+      : url.includes("action=tokenbalance")
+        ? { status: "1", result: "1000000" }
+        : PRO_ANSWER;
+    return { ok: true, json: async () => body } as unknown as Response;
+  }) as unknown as typeof fetch;
+
+  const free = await fetchBlockscanFreeTokens("0xAbC0000000000000000000000000000000000001", BLOCKSCAN_CHAINS[0], {
+    apiKey: "FREEKEY",
+    fetchImpl: impl,
+    paceMs: 550,
+    maxContracts: 3,
+    maxPages: 1,
+    sleep: async (ms) => void waits.push(ms),
+  });
+
+  assert.equal(free.ok, true);
+  assert.equal(free.readContracts, 3, "the shared contract limit is respected");
+  assert.ok(free.unreadContracts > 0, "what was left over is reported, not hidden");
+  assert.equal(calls.filter((url) => url.includes("action=tokenbalance")).length, 3);
+  assert.ok(waits.every((ms) => ms === 550), "every call is paced under Etherscan's limit");
+  assert.ok(BLOCKSCAN_FREE_MAX_PAGES >= 1);
+  assert.ok(BLOCKSCAN_FREE_MAX_CONTRACTS >= 3);
+
+  const noKey = await fetchBlockscanFreeTokens("0xAbC0000000000000000000000000000000000001", BLOCKSCAN_CHAINS[0], {
+    apiKey: "",
+  });
+  assert.equal(noKey.ok, false);
+  assert.equal(noKey.needsKey, true);
+});
+
+test("a paid key never runs the free path", async () => {
+  const { impl, calls } = stubFetch((url) =>
+    url.includes("action=addresstokenbalance")
+      ? { status: "1", message: "OK", result: [token()] }
+      : { status: "1", result: "0" },
+  );
+
+  const scan = await fetchBlockscanBalances("0xAbC0000000000000000000000000000000000001", {
+    apiKey: "PAIDKEY",
+    fetchImpl: impl,
+    chainFilter: "ethereum",
+    paceMs: 0,
+  });
+
+  assert.equal(scan.ok, true);
+  assert.equal(scan.proOnly, undefined);
+  assert.equal(scan.freeFallbackChains, undefined);
+  assert.equal(calls.filter((url) => url.includes("action=tokentx")).length, 0);
+  assert.equal(scan.balances[0].price, 1.0001, "the paid endpoint's prices are kept");
+});
+
+test("unpriced index rows are priced by the scanner instead of showing $0", () => {
+  const scanner = readFileSync(resolve(__dirname, "../src/lib/wallet-scanner.ts"), "utf8");
+  assert.ok(
+    scanner.includes("primary.filter((balance) => !(balance.price > 0))"),
+    "the primary balances are priced when the index could not price them",
+  );
+  assert.ok(scanner.includes("pricedPrimary?.get(balance.id)"), "and the priced copy replaces the raw row");
+  assert.ok(scanner.includes("blockscanFreeFallback"), "the free path is reported to the dialog");
+
+  const dialog = readFileSync(resolve(__dirname, "../src/components/AddAssetDialog.tsx"), "utf8");
+  assert.ok(dialog.includes("blockscanFreeFallback"), "the dialog explains the free plan");
+  assert.ok(dialog.includes("transfer history"), "and says where the tokens came from");
 });
