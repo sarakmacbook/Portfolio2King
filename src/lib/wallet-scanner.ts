@@ -55,6 +55,11 @@ export type ScannedWalletBalance = {
   /** Token artwork, when the indexer returned one (DeBank does). */
   logoUrl?: string;
   /**
+   * The indexer's own spam verdict. Spam is usually visible in the name, but a
+   * scam token can be named "USDC" — this is the only signal for that case.
+   */
+  spam?: boolean;
+  /**
    * Trust signals added by the scan route (`wallet-trust`). They are optional
    * because the scanner itself only reads balances — contract matching and
    * organic volume are a second, best-effort pass.
@@ -706,6 +711,7 @@ function fromDebank(balance: DebankBalance): ScannedWalletBalance {
     category: balance.category,
     contract: balance.contract,
     ...(balance.logoUrl ? { logoUrl: balance.logoUrl } : {}),
+    ...(balance.spam ? { spam: true } : {}),
   };
 }
 

@@ -538,3 +538,13 @@ test("chain names come from DeBank's own list, so new chains get a real label", 
   assert.equal(result.ok, true);
   assert.equal(result.balances[0].chainLabel, "Brand New Chain");
 });
+
+test("parseDebankTokens keeps DeBank's scam flag but never invents one", () => {
+  const balances = parseDebankTokens([
+    token({ id: "0x1111111111111111111111111111111111111111", name: "USDC", symbol: "USDC", is_scam: true }),
+    token({ id: "0x2222222222222222222222222222222222222222", symbol: "DAI", name: "Dai", is_scam: false }),
+  ]);
+  assert.equal(balances.length, 2);
+  assert.equal(balances.find((b) => b.symbol === "USDC")?.spam, true);
+  assert.equal(balances.find((b) => b.symbol === "DAI")?.spam, undefined);
+});

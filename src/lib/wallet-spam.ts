@@ -32,8 +32,10 @@ export type SpamReason =
   | "flagged by the chain"
   | "contains a web address"
   | "airdrop wording"
+  | "advertises an amount"
   | "hidden characters"
-  | "unusually long name";
+  | "unusually long name"
+  | "unreadable name";
 
 /** Real token names are short; bait messages are not. */
 const MAX_NAME_LENGTH = 64;
@@ -55,10 +57,29 @@ const CHAT_HANDLE_RE = /\bt\.me\b|\btelegram\b|@[a-z0-9_]{4,}/i;
  * up in real token names — "reward", "bonus" and "gift" are left out on purpose
  * because legitimate tokens do use them.
  */
-const BAIT_RE = /\b(?:claim|claimable|airdrop|airdrops|visit|redeem|voucher|giveaway|winner|congratulations)\b/i;
+const BAIT_RE = /\b(?:claim|claimable|airdrop|airdrops|visit|redeem|voucher|giveaway|winner|congratulations|promo|promotion)\b/i;
+
+/**
+ * The other half of the same trick: a sentence addressed to the holder. Nobody
+ * names a real token "You have received 5,000 USDT" — that is a claim page that
+ * happens to be a token.
+ */
+const ADDRESSED_RE =
+  /\byou(?:'ve|'re|\s+have|\s+are)?\s+(?:won|received|gotten|eligible)\b|\bclaim\s+(?:your|now|here|at)\b|\breceive\s+(?:your|free)\b/i;
+
+/**
+ * An amount of a real ticker in the *name*. A real token does not print a
+ * balance in its own title, so `5,000 USDT` / `$1000 ETH` in the name is bait —
+ * including on tokens whose name is otherwise spelled correctly.
+ */
+const AMOUNT_ADVERT_RE =
+  /\b\d{1,3}(?:[,.]\d{3})+\s*(?:usdt|usdc|eth|btc|bnb|dai|sol)\b|\$\s?\d[\d,.]*\s*(?:usdt|usdc|eth|btc|bnb)\b|\b\d{3,}\s+(?:usdt|usdc|eth|btc|bnb)\b/i;
 
 /** Zero-width and bidi characters: used to fake a ticker that looks like another. */
 const HIDDEN_CHARACTER_RE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/;
+
+/** Any letter at all. A name with none of them is an emoji dump, not a token. */
+const LETTER_RE = /\p{L}/u;
 
 function textOf(token: SpamCheckable): { name: string; symbol: string } {
   const name = typeof token.name === "string" ? token.name : "";
@@ -81,10 +102,16 @@ export function spamReasonsOf(token: SpamCheckable): SpamReason[] {
 
   if (WEB_ADDRESS_RE.test(readable)) reasons.push("contains a web address");
   if (CHAT_HANDLE_RE.test(readable)) reasons.push("contains a web address");
-  if (BAIT_RE.test(readable)) reasons.push("airdrop wording");
+  if (BAIT_RE.test(readable) || ADDRESSED_RE.test(readable)) reasons.push("airdrop wording");
+  if (AMOUNT_ADVERT_RE.test(name)) reasons.push("advertises an amount");
   if (HIDDEN_CHARACTER_RE.test(readable)) reasons.push("hidden characters");
   if (name.trim().length > MAX_NAME_LENGTH || symbol.trim().length > MAX_SYMBOL_LENGTH) {
     reasons.push("unusually long name");
+  }
+  // A name and symbol with no letters at all ("🎁🎁", "***"): the whole entry is a
+  // banner, and there is nothing left to recognise it by.
+  if (name.trim() !== "" && !LETTER_RE.test(name) && !LETTER_RE.test(symbol)) {
+    reasons.push("unreadable name");
   }
 
   // De-duplicate: a name with both a URL and a chat invite has one problem.

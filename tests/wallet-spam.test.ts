@@ -93,6 +93,46 @@ test("a token worth real money is still spam — value is not the test", () => {
   assert.deepEqual(splitSpam([worthLots], true).kept, []);
 });
 
+test("a token that talks to the holder is spam", () => {
+  // The second wave of airdrop bait: no URL, no "airdrop" — just a sentence
+  // written as if the token were a prize notification.
+  assert.equal(isSpamToken({ name: "You have won 5,000 USDT", symbol: "WON" }), true);
+  assert.equal(isSpamToken({ name: "You've received a reward", symbol: "RWD" }), true);
+  assert.equal(isSpamToken({ name: "Claim your tokens now", symbol: "FREE" }), true);
+  assert.equal(isSpamToken({ name: "Receive your bonus", symbol: "BONUS" }), true);
+  assert.equal(spamReasonOf({ name: "You have won 5,000 USDT", symbol: "WON" }), "airdrop wording");
+});
+
+test("a token that prints an amount in its name is spam", () => {
+  // A real token does not advertise a balance in its own title.
+  assert.equal(isSpamToken({ name: "5,000 USDT", symbol: "USDT" }), true);
+  assert.equal(spamReasonOf({ name: "5,000 USDT", symbol: "USDT" }), "advertises an amount");
+  assert.equal(isSpamToken({ name: "$1000 ETH", symbol: "ETH2" }), true);
+  assert.equal(isSpamToken({ name: "1000 BNB", symbol: "BNB2" }), true);
+  // Numbers alone are fine — plenty of real tickers carry them.
+  assert.equal(isSpamToken({ name: "1inch", symbol: "1INCH" }), false);
+  assert.equal(isSpamToken({ name: "5ire", symbol: "5IRE" }), false);
+  assert.equal(isSpamToken({ name: "Bitcoin 2", symbol: "BTC2" }), false);
+});
+
+test("an emoji-only entry is spam", () => {
+  assert.equal(isSpamToken({ name: "🎁🎁🎁", symbol: "🎁" }), true);
+  assert.equal(spamReasonOf({ name: "🎁🎁🎁", symbol: "🎁" }), "unreadable name");
+  assert.equal(isSpamToken({ name: "***", symbol: "***" }), true);
+  // An emoji *next to* real letters is normal branding, not spam.
+  assert.equal(isSpamToken({ name: "🐸 Pepe", symbol: "PEPE" }), false);
+  assert.equal(isSpamToken({ name: "", symbol: "ETH" }), false);
+});
+
+test("an indexer's own scam verdict is enough, even with a perfect name", () => {
+  // The one case naming rules cannot catch: a scam token called "USDC".
+  const impostor = { name: "USDC", symbol: "USDC", spam: true };
+  assert.equal(isSpamToken(impostor), true);
+  assert.deepEqual(splitSpam([impostor], true).kept, []);
+  // And an entry the indexer cleared stays cleared.
+  assert.equal(isSpamToken({ name: "USDC", symbol: "USDC", spam: false }), false);
+});
+
 const read = (path: string) => readFileSync(resolve(__dirname, "../src", path), "utf8");
 
 test("the wallet importer hides spam and says what it hid", () => {
@@ -130,4 +170,28 @@ test("the holdings table filters spam, and spam is never counted in the totals",
   const portfolio = read("lib/portfolio.ts");
   const totals = portfolio.slice(portfolio.indexOf("export function computeTotals"));
   assert.ok(totals.includes("isSpamToken("), "the snapshot and alert totals skip it too");
+});
+
+test("the DeBank scam flag reaches the picker", () => {
+  // `parseDebankTokens` keeps DeBank's `is_scam`, `fromDebank` carries it, and
+  // the shared rule reads it — so a cleanly named scam token is still hidden.
+  const debank = read("lib/debank.ts");
+  assert.ok(debank.includes("is_scam === true"), "the scan reads DeBank's verdict");
+  assert.ok(debank.includes("spam?: boolean"), "a balance can carry it");
+  const scanner = read("lib/wallet-scanner.ts");
+  assert.ok(scanner.includes("...(balance.spam ? { spam: true } : {})"), "the scan passes it on");
+});
+
+test("junk already in the portfolio can be removed in one click", () => {
+  const actions = read("app/actions.ts");
+  const body = actions.slice(actions.indexOf("export async function removeSpamHoldings"));
+  assert.ok(body.includes("isSpamToken("), "the same rule decides what goes");
+  assert.ok(body.includes("db.delete(assets)"), "flagged holdings are deleted");
+  assert.ok(body.includes("recordSnapshot("), "the history is re-recorded");
+  assert.ok(body.includes("removed: junk.length"), "the count is reported back");
+
+  const table = read("components/HoldingsTable.tsx");
+  assert.ok(table.includes("removeSpamHoldings"), "the table can call it");
+  assert.ok(table.includes("Remove them"), "the button is there");
+  assert.ok(table.includes("spamCleanup"), "the result is shown, not swallowed");
 });
