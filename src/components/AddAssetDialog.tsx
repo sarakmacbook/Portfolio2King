@@ -15,6 +15,7 @@ import { playMoneyChimeFromGesture } from "@/lib/sounds";
 import { DEFAULT_DUST_THRESHOLD_USD, normaliseDustThreshold } from "@/lib/wallet-dust";
 import { MIN_LIQUIDITY_USD, MIN_ORGANIC_VOLUME_USD, shortUsd } from "@/lib/organic-volume";
 import { BLOCKSCAN_CHAINS } from "@/lib/blockscan";
+import { MORALIS_CHAINS } from "@/lib/moralis";
 import { depthOf, filterScanBalances } from "@/lib/wallet-trust";
 import { CAMBODIAN_BANKS, CUSTOM_BANK, type CambodianBank } from "@/lib/cambodian-banks";
 import type { DiscoveredStock } from "@/lib/stock-search";
@@ -139,13 +140,13 @@ function AddAssetForm({
    * Etherscan V2. There is no chain filter any more — every scan covers every
    * chain both sources know, which is what the picker listed anyway.
    */
-  const [walletSource, setWalletSource] = useState<"auto" | "blockscan">("auto");
+  const [walletSource, setWalletSource] = useState<"auto" | "blockscan" | "moralis">("auto");
   const [walletBalances, setWalletBalances] = useState<ScannedWalletBalance[]>([]);
   const [scanningWallet, setScanningWallet] = useState(false);
   const [walletScanError, setWalletScanError] = useState("");
   const [walletScanDone, setWalletScanDone] = useState(false);
   const [walletScanSource, setWalletScanSource] = useState<
-    "debank" | "onchain" | "blockscan" | null
+    "debank" | "onchain" | "blockscan" | "moralis" | null
   >(null);
   const [walletScanNote, setWalletScanNote] = useState("");
   const [importingWallet, setImportingWallet] = useState(false);
@@ -322,12 +323,14 @@ function AddAssetForm({
       const data = (await response.json()) as {
         error?: string;
         balances?: ScannedWalletBalance[];
-        source?: "debank" | "blockscan" | "onchain";
+        source?: "debank" | "blockscan" | "moralis" | "onchain";
         sourceNote?: string;
         debankNeedsKey?: boolean;
         blockscanNeedsKey?: boolean;
         blockscanProOnly?: boolean;
         blockscanSkippedChains?: number;
+        moralisNeedsKey?: boolean;
+        moralisSkippedChains?: number;
       };
       if (!response.ok) {
         throw new Error(data.error || "Could not scan that wallet address.");
@@ -344,7 +347,20 @@ function AddAssetForm({
       // a smaller scan, not an error — and when the cause is a missing key, the
       // note says so once and names the fix.
       setWalletScanNote(
-        data.source === "blockscan"
+        data.source === "moralis"
+          ? [
+              data.moralisNeedsKey
+                ? "Moralis needs a MORALIS_API_KEY — this scan used the other sources. A free key from moralis.com covers every chain here."
+                : data.sourceNote
+                  ? data.sourceNote
+                  : "",
+              data.moralisSkippedChains
+                ? `${data.moralisSkippedChains} chain${data.moralisSkippedChains === 1 ? "" : "s"} were not reached before the time limit; scan again in a moment to cover the rest.`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" ")
+          : data.source === "blockscan"
           ? [
               data.blockscanNeedsKey
                 ? "Blockscan needs an ETHERSCAN_API_KEY — this scan fell back to reading the chains directly, so it sees fewer tokens. Get a key at etherscan.io (the balance endpoint is free, token holdings need a paid plan)."
@@ -893,14 +909,18 @@ function AddAssetForm({
               <select
                 className="input sm:w-44"
                 value={walletSource}
-                onChange={(event) =>
-                  setWalletSource(event.target.value === "blockscan" ? "blockscan" : "auto")
-                }
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setWalletSource(
+                    value === "blockscan" || value === "moralis" ? value : "auto",
+                  );
+                }}
                 aria-label="Where to scan for the tokens"
                 title="Which index is asked for the token list"
               >
                 <option value="auto">Scan via DeBank</option>
                 <option value="blockscan">Scan via Blockscan</option>
+                <option value="moralis">Scan via Moralis</option>
               </select>
               <button
                 type="button"
@@ -919,6 +939,17 @@ function AddAssetForm({
                 whole-wallet sweep takes about ten seconds. It needs{" "}
                 <code className="rounded bg-slate-100 px-1">ETHERSCAN_API_KEY</code>; without one the
                 scan still reads the chains directly and says so.
+              </p>
+            )}
+
+            {walletSource === "moralis" && (
+              <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+                Moralis is the only source that labels a token as a scam itself
+                (<code className="rounded bg-slate-100 px-1">possible_spam</code>), so airdropped
+                junk is counted as spam instead of having to be spotted by its name. It reads{" "}
+                {MORALIS_CHAINS.length} chains with one{" "}
+                <code className="rounded bg-slate-100 px-1">MORALIS_API_KEY</code> from moralis.com;
+                without a key the scan says so and falls back to the other sources.
               </p>
             )}
 
@@ -1023,6 +1054,13 @@ function AddAssetForm({
                   Avalanche, plus Blockscout then Routescan for every other ERC-20 the wallet holds.
                 </li>
                 <li>
+                  <strong className="font-medium text-slate-600">Moralis</strong> — the source to pick
+                  when a wallet is full of junk: it returns a `possible_spam` flag per token, so
+                  spam is counted and hidden instead of guessed from the name. One{" "}
+                  <code className="rounded bg-slate-100 px-1">MORALIS_API_KEY</code>,{" "}
+                  {MORALIS_CHAINS.length} chains, prices and logos included.
+                </li>
+                <li>
                   <strong className="font-medium text-slate-600">Blockscan</strong> — pick it in the
                   scan menu to ask Etherscan V2 (the API behind blockscan.com) instead: one key,{" "}
                   {BLOCKSCAN_CHAINS.length} chains, prices included, merged with the direct read. It
@@ -1074,7 +1112,9 @@ function AddAssetForm({
                     ? " via DeBank"
                     : walletScanSource === "blockscan"
                       ? " via Blockscan"
-                      : ""}
+                      : walletScanSource === "moralis"
+                        ? " via Moralis"
+                        : ""}
                   {walletSelection.counts.impostor > 0
                     ? ` · ${walletSelection.counts.impostor} look-alike hidden`
                     : ""}

@@ -17,10 +17,11 @@ export const dynamic = "force-dynamic";
  * the direct read. `chain` may be `auto` (every chain) or any chain id DeBank
  * knows — the filter is alias-aware, so `ethereum` and `eth` are the same.
  * `source=blockscan` swaps the index for Etherscan V2 — the API behind
- * blockscan.com — and merges the direct read into it, so a missing key or a
- * paid-plan endpoint still answers with whatever the chains themselves say. The
- * response carries `source: "debank" | "blockscan" | "onchain"` so the dialog can
- * say where the numbers came from. Each balance is then matched against the
+ * blockscan.com — and `source=moralis` for Moralis, whose token list carries a
+ * `possible_spam` verdict per token. Both merge the direct read in, so a missing
+ * key or a paid-plan endpoint still answers with whatever the chains themselves
+ * say. The response carries `source: "debank" | "blockscan" | "moralis" |
+ * "onchain"` so the dialog can say where the numbers came from. Each balance is then matched against the
  * official contract table and looked up for organic trading volume
  * (`wallet-trust`) — best-effort, so a slow or rate-limited lookup leaves the
  * token "unknown" rather than hidden. Read-only — no keys or signatures.
@@ -29,7 +30,9 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const address = (params.get("address") ?? "").trim();
   const chain = normaliseWalletChain(params.get("chain"));
-  const source: WalletScanSource = params.get("source") === "blockscan" ? "blockscan" : "auto";
+  const requestedSource = params.get("source");
+  const source: WalletScanSource =
+    requestedSource === "blockscan" || requestedSource === "moralis" ? requestedSource : "auto";
 
   if (!address) {
     return NextResponse.json(
