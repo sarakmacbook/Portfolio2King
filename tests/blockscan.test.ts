@@ -317,7 +317,7 @@ test("Blockscan is a source the user picks, and the scan route carries it", () =
   assert.ok(scanner.includes("fetchBlockscanBalances("), "the scanner can read Blockscan");
   assert.ok(scanner.includes('source: "blockscan"'), "the result says where it came from");
   assert.ok(
-    scanner.includes("source === \"blockscan\" && !isEvm"),
+    scanner.includes('source !== "auto" && !isEvm'),
     "a non-EVM address gets a plain explanation instead of an empty scan",
   );
 
@@ -337,7 +337,7 @@ test("Blockscan refuses a non-EVM address in words, not with an empty scan", asy
       scanWalletAddress("bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq", "auto", {
         source: "blockscan",
       }),
-    /Blockscan only indexes EVM addresses/,
+    /only index EVM addresses/,
   );
 });
 

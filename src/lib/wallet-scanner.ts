@@ -1,6 +1,7 @@
 import type { CryptoCategory } from "@/db/schema";
 import { fetchDebankBalances, type DebankBalance } from "@/lib/debank";
 import { blockscanApiKey, fetchBlockscanBalances } from "@/lib/blockscan";
+import { fetchMoralisBalances, moralisApiKey } from "@/lib/moralis";
 import { fetchBlockscoutTokens } from "@/lib/blockscout";
 import { type DiscoveredToken } from "@/lib/discovered-tokens";
 import { fetchRoutescanTokens } from "@/lib/routescan";
@@ -90,7 +91,7 @@ export type WalletScanResult = {
    * explorers. The dialog shows this so it is obvious where the numbers came
    * from.
    */
-  source: "debank" | "onchain" | "blockscan";
+  source: "debank" | "onchain" | "blockscan" | "moralis";
   /** Why DeBank was not used, when it was tried and failed. */
   sourceNote?: string;
   /**
@@ -115,6 +116,13 @@ export type WalletScanResult = {
   blockscanSkippedChains?: number;
   /** Blockscan answered, but token holdings are a paid-plan endpoint. */
   blockscanProOnly?: boolean;
+  /**
+   * Moralis was the chosen source but no `MORALIS_API_KEY` is configured, so the
+   * scan is running on the other sources. The dialog turns this into a hint.
+   */
+  moralisNeedsKey?: boolean;
+  /** How many chains the Moralis sweep ran out of time before asking. */
+  moralisSkippedChains?: number;
 };
 
 const REQUEST_TIMEOUT_MS = 7000;
@@ -780,14 +788,15 @@ async function mergeWithDirect(
   return { balances, extra: extra.length };
 }
 
-export type WalletScanSource = "auto" | "blockscan";
+export type WalletScanSource = "auto" | "blockscan" | "moralis";
 
 export async function scanWalletAddress(
   rawAddress: string,
   chainFilter: string = "auto",
   options: { source?: WalletScanSource } = {},
 ): Promise<WalletScanResult> {
-  const source: WalletScanSource = options.source === "blockscan" ? "blockscan" : "auto";
+  const source: WalletScanSource =
+    options.source === "blockscan" || options.source === "moralis" ? options.source : "auto";
   const requestedChain = normaliseWalletChain(chainFilter);
   const address = rawAddress.trim();
   const addressKind = detectWalletAddressKind(address);
@@ -812,9 +821,9 @@ export async function scanWalletAddress(
         ? []
         : EXPLORER_CHAINS;
 
-  if (source === "blockscan" && !isEvm) {
+  if (source !== "auto" && !isEvm) {
     throw new Error(
-      "Blockscan only indexes EVM addresses — scan Solana, Bitcoin and Tron with the default scan.",
+      "Blockscan and Moralis only index EVM addresses — scan Solana, Bitcoin and Tron with the default scan.",
     );
   }
 
@@ -827,11 +836,20 @@ export async function scanWalletAddress(
    * direct read sees every ERC-20 on a chain but knows fewer chains. Both run in
    * parallel so a scan takes as long as the slower one, not both.
    */
-  const [debank, blockscan, directRaw] = await Promise.all([
+  /**
+   * Moralis is preferred in a default scan whenever a key is configured: it is
+   * the only source that labels a token `possible_spam`, so the junk is counted
+   * as spam instead of having to be spotted by its name.
+   */
+  const wantsMoralis =
+    isEvm && (source === "moralis" || (source === "auto" && moralisApiKey() !== ""));
+
+  const [debank, blockscan, moralis, directRaw] = await Promise.all([
     isEvm && source === "auto" ? fetchDebankBalances(address, requestedChain) : Promise.resolve(null),
     isEvm && source === "blockscan"
       ? fetchBlockscanBalances(address, { chainFilter: requestedChain })
       : Promise.resolve(null),
+    wantsMoralis ? fetchMoralisBalances(address, { chainFilter: requestedChain }) : Promise.resolve(null),
     isEvm
       ? Promise.all([
           ...chainsToScan.map((spec) => scanOneEvmChain(spec, address)),
@@ -865,6 +883,28 @@ export async function scanWalletAddress(
       ...(blockscan.proOnly ? { blockscanProOnly: true } : {}),
       ...(blockscan.skippedChains.length > 0
         ? { blockscanSkippedChains: blockscan.skippedChains.length }
+        : {}),
+      ...(extra > 0 ? { directAdditions: extra } : {}),
+    };
+  }
+
+  /**
+   * Moralis answers first when it was asked: its spam verdict is the whole reason
+   * to use it. A default scan only uses it when it actually returned balances, so
+   * a missing or rate-limited key still lets DeBank answer.
+   */
+  if (moralis && (moralis.balances.length > 0 || source === "moralis")) {
+    const { balances, extra } = await mergeWithDirect(moralis.balances, directRaw);
+    return {
+      address,
+      addressKind,
+      chain: requestedChain,
+      balances,
+      source: "moralis",
+      ...(moralis.error ? { sourceNote: moralis.error } : {}),
+      ...(moralis.needsKey ? { moralisNeedsKey: true } : {}),
+      ...(moralis.skippedChains.length > 0
+        ? { moralisSkippedChains: moralis.skippedChains.length }
         : {}),
       ...(extra > 0 ? { directAdditions: extra } : {}),
     };

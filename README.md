@@ -244,6 +244,25 @@ never turns into an empty wallet:
   read — the result then says `via Blockscan` and why. API callers can force it
   with `?source=blockscan` on `/api/wallet/scan`.
 
+**Moralis** is the third choice (*Scan via Moralis*), and the one to pick when a
+wallet is drowning in airdropped junk. Its
+`GET /wallets/{address}/tokens?chain=…` returns, per token, the quantity, USD
+price and value, the logo — and `possible_spam`, its own scam verdict. That flag
+becomes the same `spam` field the naming rules produce, so a scam token called
+`USDC` is counted under *N spam-looking hidden* and can be revealed, instead of
+having to be guessed from its name.
+
+- **One call per chain**, `X-API-Key` header, `MORALIS_API_KEY`. Fourteen chains,
+  three requests at a time, 8 s timeout inside a 12 s budget.
+- **Nothing is excluded server-side.** `exclude_spam=false` is always sent: the
+  app marks and counts what it hides, so a spam token never disappears without a
+  *Show them* to bring it back.
+- **Preferred when configured.** A default scan with `MORALIS_API_KEY` set asks
+  Moralis first (its spam verdict is the reason), keeps DeBank and Blockscan as
+  the fallbacks, and says `via Moralis` in the result. Without a key the option
+  explains itself and the scan uses the other sources.
+- API callers can force it with `?source=moralis` on `/api/wallet/scan`.
+
 Only chains with a public Blockscout or Routescan instance can be *discovered*
 beyond the hand-listed tickers — today that is 14 Blockscout chains (Ethereum,
 Base, Optimism, Arbitrum, Polygon, Gnosis, zkSync, Scroll, Linea, Mantle, Zora,
