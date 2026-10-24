@@ -242,7 +242,7 @@ that talks to the network about a wallet.
 
 | Address | How the tokens are found |
 | --- | --- |
-| `0x…` (EVM) | **Two reads in parallel, then merged.** DeBank covers every chain it indexes in one call; at the same time the direct read asks the public RPCs on Ethereum, BNB Chain, Arbitrum, Base, Polygon, Optimism and Avalanche for the native coin plus the known tickers, and asks **Blockscout → Routescan** for *every other ERC-20* the wallet holds (that is where the long tail comes from). |
+| `0x…` (EVM) | **One source answers.** DeBank by default — every chain it indexes in one call, prices included. Pick *Blockscan* or *Moralis* in the menu and that source answers alone. If the chosen source cannot answer (no key, a refusal, nothing found), the others are tried in turn and the chains are read **only as a last resort**: public RPCs on Ethereum, BNB Chain, Arbitrum, Base, Polygon, Optimism and Avalanche, plus **Blockscout → Routescan**. A scan is no longer two reads merged. |
 | Solana | The public Solana RPC (`solana-rpc.publicnode.com`, then `api.mainnet-beta.solana.com`) reads the wallet's token accounts and the known mints. |
 | Bitcoin | `mempool.space`, falling back to `blockstream.info`. |
 | Tron | `apilist.tronscanapi.com/api/accountv2`. |
@@ -252,8 +252,8 @@ Blockscan is Etherscan's multichain explorer and its data comes from **Etherscan
 V2** (`https://api.etherscan.io/v2/api`) — one key for 60+ chains, with `chainid`
 choosing the network. The sweep asks
 `module=account&action=addresstokenbalance` per chain (token balances *and*
-`TokenPriceUSD`) and merges the answer with the direct read above, so a refusal
-never turns into an empty wallet:
+`TokenPriceUSD`) and its answer is the scan's answer — with the chains as the
+fallback if Etherscan refuses, so a refusal never turns into an empty wallet:
 
 - **Needs a key.** `ETHERSCAN_API_KEY` (or `BLOCKSCAN_API_KEY`). Without one the
   sweep is skipped, the scan falls back to the direct read, and the dialog says so
@@ -370,21 +370,23 @@ Blockscout has no public instance (Base, for example). A chain that has neither
 still reports its native coin and the listed tickers over RPC; nothing is hidden
 because a third party is missing.
 
-The two reads run together, so a scan takes as long as the slower one:
+**One source answers; the chains are the fallback** (not a second opinion):
 
-1. **DeBank** (EVM only) — `pro-openapi.debank.com` with `DEBANK_ACCESS_KEY` when
-   one is set, otherwise the keyless `api.debank.com` and `api.rabby.io` routes
-   in turn. 6 s per request, 12 s total budget, at most 250 tokens.
-2. **Direct read** — per chain, in parallel: `eth_getBalance` plus batched
-   `balanceOf` calls for the known tickers, and the explorer discovery call
+1. **The source you picked** (EVM only) — DeBank by default
+   (`pro-openapi.debank.com` with a key, otherwise the keyless `api.debank.com`
+   and `api.rabby.io` routes in turn; 6 s per request, 12 s total budget, at most
+   250 tokens), or Blockscan / Moralis from the menu.
+2. **The other keyed sources**, in turn — Moralis then Blockscan — but only when
+   the chosen one could not answer at all (no key, a refusal, nothing found).
+3. **The chains as the last resort** — `eth_getBalance` plus batched `balanceOf`
+   for the known tickers over public RPCs, and the explorer discovery call
    (7 s Blockscout / 8 s Routescan, two pages of 100, at most 150 tokens per
-   chain, spam-flagged tokens dropped).
-3. **Merge** — the same token found twice is one row (chain + contract), and
-   the index's live price (DeBank's, or Blockscan's `TokenPriceUSD`) wins over a
-   locally looked-up one. Tokens only the direct
-   read saw are priced from the market APIs, then from the built-in fallback
-   table. The result says `via DeBank`, `via Blockscan` or `read directly from
-   the chains`, and `directAdditions` counts what the index would have missed.
+   chain, spam-flagged tokens dropped). This is the only path that reads every
+   ERC-20 an explorer can enumerate, and it therefore sees far more junk; it runs
+   only when nothing else answered.
+4. **Pricing** — the index's live price is used when it has one; a row it could
+   not price is quoted from the market APIs, then from the built-in fallback
+   table, so a real token is never shown (or filtered away) as $0 dust.
 4. **Trust pass** (`/api/wallet/scan` → `wallet-trust`) — official contract
    address, organic 24 h volume and liquidity depth per contract, from the local
    table, a batched **CoinMarketCap** contract lookup (50 addresses per call) and
@@ -443,11 +445,11 @@ two sides at once:
   has no public instance for (BNB Chain, Avalanche, …) and steps in when
   Blockscout is rate-limited. Spam-marked tokens are dropped.
 
-DeBank and the direct read run **together and are merged**, not "DeBank or
-nothing": DeBank's prices win for the tokens it reports, and anything it missed —
-another chain, a filtered token, a token it does not index — is added from the
-direct read and priced by the app. That is what stops a scan from quietly
-dropping a holding DeBank did not mention.
+A scan is **one source**, not a merge. DeBank's answer (or Blockscan's, or
+Moralis') is what the picker shows — with its prices and its metadata — because
+merging a second read doubled every scan's cost and pulled in every airdropped
+look-alike an explorer could enumerate. The chains are read only when the chosen
+source cannot answer, so a refusal still never means "empty wallet".
 
 Every chain either scan covers is read, including the ones with no RPC token
 list (zkSync, Linea, Scroll, Mantle, Blast, Fantom, Gnosis, Cronos, plus Zora,

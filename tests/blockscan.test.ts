@@ -353,11 +353,16 @@ test("Blockscan refuses a non-EVM address in words, not with an empty scan", asy
 
 test("an auto scan falls back to Blockscan when DeBank cannot answer", () => {
   const scanner = read("lib/wallet-scanner.ts");
-  const body = scanner.slice(scanner.indexOf('if (source === "auto" && blockscanKey !== "" && debankBalances.length === 0)'));
+  const body = scanner.slice(scanner.indexOf('if (blockscanKey !== "")'));
   assert.ok(body.includes("fetchBlockscanBalances("), "the same sweep runs as the fallback");
   assert.ok(body.includes("apiKey: blockscanKey"), "using the key from the app or the environment");
   assert.ok(body.includes('source: "blockscan"'), "and the result says so");
-  assert.ok(body.includes("mergeWithDirect("), "with the direct read still merged in");
+  assert.ok(
+    body.includes("had no answer, so this scan used Blockscan"),
+    "the note says why it was used",
+  );
+  // One source at a time: the result is the index's answer, not a merge.
+  assert.equal(scanner.includes("mergeWithDirect("), false, "no merged second opinion");
 });
 
 // ---------------------------------------------------------------------------
@@ -570,6 +575,7 @@ test("unpriced index rows are priced by the scanner instead of showing $0", () =
     scanner.includes("primary.filter((balance) => !(balance.price > 0))"),
     "the primary balances are priced when the index could not price them",
   );
+  assert.ok(scanner.includes("const fromIndex = async"), "every index answer goes through it");
   assert.ok(scanner.includes("pricedPrimary?.get(balance.id)"), "and the priced copy replaces the raw row");
   assert.ok(scanner.includes("blockscanFreeFallback"), "the free path is reported to the dialog");
 

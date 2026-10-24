@@ -326,13 +326,15 @@ test("the direct read discovers tokens it has no hard-coded entry for", async ()
   }
 });
 
-test("a DeBank answer is merged with the direct read, so its gaps are filled", async () => {
+test("one source answers a scan: DeBank answered, so the chains are never read", async () => {
   const originalFetch = globalThis.fetch;
   const originalKey = process.env.DEBANK_ACCESS_KEY;
   process.env.DEBANK_ACCESS_KEY = "test-key";
 
+  const calls: string[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    calls.push(url);
     // DeBank knows about ETH on Base but not about LayerZero (ZRO).
     if (url.includes("debank.com")) {
       return new Response(
@@ -391,14 +393,19 @@ test("a DeBank answer is merged with the direct read, so its gaps are filled", a
 
   try {
     const scan = await scanWalletAddress("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "base");
-    assert.equal(scan.source, "debank", "DeBank still supplies the priced balances");
-    const zro = scan.balances.find((balance) => balance.symbol === "ZRO");
-    assert.ok(zro, "the token DeBank missed is found by the explorer");
-    assert.equal(zro?.quantity, 2.5);
-    assert.equal(zro?.chain, "base");
-    // DeBank's own entry is not duplicated by the RPC read of the same coin.
-    assert.equal(scan.balances.filter((balance) => balance.symbol === "ETH").length, 1);
-    assert.equal(scan.directAdditions, 1);
+    assert.equal(scan.source, "debank");
+    assert.deepEqual(
+      scan.balances.map((balance) => balance.symbol),
+      ["ETH"],
+      "DeBank's answer is the answer — the explorers are not consulted",
+    );
+    assert.equal(
+      scan.balances.find((balance) => balance.symbol === "ZRO"),
+      undefined,
+      "no merge: the explorer's extra ERC-20s are no longer mixed in",
+    );
+    // The single DeBank call is all that was asked for.
+    assert.equal(calls.length, 1, "a scan is one source, not a sweep of thirty calls");
   } finally {
     globalThis.fetch = originalFetch;
     if (originalKey === undefined) delete process.env.DEBANK_ACCESS_KEY;
@@ -490,4 +497,74 @@ test("chains the dropdown offers are scanned even when the RPC list does not cov
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("one source answers a public address — the chains are the fallback, not a merge", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.DEBANK_ACCESS_KEY;
+  process.env.DEBANK_ACCESS_KEY = "test-key";
+
+  const calls: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes("debank.com")) {
+      // A refusal: the shape DeBank sends when the key is wrong or rate-limited.
+      return new Response(JSON.stringify({ error_code: 1, error_message: "rate limited" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    // Blockscout answers with one ERC-20.
+    if (url.includes("blockscout.com")) {
+      return new Response(
+        JSON.stringify({
+          status: "1",
+          result: [
+            {
+              contractAddress: "0x1111111111111111111111111111111111111111",
+              tokenName: "Honest Token",
+              symbol: "HON",
+              decimals: "18",
+              balance: "1000000000000000000",
+              type: "ERC-20",
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    if (url.includes("routescan.io")) {
+      return new Response(JSON.stringify({ status: "0", result: "[]" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response("Offline", { status: 502 });
+  }) as typeof fetch;
+
+  try {
+    const scan = await scanWalletAddress("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "base");
+    assert.equal(scan.source, "onchain", "DeBank refused, so the chains answered");
+    assert.ok(scan.sourceNote, "and the refusal is explained rather than hidden");
+    assert.ok(
+      scan.balances.some((balance) => balance.symbol === "HON"),
+      "the fallback still finds tokens",
+    );
+    // The chains were read only because DeBank could not answer.
+    assert.ok(calls.some((url) => url.includes("debank.com")), "DeBank was asked first");
+    assert.ok(calls.some((url) => url.includes("blockscout.com")), "then the chains");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.DEBANK_ACCESS_KEY;
+    else process.env.DEBANK_ACCESS_KEY = originalKey;
+  }
+});
+
+test("a non-EVM address goes straight to its own reader", async () => {
+  const scanner = readFileSync(resolve(__dirname, "../src/lib/wallet-scanner.ts"), "utf8");
+  assert.ok(
+    scanner.includes('if (!isEvm) return onchainFallback();'),
+    "Solana / Bitcoin / Tron never touch an EVM index",
+  );
 });
