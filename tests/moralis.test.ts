@@ -302,11 +302,13 @@ test("Moralis is selectable in the picker, and it is preferred when a key is set
   assert.ok(scanner.includes("fetchMoralisBalances("), "the scanner can read Moralis");
   assert.ok(scanner.includes('source: "moralis"'), "the result says where it came from");
   assert.ok(
-    scanner.includes('source === "auto" && moralisKey !== ""'),
-    "a default scan prefers Moralis when a key exists (saved in the app or in the environment)",
+    scanner.includes('if (moralisKey !== "")'),
+    "a default scan falls back to Moralis when DeBank cannot answer",
   );
+  // One source answers: a scan is not a merge of an index and the chains.
+  assert.equal(scanner.includes("mergeWithDirect("), false, "no merged second opinion");
   assert.ok(
-    scanner.includes("mergeWithDirect(moralis.balances"),
-    "and still merges the direct read in",
+    scanner.includes("const readDirect = ()"),
+    "the direct read is the fallback, and only runs when it is needed",
   );
 });

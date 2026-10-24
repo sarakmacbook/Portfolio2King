@@ -416,10 +416,14 @@ function AddAssetForm({
           : data.source !== "onchain"
             ? ""
             : data.debankNeedsKey
-              ? "Read directly from the chains — DeBank only lists tokens with an access key, so this scan sees fewer of them. Add a free DeBank key under Scanner API keys below (or set DEBANK_ACCESS_KEY) to cover every chain DeBank indexes."
-              : data.sourceNote
-                ? `Read directly from the chains — ${data.sourceNote}`
-                : "",
+              ? "No source could answer — DeBank only lists tokens with an access key. This scan read the chains directly, which sees fewer tokens. Add a free DeBank key under Scanner API keys below (or set DEBANK_ACCESS_KEY) to cover every chain DeBank indexes."
+              : data.blockscanNeedsKey
+                ? "Blockscan needs an Etherscan API key, so this scan read the chains directly — which sees fewer tokens. Add one under Scanner API keys below (or set ETHERSCAN_API_KEY); the key from etherscan.io is free."
+                : data.moralisNeedsKey
+                  ? "Moralis needs an API key, so this scan read the chains directly — which sees fewer tokens. Add one under Scanner API keys below (or set MORALIS_API_KEY); a free key from moralis.com covers every chain here."
+                  : data.sourceNote
+                    ? `Read directly from the chains — ${data.sourceNote}`
+                    : "Read directly from the chains.",
       );
       if (list.length === 0) {
         // Never say "empty wallet" when the source itself refused.
@@ -1105,10 +1109,18 @@ function AddAssetForm({
               </summary>
               <ul className="mt-2 space-y-1.5 text-[11px] leading-relaxed text-slate-500">
                 <li>
-                  <strong className="font-medium text-slate-600">0x… (EVM)</strong> — DeBank for
-                  every chain it indexes, prices included, <em>at the same time as</em> a direct
-                  read: public RPC on Ethereum, BNB Chain, Arbitrum, Base, Polygon, Optimism and
-                  Avalanche, plus Blockscout then Routescan for every other ERC-20 the wallet holds.
+                  <strong className="font-medium text-slate-600">One source answers</strong> — a scan
+                  asks the source you picked and shows <em>its</em> answer: no second opinion, no
+                  merged long tail, no airdropped look-alikes from an explorer nobody asked about.
+                  Every row then goes through the same checks below.
+                </li>
+                <li>
+                  <strong className="font-medium text-slate-600">0x… (EVM)</strong> — DeBank by
+                  default, for every chain it indexes, prices included. If DeBank cannot answer, the
+                  other keyed sources are tried in turn (Moralis, then Blockscan) and the chains are
+                  read <strong className="font-medium text-slate-600">only when</strong> none of them
+                  can: public RPC on Ethereum, BNB Chain, Arbitrum, Base, Polygon, Optimism and
+                  Avalanche, plus Blockscout then Routescan.
                 </li>
                 <li>
                   <strong className="font-medium text-slate-600">Moralis</strong> — the source to pick
@@ -1121,14 +1133,13 @@ function AddAssetForm({
                 <li>
                   <strong className="font-medium text-slate-600">Blockscan</strong> — pick it in the
                   scan menu to ask Etherscan V2 (the API behind blockscan.com) instead: one key,{" "}
-                  {BLOCKSCAN_CHAINS.length} chains, prices included, merged with the direct read. It
-                  is paced at 2 calls a second and needs{" "}
+                  {BLOCKSCAN_CHAINS.length} chains, prices included. It is paced at 2 calls a second
+                  and needs{" "}
                   <code className="rounded bg-slate-100 px-1">ETHERSCAN_API_KEY</code> or a key saved
                   in Scanner API keys. A free key reads token holdings through the wallet&apos;s
                   transfer history (<code className="rounded bg-slate-100 px-1">tokentx</code> →{" "}
-                  <code className="rounded bg-slate-100 px-1">tokenbalance</code>); a paid key reads them
-                  in one call per chain, with prices. DeBank scans fall back to
-                  it automatically when DeBank cannot answer and a key is set.
+                  <code className="rounded bg-slate-100 px-1">tokenbalance</code>); a paid key reads
+                  them in one call per chain, with prices.
                 </li>
                 <li>
                   <strong className="font-medium text-slate-600">Solana</strong> — public RPC token
@@ -1137,9 +1148,9 @@ function AddAssetForm({
                   <strong className="font-medium text-slate-600">Tron</strong> — Tronscan.
                 </li>
                 <li>
-                  <strong className="font-medium text-slate-600">Merge</strong> — DeBank&apos;s price
-                  wins for the tokens it knows; anything only the direct read saw is added and priced
-                  from the market APIs.
+                  <strong className="font-medium text-slate-600">Pricing</strong> — the index&apos;s
+                  price is used when it has one; a balance it could not price is quoted from the
+                  market APIs instead of being shown (or filtered) as $0.
                 </li>
                 <li>
                   <strong className="font-medium text-slate-600">Then the checks</strong> — official

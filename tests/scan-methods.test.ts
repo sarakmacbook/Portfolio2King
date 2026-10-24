@@ -79,16 +79,19 @@ test("the dialog explains the method in the app, not only in the README", () => 
   for (const method of ["DeBank", "Blockscout", "Routescan", "mempool.space", "Tronscan", "DexScreener"]) {
     assert.ok(dialog.includes(method), `the panel names ${method}`);
   }
-  assert.ok(dialog.includes("at the same time as"), "the parallel DeBank + direct read is explained");
+  assert.ok(
+    dialog.includes("only when"),
+    "the panel says the chains are read only when the chosen source cannot answer",
+  );
   assert.ok(dialog.includes("Limits"), "and the caps are stated");
 });
 
 test("the scan route still runs the method the docs describe", () => {
   const scanner = read("src/lib/wallet-scanner.ts");
-  assert.ok(scanner.includes("Promise.all("), "DeBank and the direct read run together");
+  assert.ok(scanner.includes("const readDirect = ()"), "the direct read is the fallback");
   assert.ok(scanner.includes("discoverChainTokens("), "explorer discovery is part of the direct read");
   assert.ok(scanner.includes("priceBalances("), "unpriced tokens get a price");
-  assert.ok(scanner.includes("directAdditions"), "what DeBank missed is reported");
+  assert.ok(scanner.includes("fromIndex("), "index rows go through the same pricing");
 
   const route = read("src/app/api/wallet/scan/route.ts");
   assert.ok(route.includes("scanWalletAddress("), "the route reads balances first");
