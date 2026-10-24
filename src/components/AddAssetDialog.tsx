@@ -303,15 +303,16 @@ function AddAssetForm({
       // Only mention DeBank when it was actually involved, so the picker stays
       // quiet on a plain on-chain read for Solana / Bitcoin / Tron.
       // Where the numbers came from, said plainly. DeBank being unavailable is
-      // a smaller scan, not an error — and when it is a missing key, say so.
+      // a smaller scan, not an error — and when the cause is a missing key, the
+      // note says so once and names the fix.
       setWalletScanNote(
-        data.source === "onchain" && data.sourceNote
-          ? `Read directly from the chains — ${data.sourceNote}${
-              data.debankNeedsKey
-                ? " Add a free DEBANK_ACCESS_KEY to cover every chain DeBank indexes."
-                : ""
-            }`
-          : "",
+        data.source !== "onchain"
+          ? ""
+          : data.debankNeedsKey
+            ? "Read directly from the chains — DeBank only lists tokens with an access key, so this scan sees fewer of them. Add a free DEBANK_ACCESS_KEY to cover every chain DeBank indexes."
+            : data.sourceNote
+              ? `Read directly from the chains — ${data.sourceNote}`
+              : "",
       );
       if (list.length === 0) {
         setWalletScanError("No non-zero balances found on that wallet address.");

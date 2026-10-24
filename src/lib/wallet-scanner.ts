@@ -1,5 +1,6 @@
 import type { CryptoCategory } from "@/db/schema";
 import { fetchDebankBalances, type DebankBalance } from "@/lib/debank";
+import { fetchBlockscoutTokens } from "@/lib/blockscout";
 import { fetchPreferredMarketPrice } from "@/lib/market-prices";
 import { STABLECOIN_SYMBOLS } from "@/lib/stablecoins";
 import {
@@ -252,7 +253,47 @@ export function encodeBalanceOfCall(evmAddress: string): string {
   return `0x70a08231${clean.padStart(64, "0")}`;
 }
 
+/**
+ * Reads a chain: the native balance plus the known tickers over RPC, and every
+ * other ERC-20 the wallet holds via Blockscout's account API.
+ *
+ * RPC alone can only answer "how much of *this* token do you hold", so a wallet
+ * would otherwise show only the hand-listed tickers. Blockscout contributes the
+ * tokens this file has never heard of — which is most of them.
+ */
 async function scanOneEvmChain(
+  spec: EvmChainSpec,
+  address: string,
+): Promise<Array<Omit<ScannedWalletBalance, "price" | "valueUsd">>> {
+  const [known, discovered] = await Promise.all([
+    scanEvmChainRpc(spec, address),
+    fetchBlockscoutTokens(spec.chain, address).catch(() => []),
+  ]);
+
+  const seen = new Set(
+    known.map((item) => item.contract?.toLowerCase()).filter((value): value is string => Boolean(value)),
+  );
+  const extra: typeof known = [];
+  for (const token of discovered) {
+    const key = token.contract.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    extra.push({
+      id: `${spec.chain}:${token.symbol}:${token.contract}`,
+      symbol: token.symbol,
+      name: token.name,
+      chain: spec.chain,
+      chainLabel: spec.label,
+      quantity: token.quantity,
+      category: token.stablecoin ? "stablecoin" : "volatile",
+      contract: token.contract,
+    });
+  }
+
+  return [...known, ...extra];
+}
+
+async function scanEvmChainRpc(
   spec: EvmChainSpec,
   address: string,
 ): Promise<Array<Omit<ScannedWalletBalance, "price" | "valueUsd">>> {

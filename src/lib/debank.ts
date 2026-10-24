@@ -716,18 +716,25 @@ export async function fetchDebankBalances(
   }
 
   const key = (process.env.DEBANK_ACCESS_KEY ?? "").trim();
+  // An empty list from a *keyed* call is real information: DeBank looked and the
+  // wallet holds nothing. The same answer from a keyless call is not — DeBank
+  // serves an empty list to unauthenticated callers even for a wallet full of
+  // tokens, so trusting it hides every holding behind "no tokens".
   const emptyMessage = "DeBank reports no tokens for that wallet on any chain it indexes.";
+  const emptyIsTrustworthy = emptyAnswer && Boolean(key);
+  const keylessEmptyMessage =
+    "DeBank needs an access key to list tokens — its keyless routes answer with an empty list.";
   return {
     ok: false,
     balances: [],
     endpoint: null,
     // A refusal beats everything; otherwise a real "it is empty" answer beats a
     // route that merely 404'd.
-    error: refusal ?? (emptyAnswer ? emptyMessage : lastError),
+    error: refusal ?? (emptyIsTrustworthy ? emptyMessage : emptyAnswer ? keylessEmptyMessage : lastError),
     status: lastStatus,
-    // Keyless routes being refused or retired is exactly what an access key
-    // fixes, so point at it — unless DeBank actually answered "empty".
-    needsAccessKey: !key && !emptyAnswer && (Boolean(refusal) || lastStatus !== null),
+    // Point at the access key whenever DeBank did not give a usable, trustworthy
+    // answer: refused routes, retired routes, or a keyless empty list.
+    needsAccessKey: !key && (Boolean(refusal) || lastStatus !== null || emptyAnswer),
     attempts,
   };
 }
