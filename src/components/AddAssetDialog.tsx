@@ -12,6 +12,11 @@ import {
 import type { CryptoCategory } from "@/db/schema";
 import { TYPE_META, money, qty } from "@/lib/format";
 import { playMoneyChimeFromGesture } from "@/lib/sounds";
+import {
+  DEFAULT_DUST_THRESHOLD_USD,
+  normaliseDustThreshold,
+  splitDust,
+} from "@/lib/wallet-dust";
 import { CAMBODIAN_BANKS, CUSTOM_BANK, type CambodianBank } from "@/lib/cambodian-banks";
 import type { DiscoveredStock } from "@/lib/stock-search";
 import {
@@ -141,6 +146,11 @@ function AddAssetForm({
   /** Import the wallet's tokens into a folder, named by the user or by the address. */
   const [walletFileIntoFolder, setWalletFileIntoFolder] = useState(true);
   const [walletFolderName, setWalletFolderName] = useState("");
+  /** Hide scanned balances worth less than `walletDustThreshold` (dust). */
+  const [walletHideDust, setWalletHideDust] = useState(true);
+  const [walletDustThreshold, setWalletDustThreshold] = useState(
+    String(DEFAULT_DUST_THRESHOLD_USD),
+  );
   const [walletImportMessage, setWalletImportMessage] = useState("");
   const [customBankSelected, setCustomBankSelected] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -168,6 +178,14 @@ function AddAssetForm({
 
   /** How many distinct chains the last scan found balances on. */
   const walletScanChainCount = new Set(walletBalances.map((item) => item.chain)).size;
+
+  const walletDustCut = walletHideDust ? normaliseDustThreshold(walletDustThreshold) : 0;
+  /** The balances the picker shows and "Import all" imports (dust removed). */
+  const walletVisible = useMemo(
+    () => splitDust(walletBalances, walletDustCut),
+    [walletBalances, walletDustCut],
+  );
+  const walletVisibleBalances = walletVisible.kept;
   /** Folder the scan would be filed into; blank means "name it after the address". */
   const walletFolderPlaceholder = shortWalletAddress(walletAddress.trim()) || "0x1234…abcd";
   const walletFolderLabel = walletFolderName.trim() || walletFolderPlaceholder;
@@ -347,7 +365,7 @@ function AddAssetForm({
   }
 
   async function handleImportAllWalletBalances() {
-    if (walletBalances.length === 0) return;
+    if (walletVisibleBalances.length === 0) return;
     setImportingWallet(true);
     setWalletScanError("");
     setWalletImportMessage("");
@@ -357,21 +375,29 @@ function AddAssetForm({
         walletLogo,
         priceSource,
         folderName: walletFileIntoFolder ? walletFolderName.trim() : null,
-        balances: walletBalances,
+        // The server applies the same cut-off, so a stale client cannot slip
+        // dust into the portfolio.
+        minValueUsd: walletDustCut,
+        balances: walletVisibleBalances,
       });
       if (!result.ok) {
         throw new Error(result.error || "Could not import wallet balances.");
       }
       playMoneyChimeFromGesture();
       const count = `${result.importedCount} holding${result.importedCount === 1 ? "" : "s"}`;
+      const skipped = result.skippedDust
+        ? ` Skipped ${result.skippedDust} under ${money(walletDustCut)}.`
+        : "";
       if (result.folder) {
-        setWalletImportMessage(`Imported ${count} into the “${result.folder.name}” folder.`);
+        setWalletImportMessage(
+          `Imported ${count} into the “${result.folder.name}” folder.${skipped}`,
+        );
         setWalletFolderName("");
       } else {
         setWalletImportMessage(
           result.folderNote
-            ? `Imported ${count}. ${result.folderNote}`
-            : `Imported ${count} from wallet.`,
+            ? `Imported ${count}. ${result.folderNote}${skipped}`
+            : `Imported ${count} from wallet.${skipped}`,
         );
       }
       router.refresh();
@@ -756,7 +782,7 @@ function AddAssetForm({
                   one folder for this wallet.
                 </p>
               </div>
-              {walletBalances.length > 0 && (
+              {walletVisibleBalances.length > 0 && (
                 <button
                   type="button"
                   className="btn-primary text-xs"
@@ -766,8 +792,8 @@ function AddAssetForm({
                   {importingWallet
                     ? "Importing…"
                     : walletFileIntoFolder
-                      ? `Import all (${walletBalances.length}) into “${walletFolderLabel}”`
-                      : `Import all (${walletBalances.length}) to portfolio`}
+                      ? `Import all (${walletVisibleBalances.length}) into “${walletFolderLabel}”`
+                      : `Import all (${walletVisibleBalances.length}) to portfolio`}
                 </button>
               )}
             </div>
@@ -832,6 +858,36 @@ function AddAssetForm({
               />
             </div>
 
+            <div className="mt-2 flex flex-col gap-2 rounded-xl border border-indigo-100 bg-white/70 p-2 sm:flex-row sm:items-center">
+              <label className="flex shrink-0 items-center gap-2 text-xs font-medium text-slate-600">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-indigo-600"
+                  checked={walletHideDust}
+                  onChange={(event) => setWalletHideDust(event.target.checked)}
+                />
+                Skip tokens under
+              </label>
+              <div className="flex min-w-0 items-center gap-1">
+                <span className="text-xs text-slate-500">$</span>
+                <input
+                  className="input w-20 text-xs disabled:opacity-50"
+                  type="number"
+                  min={0}
+                  step="0.5"
+                  inputMode="decimal"
+                  value={walletDustThreshold}
+                  onChange={(event) => setWalletDustThreshold(event.target.value)}
+                  disabled={!walletHideDust}
+                  aria-label="Hide tokens worth less than this many dollars"
+                />
+                <span className="text-xs text-slate-500">value</span>
+              </div>
+              <span className="text-[11px] text-slate-400">
+                Dust stays out of the list and out of “Import all”.
+              </span>
+            </div>
+
             {walletScanError && (
               <p className="mt-2 text-xs text-rose-600">{walletScanError}</p>
             )}
@@ -848,11 +904,37 @@ function AddAssetForm({
                 <p className="text-xs text-slate-500">
                   Found {walletBalances.length} balance{walletBalances.length === 1 ? "" : "s"}
                   {walletScanChainCount > 1 ? ` on ${walletScanChainCount} chains` : ""}
-                  {walletScanSource === "debank" ? " via DeBank" : ""} · click a token to fill the form
-                  below, or click <strong>Import all</strong> above.
+                  {walletScanSource === "debank" ? " via DeBank" : ""}
+                  {walletVisible.dustCount > 0
+                    ? ` · ${walletVisible.dustCount} under ${money(walletDustCut)} hidden (${money(
+                        walletVisible.dustValue,
+                      )})`
+                    : ""}
+                  {" · "}click a token to fill the form below, or click{" "}
+                  <strong>Import all</strong> above.
                 </p>
+                {walletVisible.dustCount > 0 ? (
+                  <p className="text-[11px] text-slate-500">
+                    Dust is hidden, not dropped:{" "}
+                    <button
+                      type="button"
+                      className="font-medium text-indigo-600 hover:underline"
+                      onClick={() => setWalletHideDust(false)}
+                    >
+                      show the {walletVisible.dustCount} token
+                      {walletVisible.dustCount === 1 ? "" : "s"} under {money(walletDustCut)}
+                    </button>{" "}
+                    (or set the cut-off to $0).
+                  </p>
+                ) : null}
+                {walletVisibleBalances.length === 0 ? (
+                  <p className="rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs text-amber-800">
+                    Every balance in this wallet is under {money(walletDustCut)}. Lower the cut-off
+                    above, or tick “Show all”, to import them anyway.
+                  </p>
+                ) : (
                 <div className="flex gap-2 overflow-x-auto pb-1">
-                  {walletBalances.map((item) => (
+                  {walletVisibleBalances.map((item) => (
                     <button
                       key={item.id}
                       type="button"
@@ -889,6 +971,7 @@ function AddAssetForm({
                     </button>
                   ))}
                 </div>
+                )}
               </div>
             )}
           </div>

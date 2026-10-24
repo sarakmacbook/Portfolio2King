@@ -131,6 +131,14 @@ the form for you (or imports everything it finds):
    *File into a folder* box, or leave the name blank and it is called after the
    address (`0x1234…abcd`). Untick the box to import without a folder. Importing
    the same wallet again reuses the same folder instead of making a second one.
+4. **Skip tokens under $** (on by default, $1) keeps dust out of the list and out
+   of *Import all* — the wash-trading airdrops and leftover cents that would
+   otherwise become 40-row holdings. It is measured in **dollars**, not quantity,
+   so a million near-worthless tokens count as dust too. Nothing is deleted: the
+   line under the scan says how many tokens and how much value were hidden and
+   offers a one-click *show them*, and setting the box to `0` turns the filter
+   off. The same cut-off is re-applied server-side, so a stale page cannot slip
+   dust into the portfolio, and the import message says what was skipped.
 
 EVM addresses are read through **[DeBank](https://debank.com)**, which indexes
 **every EVM chain it supports — 100+ of them**, from Ethereum, BNB Chain,
@@ -305,6 +313,12 @@ Folders turn a long table into a few groups without changing any numbers:
   optimistically and snapping back if the save fails). Arrange mode is the only
   place where moves stay pending until **Save layout**, because that is the click
   that stores the folders themselves.
+
+The toolbar also has a **Hide under $** box (off by default) that hides holdings
+worth less than the amount you type — the same rule as the wallet import, applied
+to the table. Hidden rows are always counted in a note above the table ("3
+holdings under $1.00 hidden ($0.42) · Show them"), and arrange mode ignores the
+filter so a hidden holding can still be dragged.
 
 Outside arrange mode the strip is a filter: **All** plus one chip per folder with
 its count and value. Clicking a chip narrows the table (and the category tab +
