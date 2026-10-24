@@ -31,6 +31,7 @@ import {
   getWeb3Wallet,
   type Web3WalletId,
 } from "@/lib/web3-wallets";
+import ScannerKeys from "./ScannerKeys";
 import { ErrorNote, Modal, SubmitButton } from "./ui";
 import CryptoLogo, { Web3WalletBadge } from "./CryptoLogo";
 
@@ -149,6 +150,14 @@ function AddAssetForm({
     "debank" | "onchain" | "blockscan" | "moralis" | null
   >(null);
   const [walletScanNote, setWalletScanNote] = useState("");
+  /**
+   * Which scan source just reported a missing key. The "Scanner API keys" panel
+   * opens and highlights that row, so the fix is one paste away instead of an
+   * environment variable the user may not control.
+   */
+  const [scannerKeyPrompt, setScannerKeyPrompt] = useState<
+    "" | "debank" | "etherscan" | "moralis"
+  >("");
   const [importingWallet, setImportingWallet] = useState(false);
   /** Import the wallet's tokens into a folder, named by the user or by the address. */
   const [walletFileIntoFolder, setWalletFileIntoFolder] = useState(true);
@@ -313,6 +322,7 @@ function AddAssetForm({
     setWalletScanError("");
     setWalletImportMessage("");
     setWalletScanDone(false);
+    setScannerKeyPrompt("");
     try {
       const params = new URLSearchParams({
         address: trimmed,
@@ -341,6 +351,15 @@ function AddAssetForm({
       setWalletDeselected(new Set());
       setWalletScanDone(true);
       setWalletScanSource(data.source ?? null);
+      setScannerKeyPrompt(
+        data.source === "moralis" && data.moralisNeedsKey
+          ? "moralis"
+          : data.source === "blockscan" && data.blockscanNeedsKey
+            ? "etherscan"
+            : data.source === "onchain" && data.debankNeedsKey
+              ? "debank"
+              : "",
+      );
       // Only mention DeBank when it was actually involved, so the picker stays
       // quiet on a plain on-chain read for Solana / Bitcoin / Tron.
       // Where the numbers came from, said plainly. DeBank being unavailable is
@@ -350,7 +369,7 @@ function AddAssetForm({
         data.source === "moralis"
           ? [
               data.moralisNeedsKey
-                ? "Moralis needs a MORALIS_API_KEY — this scan used the other sources. A free key from moralis.com covers every chain here."
+                ? "Moralis needs an API key — this scan used the other sources. Add one under Scanner API keys below (or set MORALIS_API_KEY); a free key from moralis.com covers every chain here."
                 : data.sourceNote
                   ? data.sourceNote
                   : "",
@@ -363,7 +382,7 @@ function AddAssetForm({
           : data.source === "blockscan"
           ? [
               data.blockscanNeedsKey
-                ? "Blockscan needs an ETHERSCAN_API_KEY — this scan fell back to reading the chains directly, so it sees fewer tokens. Get a key at etherscan.io (the balance endpoint is free, token holdings need a paid plan)."
+                ? "Blockscan needs an Etherscan API key — this scan fell back to reading the chains directly, so it sees fewer tokens. Add one under Scanner API keys below (or set ETHERSCAN_API_KEY); the balance endpoint is free, token holdings need a paid plan."
                 : data.blockscanProOnly
                   ? "Blockscan answered, but token holdings need a paid Etherscan plan on that key — the tokens below came from the chains directly."
                   : data.sourceNote
@@ -378,7 +397,7 @@ function AddAssetForm({
           : data.source !== "onchain"
             ? ""
             : data.debankNeedsKey
-              ? "Read directly from the chains — DeBank only lists tokens with an access key, so this scan sees fewer of them. Add a free DEBANK_ACCESS_KEY to cover every chain DeBank indexes."
+              ? "Read directly from the chains — DeBank only lists tokens with an access key, so this scan sees fewer of them. Add a free DeBank key under Scanner API keys below (or set DEBANK_ACCESS_KEY) to cover every chain DeBank indexes."
               : data.sourceNote
                 ? `Read directly from the chains — ${data.sourceNote}`
                 : "",
@@ -937,8 +956,9 @@ function AddAssetForm({
                 Blockscan is Etherscan&apos;s multichain explorer. Its API (Etherscan V2) reads{" "}
                 {BLOCKSCAN_CHAINS.length} chains with one key, paced at 2 calls a second, so a
                 whole-wallet sweep takes about ten seconds. It needs{" "}
-                <code className="rounded bg-slate-100 px-1">ETHERSCAN_API_KEY</code>; without one the
-                scan still reads the chains directly and says so.
+                <code className="rounded bg-slate-100 px-1">ETHERSCAN_API_KEY</code> — add it in{" "}
+                <strong className="font-medium text-slate-600">Scanner API keys</strong> below; without
+                one the scan still reads the chains directly and says so.
               </p>
             )}
 
@@ -948,7 +968,8 @@ function AddAssetForm({
                 (<code className="rounded bg-slate-100 px-1">possible_spam</code>), so airdropped
                 junk is counted as spam instead of having to be spotted by its name. It reads{" "}
                 {MORALIS_CHAINS.length} chains with one{" "}
-                <code className="rounded bg-slate-100 px-1">MORALIS_API_KEY</code> from moralis.com;
+                <code className="rounded bg-slate-100 px-1">MORALIS_API_KEY</code> from moralis.com —
+                add it in <strong className="font-medium text-slate-600">Scanner API keys</strong> below;
                 without a key the scan says so and falls back to the other sources.
               </p>
             )}
@@ -1057,7 +1078,8 @@ function AddAssetForm({
                   <strong className="font-medium text-slate-600">Moralis</strong> — the source to pick
                   when a wallet is full of junk: it returns a `possible_spam` flag per token, so
                   spam is counted and hidden instead of guessed from the name. One{" "}
-                  <code className="rounded bg-slate-100 px-1">MORALIS_API_KEY</code>,{" "}
+                  <code className="rounded bg-slate-100 px-1">MORALIS_API_KEY</code> (or a key saved
+                  in Scanner API keys),{" "}
                   {MORALIS_CHAINS.length} chains, prices and logos included.
                 </li>
                 <li>
@@ -1065,8 +1087,8 @@ function AddAssetForm({
                   scan menu to ask Etherscan V2 (the API behind blockscan.com) instead: one key,{" "}
                   {BLOCKSCAN_CHAINS.length} chains, prices included, merged with the direct read. It
                   is paced at 2 calls a second and needs{" "}
-                  <code className="rounded bg-slate-100 px-1">ETHERSCAN_API_KEY</code>; a free key
-                  reads native balances, token holdings need a paid plan. DeBank scans fall back to
+                  <code className="rounded bg-slate-100 px-1">ETHERSCAN_API_KEY</code> or a key saved
+                  in Scanner API keys; a free key reads native balances, token holdings need a paid plan. DeBank scans fall back to
                   it automatically when DeBank cannot answer and a key is set.
                 </li>
                 <li>
@@ -1091,6 +1113,8 @@ function AddAssetForm({
                 </li>
               </ul>
             </details>
+
+            <ScannerKeys key={scannerKeyPrompt || "scanner-keys"} highlight={scannerKeyPrompt} />
 
             {walletScanError && (
               <p className="mt-2 text-xs text-rose-600">{walletScanError}</p>

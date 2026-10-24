@@ -263,6 +263,37 @@ having to be guessed from its name.
   explains itself and the scan uses the other sources.
 - API callers can force it with `?source=moralis` on `/api/wallet/scan`.
 
+### Scanner API keys — added in the app, no redeploy
+
+All three scan keys (DeBank, Etherscan/Blockscan, Moralis) can be added from the
+app: **Add holding → Crypto → Add via wallet address → Scanner API keys**. Paste
+the key, press **Save key**, and the next scan uses it. The panel shows each
+source's state — *Saved in app*, *From environment* or *No key* — with only the
+last four characters of the key (`••••••••7F3A`).
+
+- **Encrypted at rest.** Keys live in `app_settings`
+  (`scanner.key.debank` / `scanner.key.etherscan` / `scanner.key.moralis`) sealed
+  with AES-256-GCM by the same store the exchange keys use: `EXCHANGE_CREDENTIALS_KEY`
+  when it is set, otherwise a generated key kept beside the ciphertext.
+  `src/lib/scanner-keys.ts` owns the format.
+- **Saved key wins; the environment is the fallback.** `DEBANK_ACCESS_KEY`,
+  `ETHERSCAN_API_KEY` (alias `BLOCKSCAN_API_KEY`) and `MORALIS_API_KEY` (alias
+  `MORALIS_APIKEY`) keep working, and **Remove** deletes the saved row so the
+  variable takes over again. Nothing needs to be migrated either way.
+- **Write-only from the browser.** `GET /api/wallet/scan/keys` returns masks and
+  provenance only; saving and removing go through the server actions in
+  `src/app/scanner-actions.ts`. The key itself is never echoed back.
+- **Wired into every scan.** `/api/wallet/scan` resolves the keys with
+  `getScannerKeys()` and passes them to the scanner, which hands each one to its
+  client (`fetchDebankBalances`, `fetchBlockscanBalances`, `fetchMoralisBalances`).
+  A default scan still prefers Moralis when a key exists, and a DeBank scan still
+  falls back to Blockscan — with the saved keys, not just the environment.
+- **A missing key points at the panel.** When a scan reports *"needs a key"*, the
+  Scanner API keys panel opens and highlights that row instead of only naming an
+  environment variable.
+- **No database, no saved keys.** Without a connection the panel says so and the
+  environment variables remain the only way to configure a key.
+
 Only chains with a public Blockscout or Routescan instance can be *discovered*
 beyond the hand-listed tickers — today that is 14 Blockscout chains (Ethereum,
 Base, Optimism, Arbitrum, Polygon, Gnosis, zkSync, Scroll, Linea, Mantle, Zora,

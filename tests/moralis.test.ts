@@ -302,8 +302,8 @@ test("Moralis is selectable in the picker, and it is preferred when a key is set
   assert.ok(scanner.includes("fetchMoralisBalances("), "the scanner can read Moralis");
   assert.ok(scanner.includes('source: "moralis"'), "the result says where it came from");
   assert.ok(
-    scanner.includes('source === "auto" && moralisApiKey() !== ""'),
-    "a default scan prefers Moralis when a key exists",
+    scanner.includes('source === "auto" && moralisKey !== ""'),
+    "a default scan prefers Moralis when a key exists (saved in the app or in the environment)",
   );
   assert.ok(
     scanner.includes("mergeWithDirect(moralis.balances"),
