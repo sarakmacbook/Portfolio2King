@@ -84,6 +84,16 @@ export type ScannedWalletBalance = {
   washSuspected?: boolean;
   /** The scan route's "is this real?" verdict (see `wallet-trust`). */
   verification?: "verified" | "unverified" | "unknown";
+  /** CoinMarketCap's id, name and slug for the coin this contract belongs to. */
+  cmcId?: number;
+  cmcName?: string;
+  cmcSlug?: string;
+  /** The contract is listed on CoinMarketCap and its ticker agrees. */
+  cmcVerified?: boolean;
+  /** Listed, but under a different ticker than the scan showed (a rename, or bait). */
+  cmcSymbolMismatch?: boolean;
+  /** USD price from CoinMarketCap, used only when nothing else priced the token. */
+  cmcPriceUsd?: number;
 };
 
 export type WalletScanResult = {

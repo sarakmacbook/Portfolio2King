@@ -29,7 +29,7 @@ import {
  *   saved keys", so a scan still runs from the environment.
  */
 
-export type ScannerProvider = "debank" | "etherscan" | "moralis";
+export type ScannerProvider = "debank" | "etherscan" | "moralis" | "coinmarketcap";
 
 export type ScannerKeySpec = {
   /** Stable id used in forms, routes and `app_settings`. */
@@ -77,6 +77,16 @@ export const SCANNER_KEY_SPECS: ScannerKeySpec[] = [
     usedFor:
       "“Scan via Moralis” — the only source that flags a token as `possible_spam` itself, and it is preferred automatically in a default scan once a key is set.",
     format: "Web3 API key from admin.moralis.com",
+  },
+  {
+    id: "coinmarketcap",
+    label: "CoinMarketCap",
+    envVars: ["CMC_PRO_API_KEY", "COINMARKETCAP_API_KEY"],
+    setting: "scanner.key.coinmarketcap",
+    docsUrl: "https://pro.coinmarketcap.com",
+    usedFor:
+      "Contract matching after a scan: every contract the scan returns is looked up on CoinMarketCap, which says which coin an address belongs to, whether the ticker agrees, and its USD price when nothing else could price it. Without a key the contracts stay unverified — never hidden.",
+    format: "API key from pro.coinmarketcap.com",
   },
 ];
 
@@ -247,6 +257,8 @@ export type ScannerKeys = {
   /** Etherscan V2, the API behind Blockscan. */
   blockscan: string;
   moralis: string;
+  /** CoinMarketCap, used by the trust pass to match contracts after a scan. */
+  coinmarketcap: string;
 };
 
 async function readSetting(key: string): Promise<string | null> {
@@ -318,6 +330,7 @@ export async function getScannerKeys(): Promise<ScannerKeys> {
     debank: keyFor("debank"),
     blockscan: keyFor("etherscan"),
     moralis: keyFor("moralis"),
+    coinmarketcap: keyFor("coinmarketcap"),
   };
 }
 

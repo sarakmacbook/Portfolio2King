@@ -196,6 +196,32 @@ the form for you (or imports everything it finds):
    re-applied server-side. No answer from DexScreener means *unknown*, which is
    kept — a rate limit must never hide a real holding.
 
+### Matching a scanned contract to CoinMarketCap
+
+The hand-kept table only knows big issuers. `src/lib/coinmarketcap.ts` asks
+`GET /v2/cryptocurrency/info?address=…` about **every contract a scan returns**
+(50 per request, at most 150 per scan; `CMC_PRO_API_KEY` from the environment or
+the *Scanner API keys* panel), which answers three things the table cannot:
+
+- **Which coin an address belongs to** — id, name, slug and ticker. A contract
+  the table has never heard of but CMC lists, with a ticker that agrees, becomes
+  **official ✓** (the badge's tooltip says it was confirmed on CoinMarketCap).
+- **Whether the ticker is honest.** If CMC lists the address under a different
+  ticker than the scan showed, the card carries a grey **CMC: <name>** note. A
+  note, never a reason to hide: `RNDR` → `RENDER`, bridged `USDC.e` and wrapped
+  `wstETH` all differ like this.
+- **A price when nothing else had one.** The coins CMC recognised are priced in
+  one `quotes/latest` call, which turns a *no price yet* row into a real USD value
+  (and therefore a real dust decision) instead of leaving it unpriced.
+
+Precedence is deliberate: the local table's **different** always wins, because
+that is the case where the app knows the right address (a token called `USDT` at
+any other address stays a look-alike even if some CMC listing claims it). Either
+source saying *official* makes it official, and a CMC match is itself a
+verification reason (`verifiedBy: ["CoinMarketCap"]`). Everything else stays
+**unknown**, which never hides a token. No key → nothing is asked and the scan
+behaves exactly as before.
+
 Each hidden bucket (look-alike, spam, no volume, dust) is counted in the line
 under the scan with its own *Show them* link, so a filter never silently swallows
 a token.
@@ -361,8 +387,9 @@ The two reads run together, so a scan takes as long as the slower one:
    the chains`, and `directAdditions` counts what the index would have missed.
 4. **Trust pass** (`/api/wallet/scan` → `wallet-trust`) — official contract
    address, organic 24 h volume and liquidity depth per contract, from the local
-   table and one batched DexScreener call (30 contracts each). Failures leave a
-   token *unknown*, never hidden.
+   table, a batched **CoinMarketCap** contract lookup (50 addresses per call) and
+   one batched DexScreener call (30 contracts each). Failures leave a token
+   *unknown*, never hidden.
 5. **Filters in the dialog** — look-alike contracts, spam, no real market and
    dust are each counted with a *Show them*, and only ticked tokens are imported.
 
