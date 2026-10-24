@@ -43,6 +43,7 @@ import {
   type HoldingFolder,
 } from "@/lib/holdings-folders";
 import { DEFAULT_DUST_THRESHOLD_USD, normaliseDustThreshold, splitDust } from "@/lib/wallet-dust";
+import { isSpamToken, spamReasonOf, splitSpam } from "@/lib/wallet-spam";
 import { PROVIDER_LABELS, type PriceProvider } from "@/lib/market-prices";
 import { saveHoldingFolderAssignment } from "@/app/actions";
 import CryptoLogo from "./CryptoLogo";
@@ -64,6 +65,11 @@ export type HoldingRow = {
   avgCost: number;
   currentPrice: number;
   dailyChangePct?: number | null;
+  /**
+   * Looks like airdropped junk. Spam rows are worth nothing in the totals (their
+   * price is invented), so the cells show a dash instead of a number.
+   */
+  spam?: boolean;
   value: number;
   cost: number;
   pnl: number;
@@ -72,6 +78,20 @@ export type HoldingRow = {
 };
 
 type SortKey = "custom" | "name" | "value" | "pnl" | "pnlPct" | "weight";
+
+/** Marks a row that the spam filter would hide, once the user asks to see them. */
+function SpamBadge({ row }: { row: { name: string; symbol: string } }) {
+  const reason = spamReasonOf(row);
+  if (!reason) return null;
+  return (
+    <span
+      className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600"
+      title={`Looks like spam: ${reason}`}
+    >
+      spam?
+    </span>
+  );
+}
 
 /** Every sort key but the (arranged) custom one. */
 type ColumnSortKey = Exclude<SortKey, "custom">;
@@ -146,6 +166,12 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
    */
   const [hideDust, setHideDust] = useState(false);
   const [dustThreshold, setDustThreshold] = useState(String(DEFAULT_DUST_THRESHOLD_USD));
+  /**
+   * Hide holdings that look like airdropped spam. On by default — a spam token
+   * with a made-up price sits near the top of the table and is the one thing a
+   * dust cut-off cannot catch — but always reported with a one-click undo.
+   */
+  const [hideSpam, setHideSpam] = useState(true);
   /** Folder id of the group a holding is hovering over. */
   const [groupDrop, setGroupDrop] = useState<string | null>(null);
   const [filingError, setFilingError] = useState("");
@@ -453,7 +479,9 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
    * impossible to move.
    */
   const dustCut = hideDust && !arranging ? normaliseDustThreshold(dustThreshold) : 0;
-  const dustSplit = useMemo(() => splitDust(shown, dustCut), [shown, dustCut]);
+  /** Spam first, then dust on what is left — a fake price passes a dollar cut-off. */
+  const spamSplit = useMemo(() => splitSpam(shown, hideSpam && !arranging), [shown, hideSpam, arranging]);
+  const dustSplit = useMemo(() => splitDust(spamSplit.kept, dustCut), [spamSplit, dustCut]);
 
   /** The rows the folder filter keeps (category tabs and search apply too). */
   const folderRows = useMemo(
@@ -642,6 +670,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                           <span className="truncate font-medium text-slate-900 group-hover:text-indigo-600">
                             {r.name}
                           </span>
+                          <SpamBadge row={r} />
                           {r.priceSource && (
                             <ExchangeIcon
                               provider={r.priceSource}
@@ -676,9 +705,11 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                       </>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-900">{money(r.value)}</td>
+                  <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-900">
+                    {r.spam ? <span className="text-slate-400">—</span> : money(r.value)}
+                  </td>
                   <td className={`px-4 py-3 text-right tabular-nums ${pnlColor(r.pnl)}`}>
-                    {isCash ? (
+                    {isCash || r.spam ? (
                       <span className="text-slate-400">—</span>
                     ) : (
                       <>
@@ -695,7 +726,9 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                           style={{ width: `${Math.min(100, r.weight * 100)}%`, background: TYPE_META[r.type].color }}
                         />
                       </div>
-                      <span className="w-12 text-right tabular-nums text-slate-600">{(r.weight * 100).toFixed(1)}%</span>
+                      <span className="w-12 text-right tabular-nums text-slate-600">
+                        {r.spam ? "—" : `${(r.weight * 100).toFixed(1)}%`}
+                      </span>
                     </div>
                   </td>
                 </tr>
@@ -742,6 +775,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5">
                     <span className="truncate font-medium text-slate-900">{r.name}</span>
+                    <SpamBadge row={r} />
                     {r.priceSource && (
                       <ExchangeIcon
                         provider={r.priceSource}
@@ -757,9 +791,15 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                   </span>
                 </span>
                 <span className="shrink-0 text-right">
-                  <span className="block font-semibold tabular-nums text-slate-900">{money(r.value)}</span>
-                  <span className={`block text-xs tabular-nums ${isCash ? "text-slate-400" : pnlColor(r.pnl)}`}>
-                    {isCash ? "cash" : `${money(r.pnl, { sign: true })} · ${r.cost > 0 ? pct(r.pnlPct) : "—"}`}
+                  <span className="block font-semibold tabular-nums text-slate-900">
+                    {r.spam ? "—" : money(r.value)}
+                  </span>
+                  <span className={`block text-xs tabular-nums ${isCash || r.spam ? "text-slate-400" : pnlColor(r.pnl)}`}>
+                    {isCash
+                      ? "cash"
+                      : r.spam
+                        ? "not counted"
+                        : `${money(r.pnl, { sign: true })} · ${r.cost > 0 ? pct(r.pnlPct) : "—"}`}
                   </span>
                 </span>
               </Link>
@@ -944,6 +984,20 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
             </label>
           )}
           {!arranging && (
+            <label
+              className="flex shrink-0 items-center gap-1.5 text-xs text-slate-500"
+              title="Hide holdings that look like airdropped spam: a website or promo wording in the name, fake tickers"
+            >
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5 accent-indigo-600"
+                checked={hideSpam}
+                onChange={(event) => setHideSpam(event.target.checked)}
+              />
+              <span className="shrink-0">Hide spam</span>
+            </label>
+          )}
+          {!arranging && (
             <label className="flex items-center gap-2 text-xs text-slate-500 md:hidden">
               <span className="shrink-0">Sort</span>
               <select
@@ -969,6 +1023,21 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
       {filingError && (
         <p role="alert" className="mx-4 mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">
           {filingError}
+        </p>
+      )}
+
+      {spamSplit.spamCount > 0 && (
+        <p className="mx-4 mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          {spamSplit.spamCount} holding{spamSplit.spamCount === 1 ? "" : "s"} look
+          {spamSplit.spamCount === 1 ? "s" : ""} like spam and {spamSplit.spamCount === 1 ? "is" : "are"}{" "}
+          hidden, and spam is never counted in the portfolio total.{" "}
+          <button
+            type="button"
+            className="font-medium text-indigo-600 hover:underline"
+            onClick={() => setHideSpam(false)}
+          >
+            Show them
+          </button>
         </p>
       )}
 

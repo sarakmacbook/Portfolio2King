@@ -31,6 +31,7 @@ import {
   today,
 } from "@/lib/portfolio";
 import { buildAssetPriceSeries, latestDailyPriceChange, type PricePoint } from "@/lib/price-history";
+import { isSpamToken } from "@/lib/wallet-spam";
 
 export const dynamic = "force-dynamic";
 
@@ -61,7 +62,15 @@ export default async function Dashboard() {
     loadAssetWalletLogos(),
   ]);
   const holdingAssignments = await loadHoldingFolderAssignments(holdingsFolders);
-  const totals = computeTotals(list);
+  /**
+   * Spam tokens are left out of every total. Their "price" is invented by
+   * whoever minted them, so a $40,000 scam token would otherwise become the
+   * biggest position in the portfolio and distort the value, the allocation and
+   * the history snapshots. They stay in `list`, so the table can still show them
+   * (tagged, worth nothing) when the user asks.
+   */
+  const valued = list.filter((asset) => !isSpamToken(asset));
+  const totals = computeTotals(valued);
   const t = today();
   const stalePrices = list.some(
     (a) =>
@@ -80,8 +89,9 @@ export default async function Dashboard() {
   const cashAccounts = list.filter((a) => a.type === "cash").map((a) => ({ id: a.id, name: a.name, quantity: a.quantity }));
 
   const rows: HoldingRow[] = list.map((a) => {
-    const value = assetValue(a);
-    const cost = assetCost(a);
+    const spam = isSpamToken(a);
+    const value = spam ? 0 : assetValue(a);
+    const cost = spam ? 0 : assetCost(a);
     const series = a.type === "cash" ? [] : buildAssetPriceSeries(byAsset.get(a.id) ?? [], a.currentPrice, t);
     const daily = latestDailyPriceChange(series);
     return {
@@ -96,6 +106,7 @@ export default async function Dashboard() {
       avgCost: a.avgCost,
       currentPrice: a.currentPrice,
       dailyChangePct: daily?.changePct ?? null,
+      spam,
       value,
       cost,
       pnl: value - cost,
@@ -114,10 +125,10 @@ export default async function Dashboard() {
   const prev = points.length > 1 ? points[points.length - 2] : null;
   const change = prev ? totals.totalValue - prev.value : 0;
 
-  const stablecoinValue = list
+  const stablecoinValue = valued
     .filter((asset) => asset.type === "crypto" && asset.cryptoCategory === "stablecoin")
     .reduce((sum, asset) => sum + assetValue(asset), 0);
-  const volatileCryptoValue = list
+  const volatileCryptoValue = valued
     .filter((asset) => asset.type === "crypto" && asset.cryptoCategory !== "stablecoin")
     .reduce((sum, asset) => sum + assetValue(asset), 0);
   const slices = [

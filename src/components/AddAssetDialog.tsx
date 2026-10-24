@@ -17,6 +17,7 @@ import {
   normaliseDustThreshold,
   splitDust,
 } from "@/lib/wallet-dust";
+import { splitSpam } from "@/lib/wallet-spam";
 import { CAMBODIAN_BANKS, CUSTOM_BANK, type CambodianBank } from "@/lib/cambodian-banks";
 import type { DiscoveredStock } from "@/lib/stock-search";
 import {
@@ -151,6 +152,8 @@ function AddAssetForm({
   const [walletDustThreshold, setWalletDustThreshold] = useState(
     String(DEFAULT_DUST_THRESHOLD_USD),
   );
+  /** Hide tokens that look like airdropped spam (ads, fake tickers). */
+  const [walletHideSpam, setWalletHideSpam] = useState(true);
   const [walletImportMessage, setWalletImportMessage] = useState("");
   const [customBankSelected, setCustomBankSelected] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -180,10 +183,15 @@ function AddAssetForm({
   const walletScanChainCount = new Set(walletBalances.map((item) => item.chain)).size;
 
   const walletDustCut = walletHideDust ? normaliseDustThreshold(walletDustThreshold) : 0;
-  /** The balances the picker shows and "Import all" imports (dust removed). */
+  /** Spam first: a scam token's made-up price would pass the dollar cut-off. */
+  const walletSpam = useMemo(
+    () => splitSpam(walletBalances, walletHideSpam),
+    [walletBalances, walletHideSpam],
+  );
+  /** The balances the picker shows and "Import all" imports (spam + dust removed). */
   const walletVisible = useMemo(
-    () => splitDust(walletBalances, walletDustCut),
-    [walletBalances, walletDustCut],
+    () => splitDust(walletSpam.kept, walletDustCut),
+    [walletSpam, walletDustCut],
   );
   const walletVisibleBalances = walletVisible.kept;
   /** Folder the scan would be filed into; blank means "name it after the address". */
@@ -375,9 +383,10 @@ function AddAssetForm({
         walletLogo,
         priceSource,
         folderName: walletFileIntoFolder ? walletFolderName.trim() : null,
-        // The server applies the same cut-off, so a stale client cannot slip
-        // dust into the portfolio.
+        // The server applies the same rules, so a stale client cannot slip
+        // dust or spam into the portfolio.
         minValueUsd: walletDustCut,
+        skipSpam: walletHideSpam,
         balances: walletVisibleBalances,
       });
       if (!result.ok) {
@@ -385,9 +394,15 @@ function AddAssetForm({
       }
       playMoneyChimeFromGesture();
       const count = `${result.importedCount} holding${result.importedCount === 1 ? "" : "s"}`;
-      const skipped = result.skippedDust
-        ? ` Skipped ${result.skippedDust} under ${money(walletDustCut)}.`
-        : "";
+      const skipped = [
+        result.skippedDust ? `Skipped ${result.skippedDust} under ${money(walletDustCut)}.` : "",
+        result.skippedSpam
+          ? `Skipped ${result.skippedSpam} that looked like spam.`
+          : "",
+      ]
+        .filter(Boolean)
+        .map((note) => ` ${note}`)
+        .join("");
       if (result.folder) {
         setWalletImportMessage(
           `Imported ${count} into the “${result.folder.name}” folder.${skipped}`,
@@ -888,6 +903,19 @@ function AddAssetForm({
               </span>
             </div>
 
+            <label className="mt-2 flex items-center gap-2 rounded-xl border border-indigo-100 bg-white/70 p-2 text-xs font-medium text-slate-600">
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5 accent-indigo-600"
+                checked={walletHideSpam}
+                onChange={(event) => setWalletHideSpam(event.target.checked)}
+              />
+              Hide spam tokens
+              <span className="font-normal text-[11px] text-slate-400">
+                airdrops named after a website, promo wording, fake tickers
+              </span>
+            </label>
+
             {walletScanError && (
               <p className="mt-2 text-xs text-rose-600">{walletScanError}</p>
             )}
@@ -905,6 +933,9 @@ function AddAssetForm({
                   Found {walletBalances.length} balance{walletBalances.length === 1 ? "" : "s"}
                   {walletScanChainCount > 1 ? ` on ${walletScanChainCount} chains` : ""}
                   {walletScanSource === "debank" ? " via DeBank" : ""}
+                  {walletSpam.spamCount > 0
+                    ? ` · ${walletSpam.spamCount} spam-looking hidden`
+                    : ""}
                   {walletVisible.dustCount > 0
                     ? ` · ${walletVisible.dustCount} under ${money(walletDustCut)} hidden (${money(
                         walletVisible.dustValue,
@@ -913,6 +944,20 @@ function AddAssetForm({
                   {" · "}click a token to fill the form below, or click{" "}
                   <strong>Import all</strong> above.
                 </p>
+                {walletSpam.spamCount > 0 ? (
+                  <p className="text-[11px] text-slate-500">
+                    Spam is hidden, not dropped:{" "}
+                    <button
+                      type="button"
+                      className="font-medium text-indigo-600 hover:underline"
+                      onClick={() => setWalletHideSpam(false)}
+                    >
+                      show the {walletSpam.spamCount} suspect token
+                      {walletSpam.spamCount === 1 ? "" : "s"}
+                    </button>
+                    {" "}(names carrying a website or promo wording).
+                  </p>
+                ) : null}
                 {walletVisible.dustCount > 0 ? (
                   <p className="text-[11px] text-slate-500">
                     Dust is hidden, not dropped:{" "}
@@ -929,8 +974,11 @@ function AddAssetForm({
                 ) : null}
                 {walletVisibleBalances.length === 0 ? (
                   <p className="rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs text-amber-800">
-                    Every balance in this wallet is under {money(walletDustCut)}. Lower the cut-off
-                    above, or tick “Show all”, to import them anyway.
+                    {walletSpam.kept.length === 0
+                      ? "Every balance in this wallet looks like spam. Untick “Hide spam tokens” to import them anyway."
+                      : `Every balance left in this wallet is under ${money(
+                          walletDustCut,
+                        )}. Lower the cut-off, or untick it, to import them anyway.`}
                   </p>
                 ) : (
                 <div className="flex gap-2 overflow-x-auto pb-1">

@@ -139,6 +139,27 @@ the form for you (or imports everything it finds):
    offers a one-click *show them*, and setting the box to `0` turns the filter
    off. The same cut-off is re-applied server-side, so a stale page cannot slip
    dust into the portfolio, and the import message says what was skipped.
+5. **Hide spam tokens** (on by default) keeps airdropped junk out of the list and
+   out of *Import all*. Spam is not a value problem — scam tokens carry made-up
+   prices, so one "worth" $40,000 would pass any dollar cut-off and sit at the
+   top of the portfolio — so the test is the name itself: a website or `t.me`
+   invite, airdrop marketing words (*claim*, *airdrop*, *visit*, *redeem*,
+   *voucher*, *giveaway*), zero-width/bidi characters used to fake a ticker, an
+   impossibly long name or symbol, or a spam flag the explorer sent. Real names
+   are left alone — *Ethena USDe*, *Renzo Restaked ETH*, *First Digital USD* and
+   friends are checked in `tests/wallet-spam.test.ts`. It is a filter, never a
+   delete: the scan line counts what was hidden and *show the suspects* brings
+   them back, and unticking the box imports them anyway. Spam is also left out of
+   every total — its price is invented, so counting it would put a fake $40,000
+   position at the top of the portfolio — through `computeTotals`, which means the
+   value header, the allocation donut, the daily snapshots and the alert
+   thresholds all skip it together.
+
+The same switch sits on the holdings table (*Hide spam*, on by default): rows
+that look like spam are skipped with a count and a *Show them* link, and once
+shown each one carries a small **spam?** badge with its value shown as *—* (it is
+not part of the total). Arrange mode ignores the filter so
+nothing becomes impossible to drag into a folder.
 
 EVM addresses are read through **[DeBank](https://debank.com)**, which indexes
 **every EVM chain it supports — 100+ of them**, from Ethereum, BNB Chain,
@@ -1298,7 +1319,8 @@ Keys and privacy:
 - Scope: Binance **spot** balances (`free` + `locked`), OKX **trading account
   equity**, Bybit **wallet balance**. Staking/Earn positions, funding wallets,
   futures positions, and sub-accounts are not included; balances under `1e-10`
-  are ignored as dust.
+  are ignored as dust. Tokens whose name looks like airdrop bait (a website, promo
+  wording, a fake ticker) are ignored as spam too.
 - Errors are written for humans and never echo a key: rejected keys, missing
   read permission (Binance `-2015`, OKX `50113`, Bybit `10005`/`10010`), rate
   limits, and timeouts each get their own sentence.
