@@ -127,14 +127,22 @@ the form for you (or imports everything it finds):
 2. Click **Scan wallet**. Every non-zero balance comes back with its quantity,
    USD price, value, chain and logo — across every chain DeBank indexes, not
    just the popular ones this app can read by itself.
-3. Every token arrives **ticked**. Untick anything you do not want, or use
-   *Select all* / *Select none*, then **Import selected (N)** books the ticked
+3. Every token arrives **ticked**, as a card in a grid — not one long sideways
+   scroll. A wallet spread over twenty chains is **grouped by chain**, biggest
+   first, with each chain's token count and USD total in its header and a *Tick
+   chain* / *Untick chain* button for the whole section; the box above the list
+   covers every chain in one flat list if you prefer that. The **search box**
+   filters by ticker, name, chain or CoinMarketCap's name as you type, *Select
+   all* / *Select none* act on what the search shows, and the line above the
+   grid keeps a running `N selected · $X` so the size of the import is obvious
+   before you commit to it.
+4. Untick anything you do not want, then **Import selected (N)** books the ticked
    ones as holdings in one go. *Fill form* on a card copies it into the manual
    form instead. The import files them into a **folder** — name it in the
    *File into a folder* box, or leave the name blank and it is called after the
    address (`0x1234…abcd`). Untick the box to import without a folder. Importing
    the same wallet again reuses the same folder instead of making a second one.
-4. **Skip tokens under $** (on by default, $1) keeps dust out of the list and out
+5. **Skip tokens under $** (on by default, $1) keeps dust out of the list and out
    of *Import all* — the wash-trading airdrops and leftover cents that would
    otherwise become 40-row holdings. It is measured in **dollars**, not quantity,
    so a million near-worthless tokens count as dust too. Nothing is deleted: the
@@ -145,7 +153,7 @@ the form for you (or imports everything it finds):
    the scan **could not price** is never counted as dust: it is kept, shown as
    *no price yet*, and imported at price 0 rather than a made-up $1 — otherwise a
    real holding with a rate-limited price lookup would silently disappear.
-5. **Hide spam tokens** (on by default) keeps airdropped junk out of the list and
+6. **Hide spam tokens** (on by default) keeps airdropped junk out of the list and
    out of *Import all*. Spam is not a value problem — scam tokens carry made-up
    prices, so one "worth" $40,000 would pass any dollar cut-off and sit at the
    top of the portfolio — so the test is the name itself: a website or `t.me`
@@ -163,7 +171,7 @@ the form for you (or imports everything it finds):
    position at the top of the portfolio — through `computeTotals`, which means the
    value header, the allocation donut, the daily snapshots and the alert
    thresholds all skip it together.
-6. **Hide look-alike contracts** (on by default) is the official-address check.
+7. **Hide look-alike contracts** (on by default) is the official-address check.
    Anyone can deploy a token called `USDT`; what separates it from the real one is
    the contract. `src/lib/token-trust.ts` holds the issuers' own addresses for the
    well-known tokens on the chains this app prices (USDT, USDC, DAI, WETH, WBTC,
@@ -175,7 +183,7 @@ the form for you (or imports everything it finds):
    look-alike), or **unknown** (not in the table, which is most real tokens, and
    is never a reason to hide anything). The same check runs again server-side in
    `importWalletBalances`, so a stale page cannot import a fake `USDT`.
-7. **Only tokens with a real market** (on by default) answers "is this actually a
+8. **Only tokens with a real market** (on by default) answers "is this actually a
    token anyone trades?". For each contract the scan asks DexScreener for its
    pairs and works out two things.
 

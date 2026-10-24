@@ -17,6 +17,7 @@ import { MIN_LIQUIDITY_USD, MIN_ORGANIC_VOLUME_USD, shortUsd } from "@/lib/organ
 import { BLOCKSCAN_CHAINS } from "@/lib/blockscan";
 import { MORALIS_CHAINS } from "@/lib/moralis";
 import { VERIFIED_LIQUIDITY_USD, depthOf, filterScanBalances } from "@/lib/wallet-trust";
+import { groupWalletBalancesByChain, searchWalletBalances, walletValueUsd } from "@/lib/wallet-results";
 import { CAMBODIAN_BANKS, CUSTOM_BANK, type CambodianBank } from "@/lib/cambodian-banks";
 import type { DiscoveredStock } from "@/lib/stock-search";
 import {
@@ -193,6 +194,10 @@ function AddAssetForm({
    * picks, so changing a filter never silently re-selects something they dropped.
    */
   const [walletDeselected, setWalletDeselected] = useState<Set<string>>(new Set());
+  /** Search inside the scan's results — ticker, name, chain or CMC name. */
+  const [walletQuery, setWalletQuery] = useState("");
+  /** Results grouped by chain, each with its own count and value. */
+  const [walletGroupByChain, setWalletGroupByChain] = useState(true);
   const [walletImportMessage, setWalletImportMessage] = useState("");
   const [customBankSelected, setCustomBankSelected] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -235,6 +240,12 @@ function AddAssetForm({
   /** What "Import selected" imports: the kept tokens the user left ticked. */
   const walletChosen = walletVisibleBalances.filter((item) => !walletDeselected.has(item.id));
   const walletChosenIds = new Set(walletChosen.map((item) => item.id));
+  /** What the ticked tokens add up to, so the total is visible before importing. */
+  const walletChosenValue = walletValueUsd(walletChosen);
+  /** The kept tokens that match the search box (an empty box matches everything). */
+  const walletMatched = searchWalletBalances(walletVisibleBalances, walletQuery);
+  /** One group per chain, biggest first — see `wallet-results`. */
+  const walletChainGroups = groupWalletBalancesByChain(walletMatched);
   /** Folder the scan would be filed into; blank means "name it after the address". */
   const walletFolderPlaceholder = shortWalletAddress(walletAddress.trim()) || "0x1234…abcd";
   const walletFolderLabel = walletFolderName.trim() || walletFolderPlaceholder;
@@ -492,14 +503,38 @@ function AddAssetForm({
     });
   }
 
-  /** Tick every visible token (after the user unticked some). */
+  /**
+   * Tick every visible token (after the user unticked some). With a search in
+   * the box this is "everything shown", which is what it looks like.
+   */
   function selectAllWalletBalances() {
-    setWalletDeselected(new Set());
+    setWalletDeselected((current) => {
+      const next = new Set(current);
+      for (const item of walletMatched) next.delete(item.id);
+      return next;
+    });
   }
 
-  /** Untick every visible token. */
+  /** Tick or untick a whole chain at once, from its group header. */
+  function toggleWalletChain(items: readonly ScannedWalletBalance[]) {
+    const everyOneChosen = items.every((item) => !walletDeselected.has(item.id));
+    setWalletDeselected((current) => {
+      const next = new Set(current);
+      for (const item of items) {
+        if (everyOneChosen) next.add(item.id);
+        else next.delete(item.id);
+      }
+      return next;
+    });
+  }
+
+  /** Untick every visible token — again, the ones the search shows. */
   function selectNoWalletBalances() {
-    setWalletDeselected(new Set(walletVisibleBalances.map((item) => item.id)));
+    setWalletDeselected((current) => {
+      const next = new Set(current);
+      for (const item of walletMatched) next.add(item.id);
+      return next;
+    });
   }
 
   async function handleImportAllWalletBalances() {
@@ -664,6 +699,131 @@ function AddAssetForm({
     if (!trimmedName || isAnotherWalletName) {
       setName(picked.name);
     }
+  }
+
+  /**
+   * One token card — used by both the grouped and the flat list, so a card
+   * looks the same however the results are arranged.
+   */
+  function walletCard(item: ScannedWalletBalance) {
+    const chosen = walletChosenIds.has(item.id);
+    const traded = item.organicVolumeUsd;
+    const depth = depthOf(item);
+    return (
+      <div
+        className={`rounded-xl border p-2 text-left transition ${
+          chosen
+            ? "border-indigo-500 bg-white ring-2 ring-indigo-100"
+            : "border-slate-200 bg-white hover:border-indigo-300"
+        }`}
+      >
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 shrink-0 accent-indigo-600"
+            checked={chosen}
+            onChange={() => toggleWalletChoice(item.id)}
+            aria-label={`Import ${item.symbol}`}
+          />
+          <CryptoLogo
+            symbol={item.symbol}
+            name={item.name}
+            wallet={walletLogo}
+            logo={item.logoUrl}
+            className="h-7 w-7 rounded-lg"
+          />
+          <span className="min-w-0">
+            <span className="block truncate text-[10px] text-slate-400">
+              {item.chainLabel}
+            </span>
+            <span className="block truncate font-semibold text-slate-900">
+              {item.symbol}
+            </span>
+          </span>
+        </label>
+        <span className="mt-1 block text-xs font-medium tabular-nums text-slate-700">
+          {qty(item.quantity)} {item.symbol}
+        </span>
+        <span
+          className="mt-0.5 block text-xs tabular-nums text-slate-500"
+          title={
+            item.priced
+              ? undefined
+              : "No price was found for this token, so it is kept but not counted as dust"
+          }
+        >
+          {item.priced
+            ? `${money(item.valueUsd)} (${money(item.price)})`
+            : `no price yet · ${qty(item.quantity)} ${item.symbol}`}
+        </span>
+        <span className="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
+          {item.contractStatus === "official" ? (
+            <span
+              className="rounded-full bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700"
+              title={
+                item.cmcVerified && item.cmcName
+                  ? `The contract address is the official one for this token, confirmed on CoinMarketCap as ${item.cmcName}`
+                  : "The contract address is the official one for this token"
+              }
+            >
+              official ✓
+            </span>
+          ) : null}
+          {item.cmcSymbolMismatch && item.cmcName ? (
+            <span
+              className="rounded-full bg-slate-50 px-1.5 py-0.5 font-medium text-slate-600"
+              title={`CoinMarketCap lists this contract as ${item.cmcName}. The ticker shown is the one the wallet scan reported — bridged tokens and renamed tickers differ like this.`}
+            >
+              CMC: {item.cmcName}
+            </span>
+          ) : null}
+          {item.liquidityUsd !== undefined ? (
+            <span
+              className={`rounded-full px-1.5 py-0.5 font-medium ${
+                depth === "deep"
+                  ? "bg-emerald-50 text-emerald-700"
+                  : depth === "shallow"
+                    ? "bg-amber-50 text-amber-800"
+                    : "bg-slate-50 text-slate-600"
+              }`}
+              title={
+                depth === "deep"
+                  ? `Deep liquidity: ${money(item.liquidityUsd)} pooled, deepest pool ${money(item.deepestPoolUsd ?? 0)}`
+                  : depth === "shallow"
+                    ? `Thin: only ${money(item.liquidityUsd)} pooled — a fake token can hold a few hundred dollars of its own liquidity`
+                    : `Liquidity: ${money(item.liquidityUsd)} pooled across ${item.marketPairs ?? 0} pool(s)`
+              }
+            >
+              {shortUsd(item.liquidityUsd)} liq
+              {depth === "deep" ? " ✓" : ""}
+            </span>
+          ) : null}
+          {traded !== undefined ? (
+            <span
+              className={`rounded-full px-1.5 py-0.5 font-medium ${
+                traded >= MIN_ORGANIC_VOLUME_USD
+                  ? "bg-slate-50 text-slate-600"
+                  : "bg-amber-50 text-amber-800"
+              }`}
+              title={
+                item.washSuspected
+                  ? "Some pools traded implausibly more than their liquidity; that volume was left out"
+                  : "Organic 24h volume, ignoring dust pools and wash trading"
+              }
+            >
+              {shortUsd(traded)}/24h
+            </span>
+          ) : null}
+        </span>
+        <button
+          type="button"
+          className="mt-1 text-[11px] font-medium text-indigo-600 hover:underline"
+          onClick={() => chooseWalletBalance(item)}
+        >
+          Fill form
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -1370,13 +1530,55 @@ function AddAssetForm({
                   </p>
                 ) : (
                   <>
-                    <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
-                      <span>
-                        {walletChosen.length} of {walletVisibleBalances.length} selected
+                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                      <input
+                        className="input h-8 w-full max-w-[13rem] text-xs"
+                        placeholder="Search ticker, name or chain…"
+                        value={walletQuery}
+                        onChange={(event) => setWalletQuery(event.target.value)}
+                        onKeyDown={(event) => {
+                          // This dialog is a form: Enter in the search box must not submit it.
+                          if (event.key === "Enter") event.preventDefault();
+                        }}
+                        aria-label="Search the tokens this scan found"
+                      />
+                      {walletQuery ? (
+                        <button
+                          type="button"
+                          className="font-medium text-indigo-600 hover:underline"
+                          onClick={() => setWalletQuery("")}
+                        >
+                          Clear
+                        </button>
+                      ) : null}
+                      {walletChainGroups.length > 1 ? (
+                        <label
+                          className="flex items-center gap-1.5"
+                          title="One section per chain, biggest first"
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-3.5 w-3.5 accent-indigo-600"
+                            checked={walletGroupByChain}
+                            onChange={(event) => setWalletGroupByChain(event.target.checked)}
+                          />
+                          Group by chain
+                        </label>
+                      ) : null}
+                      <span className="ml-auto tabular-nums">
+                        {walletQuery
+                          ? `${walletMatched.length} of ${walletVisibleBalances.length} shown`
+                          : `${walletVisibleBalances.length} token${
+                              walletVisibleBalances.length === 1 ? "" : "s"
+                            }`}
+                        {walletChosen.length > 0
+                          ? ` · ${walletChosen.length} selected · ${money(walletChosenValue)}`
+                          : " · nothing selected"}
                       </span>
                       <button
                         type="button"
                         className="font-medium text-indigo-600 hover:underline"
+                        title={walletQuery ? "Selects the tokens matching the search" : undefined}
                         onClick={selectAllWalletBalances}
                       >
                         Select all
@@ -1384,134 +1586,59 @@ function AddAssetForm({
                       <button
                         type="button"
                         className="font-medium text-indigo-600 hover:underline"
+                        title={walletQuery ? "Unticks the tokens matching the search" : undefined}
                         onClick={selectNoWalletBalances}
                       >
                         Select none
                       </button>
                     </div>
-                    <div className="flex gap-2 overflow-x-auto pb-1">
-                      {walletVisibleBalances.map((item) => {
-                        const chosen = walletChosenIds.has(item.id);
-                        const traded = item.organicVolumeUsd;
-                        const depth = depthOf(item);
-                        return (
-                          <div
-                            key={item.id}
-                            className={`w-44 shrink-0 rounded-xl border p-2 text-left transition ${
-                              chosen
-                                ? "border-indigo-500 bg-white ring-2 ring-indigo-100"
-                                : "border-slate-200 bg-white hover:border-indigo-300"
-                            }`}
-                          >
-                            <label className="flex cursor-pointer items-center gap-2">
-                              <input
-                                type="checkbox"
-                                className="h-3.5 w-3.5 shrink-0 accent-indigo-600"
-                                checked={chosen}
-                                onChange={() => toggleWalletChoice(item.id)}
-                                aria-label={`Import ${item.symbol}`}
-                              />
-                              <CryptoLogo
-                                symbol={item.symbol}
-                                name={item.name}
-                                wallet={walletLogo}
-                                logo={item.logoUrl}
-                                className="h-7 w-7 rounded-lg"
-                              />
-                              <span className="min-w-0">
-                                <span className="block truncate text-[10px] text-slate-400">
-                                  {item.chainLabel}
-                                </span>
-                                <span className="block truncate font-semibold text-slate-900">
-                                  {item.symbol}
-                                </span>
+                    {walletMatched.length === 0 ? (
+                      <p className="rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2 text-xs text-slate-600">
+                        No token here matches “{walletQuery.trim()}”.{" "}
+                        <button
+                          type="button"
+                          className="font-medium text-indigo-600 hover:underline"
+                          onClick={() => setWalletQuery("")}
+                        >
+                          Clear the search
+                        </button>
+                      </p>
+                    ) : walletGroupByChain && walletChainGroups.length > 1 ? (
+                      <div className="max-h-[24rem] space-y-3 overflow-y-auto pr-1">
+                        {walletChainGroups.map((group) => (
+                          <div key={group.chain} className="space-y-1.5">
+                            <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1 text-[11px]">
+                              <span className="font-semibold text-slate-600">{group.label}</span>
+                              <span className="tabular-nums text-slate-400">
+                                {group.items.filter((item) => !walletDeselected.has(item.id)).length} of{" "}
+                                {group.items.length} ticked · {money(group.valueUsd)}
+                                <button
+                                  type="button"
+                                  className="ml-2 font-medium text-indigo-600 hover:underline"
+                                  onClick={() => toggleWalletChain(group.items)}
+                                  title="Tick or untick every token on this chain"
+                                >
+                                  {group.items.every((item) => !walletDeselected.has(item.id))
+                                    ? "Untick chain"
+                                    : "Tick chain"}
+                                </button>
                               </span>
-                            </label>
-                            <span className="mt-1 block text-xs font-medium tabular-nums text-slate-700">
-                              {qty(item.quantity)} {item.symbol}
-                            </span>
-                            <span
-                              className="mt-0.5 block text-xs tabular-nums text-slate-500"
-                              title={
-                                item.priced
-                                  ? undefined
-                                  : "No price was found for this token, so it is kept but not counted as dust"
-                              }
-                            >
-                              {item.priced
-                                ? `${money(item.valueUsd)} (${money(item.price)})`
-                                : `no price yet · ${qty(item.quantity)} ${item.symbol}`}
-                            </span>
-                            <span className="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
-                              {item.contractStatus === "official" ? (
-                                <span
-                                  className="rounded-full bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700"
-                                  title={
-                                    item.cmcVerified && item.cmcName
-                                      ? `The contract address is the official one for this token, confirmed on CoinMarketCap as ${item.cmcName}`
-                                      : "The contract address is the official one for this token"
-                                  }
-                                >
-                                  official ✓
-                                </span>
-                              ) : null}
-                              {item.cmcSymbolMismatch && item.cmcName ? (
-                                <span
-                                  className="rounded-full bg-slate-50 px-1.5 py-0.5 font-medium text-slate-600"
-                                  title={`CoinMarketCap lists this contract as ${item.cmcName}. The ticker shown is the one the wallet scan reported — bridged tokens and renamed tickers differ like this.`}
-                                >
-                                  CMC: {item.cmcName}
-                                </span>
-                              ) : null}
-                              {item.liquidityUsd !== undefined ? (
-                                <span
-                                  className={`rounded-full px-1.5 py-0.5 font-medium ${
-                                    depth === "deep"
-                                      ? "bg-emerald-50 text-emerald-700"
-                                      : depth === "shallow"
-                                        ? "bg-amber-50 text-amber-800"
-                                        : "bg-slate-50 text-slate-600"
-                                  }`}
-                                  title={
-                                    depth === "deep"
-                                      ? `Deep liquidity: ${money(item.liquidityUsd)} pooled, deepest pool ${money(item.deepestPoolUsd ?? 0)}`
-                                      : depth === "shallow"
-                                        ? `Thin: only ${money(item.liquidityUsd)} pooled — a fake token can hold a few hundred dollars of its own liquidity`
-                                        : `Liquidity: ${money(item.liquidityUsd)} pooled across ${item.marketPairs ?? 0} pool(s)`
-                                  }
-                                >
-                                  {shortUsd(item.liquidityUsd)} liq
-                                  {depth === "deep" ? " ✓" : ""}
-                                </span>
-                              ) : null}
-                              {traded !== undefined ? (
-                                <span
-                                  className={`rounded-full px-1.5 py-0.5 font-medium ${
-                                    traded >= MIN_ORGANIC_VOLUME_USD
-                                      ? "bg-slate-50 text-slate-600"
-                                      : "bg-amber-50 text-amber-800"
-                                  }`}
-                                  title={
-                                    item.washSuspected
-                                      ? "Some pools traded implausibly more than their liquidity; that volume was left out"
-                                      : "Organic 24h volume, ignoring dust pools and wash trading"
-                                  }
-                                >
-                                  {shortUsd(traded)}/24h
-                                </span>
-                              ) : null}
-                            </span>
-                            <button
-                              type="button"
-                              className="mt-1 text-[11px] font-medium text-indigo-600 hover:underline"
-                              onClick={() => chooseWalletBalance(item)}
-                            >
-                              Fill form
-                            </button>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                              {group.items.map((item) => (
+                                <div key={item.id}>{walletCard(item)}</div>
+                              ))}
+                            </div>
                           </div>
-                        );
-                      })}
-                    </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="grid max-h-[24rem] grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3">
+                        {walletMatched.map((item) => (
+                          <div key={item.id}>{walletCard(item)}</div>
+                        ))}
+                      </div>
+                    )}
                   </>
                 )}
               </div>
