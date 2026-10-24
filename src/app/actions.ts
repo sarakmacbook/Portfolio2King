@@ -37,6 +37,7 @@ import {
 import { folderForImport } from "@/lib/holdings-folders";
 import { shortWalletAddress } from "@/lib/wallet-chains";
 import { isDust, normaliseDustThreshold } from "@/lib/wallet-dust";
+import { isSpamToken } from "@/lib/wallet-spam";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -426,6 +427,12 @@ export async function importWalletBalances(input: {
    * slip dust into the portfolio.
    */
   minValueUsd?: number;
+  /**
+   * Skip tokens that look like airdropped spam (a web address, promo wording, a
+   * fake ticker). Applied here as well as in the dialog, so a stale page cannot
+   * import junk.
+   */
+  skipSpam?: boolean;
   balances: Array<{
     symbol: string;
     name: string;
@@ -434,6 +441,8 @@ export async function importWalletBalances(input: {
     price: number;
     category: CryptoCategory;
     contract: string | null;
+    /** Spam flag from the indexer, when one was passed along. */
+    spam?: boolean;
   }>;
 }): Promise<{
   ok: boolean;
@@ -445,6 +454,8 @@ export async function importWalletBalances(input: {
   folderNote?: string;
   /** How many balances were skipped for being under `minValueUsd`. */
   skippedDust?: number;
+  /** How many balances were skipped for looking like spam. */
+  skippedSpam?: number;
 }> {
   try {
     await ensureSchema();
@@ -463,6 +474,7 @@ export async function importWalletBalances(input: {
     // Omitted means "no cut-off"; a number is clamped like the dialog's box.
     const minValueUsd = Number(input.minValueUsd) > 0 ? normaliseDustThreshold(input.minValueUsd) : 0;
     let skippedDust = 0;
+    let skippedSpam = 0;
 
     for (const item of items.slice(0, 50)) {
       const symbol = String(item.symbol ?? "").trim().toUpperCase();
@@ -470,6 +482,12 @@ export async function importWalletBalances(input: {
       const quantity = Number(item.quantity);
       const price = Number(item.price);
       if (!symbol || !Number.isFinite(quantity) || quantity <= 0) continue;
+      // Spam: checked before the value, because a scam token with a made-up
+      // price is the one a dollar cut-off cannot catch.
+      if (input.skipSpam !== false && isSpamToken({ name, symbol, spam: item.spam === true })) {
+        skippedSpam += 1;
+        continue;
+      }
       // Dust: measured on value, not quantity — a million near-worthless tokens
       // are dust just like a fraction of a cent.
       if (isDust({ valueUsd: quantity * (Number.isFinite(price) ? price : 0) }, minValueUsd)) {
@@ -550,6 +568,7 @@ export async function importWalletBalances(input: {
       folder,
       folderNote,
       ...(skippedDust > 0 ? { skippedDust } : {}),
+      ...(skippedSpam > 0 ? { skippedSpam } : {}),
     };
   } catch (e) {
     return {

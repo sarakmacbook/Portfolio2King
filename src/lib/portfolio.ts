@@ -11,6 +11,7 @@ import {
 } from "@/db/schema";
 import { fetchPreferredMarketPrice } from "@/lib/market-prices";
 import { fetchStockQuote } from "@/lib/stock-prices";
+import { isSpamToken } from "@/lib/wallet-spam";
 import { asc, desc, eq, inArray, sql } from "drizzle-orm";
 
 let schemaReady: Promise<void> | null = null;
@@ -289,12 +290,21 @@ export type Totals = {
   byType: Record<AssetType, number>;
 };
 
+/**
+ * The portfolio's value, cost and P/L.
+ *
+ * Holdings that look like airdropped spam are skipped: their price is invented
+ * by whoever minted the token, so counting it would put a fake position at the
+ * top of the portfolio. Every caller (the dashboard, the daily snapshot, the
+ * alert thresholds) goes through here, so the numbers stay consistent.
+ */
 export function computeTotals(list: Asset[]): Totals {
   const byType: Record<AssetType, number> = { cash: 0, stock: 0, crypto: 0, other: 0 };
   let totalValue = 0;
   let costBasis = 0;
   let realized = 0;
   for (const a of list) {
+    if (isSpamToken(a)) continue;
     const v = assetValue(a);
     totalValue += v;
     costBasis += assetCost(a);
