@@ -9,6 +9,7 @@ import {
   formatUnitsFromHex,
   scanWalletAddress,
   shortWalletAddress,
+  normaliseWalletChain,
 } from "../src/lib/wallet-scanner";
 
 test("detectWalletAddressKind identifies EVM, Solana, Bitcoin, and Tron addresses", () => {
@@ -190,4 +191,29 @@ test("a wallet import is filed into a folder named after the wallet", () => {
     !dialog.includes("DeBank was unavailable"),
     "the 404 notice is worded as a chain read, not a DeBank error",
   );
+});
+
+test("the chain filter accepts any chain DeBank knows, not just the built-in list", async () => {
+  assert.equal(normaliseWalletChain("sonic"), "sonic");
+  assert.equal(normaliseWalletChain(" Sonic "), "sonic");
+  assert.equal(normaliseWalletChain("auto"), "auto");
+  assert.equal(normaliseWalletChain(""), "auto");
+  assert.equal(normaliseWalletChain(null), "auto");
+  // Anything that is not a sane chain id is ignored rather than passed to DeBank.
+  assert.equal(normaliseWalletChain("../../etc/passwd"), "auto");
+  assert.equal(normaliseWalletChain("x".repeat(40)), "auto");
+
+  // The route accepts a chain that is not in WALLET_CHAINS.
+  const scan = await walletScanGET(
+    new Request("http://localhost/api/wallet/scan?address=0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045&chain=sonic"),
+  );
+  const body = (await scan.json()) as { chain?: string };
+  assert.equal(body.chain, "sonic");
+});
+
+test("the wallet dialog offers every chain a scan found, not only the built-in ones", () => {
+  const dialog = readFileSync(resolve(__dirname, "../src/components/AddAssetDialog.tsx"), "utf8");
+  assert.ok(dialog.includes("walletChainOptions"), "the filter is built from the scan result");
+  assert.ok(dialog.includes("canonicalChainId(item.chain)"), "chains are compared canonically");
+  assert.ok(dialog.includes("walletScanChainCount"), "the result says how many chains were hit");
 });

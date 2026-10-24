@@ -122,9 +122,10 @@ the form for you (or imports everything it finds):
 
 1. Paste the address — `0x…` for any EVM chain, a Solana base58 address, a
    Bitcoin `bc1…` / `1…` address, or a Tron `T…` address — and pick a chain, or
-   leave **Auto-detect**.
+   leave **All chains (DeBank)**.
 2. Click **Scan wallet**. Every non-zero balance comes back with its quantity,
-   USD price, value and logo.
+   USD price, value, chain and logo — across every chain DeBank indexes, not
+   just the popular ones this app can read by itself.
 3. Click one token to fill the form below, or **Import all** to book them all as
    holdings in one go. The import files them into a **folder** — name it in the
    *File into a folder* box, or leave the name blank and it is called after the
@@ -132,10 +133,19 @@ the form for you (or imports everything it finds):
    the same wallet again reuses the same folder instead of making a second one.
 
 EVM addresses are read through **[DeBank](https://debank.com)**, which indexes
-every chain, so one call returns tokens from Ethereum, BNB Chain, Arbitrum, Base,
-Polygon, Optimism, Avalanche, zkSync, Linea, Scroll, Mantle, Blast, Fantom, Gnosis
-and Cronos together — with prices, so no per-token quote lookup is needed. The
-result says **via DeBank** so it is clear where the numbers came from.
+**every EVM chain it supports — 100+ of them**, from Ethereum, BNB Chain,
+Arbitrum, Base and Polygon to Sonic, Zora, Berachain, Unichain, Ink, HyperEVM and
+whatever it added last week. One call returns all of them together, with prices
+and logos, so no per-chain RPC trip or per-token quote lookup is needed. The
+result says **via DeBank** and counts the chains it found, so it is clear where
+the numbers came from.
+
+That list is not hard-coded here. A chain id this app has never seen is still
+kept, listed and imported; its display name is read from DeBank's own
+`/v1/chain/list` (cached for six hours) and falls back to the upper-cased id
+(`AERO`) if even that is unavailable. Choosing a specific chain in the dropdown
+filters the result, and the filter understands both spellings — `ethereum` and
+DeBank's `eth` are the same chain.
 
 DeBank needs no key, but its keyless routes do get blocked, renamed and
 rate-limited, so three are tried in order before giving up: DeBank's API gateway

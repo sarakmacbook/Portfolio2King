@@ -1,9 +1,5 @@
 import { NextResponse } from "next/server";
-import {
-  isValidWalletChain,
-  scanWalletAddress,
-  type WalletChain,
-} from "@/lib/wallet-scanner";
+import { normaliseWalletChain, scanWalletAddress } from "@/lib/wallet-scanner";
 
 export const dynamic = "force-dynamic";
 
@@ -11,16 +7,16 @@ export const dynamic = "force-dynamic";
  * GET /api/wallet/scan?address=0x...&chain=auto
  *
  * Returns the tokens a wallet holds. EVM addresses are read through DeBank
- * (every chain, prices included) when available, and through the public RPCs and
- * block explorers otherwise; Solana, Bitcoin and Tron always use the direct
- * read. The response carries `source: "debank" | "onchain"` so the dialog can
+ * (every chain it indexes, prices included) when available, and through the
+ * public RPCs and block explorers otherwise; Solana, Bitcoin and Tron always use
+ * the direct read. `chain` may be `auto` (every chain) or any chain id DeBank
+ * knows — the filter is alias-aware, so `ethereum` and `eth` are the same. The response carries `source: "debank" | "onchain"` so the dialog can
  * say where the numbers came from. Read-only — no keys or signatures.
  */
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const address = (params.get("address") ?? "").trim();
-  const rawChain = (params.get("chain") ?? "auto").trim().toLowerCase();
-  const chain: WalletChain = isValidWalletChain(rawChain) ? rawChain : "auto";
+  const chain = normaliseWalletChain(params.get("chain"));
 
   if (!address) {
     return NextResponse.json(

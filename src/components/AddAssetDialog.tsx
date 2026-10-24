@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useActionState, useRef, useState } from "react";
+import { useActionState, useMemo, useRef, useState } from "react";
 import { createAsset, importWalletBalances, type ActionState } from "@/app/actions";
 import { ASSET_TYPES, type AssetType } from "@/lib/constants";
 import {
@@ -17,9 +17,9 @@ import type { DiscoveredStock } from "@/lib/stock-search";
 import {
   WALLET_CHAINS,
   WALLET_CHAIN_LABELS,
+  canonicalChainId,
   shortWalletAddress,
   type ScannedWalletBalance,
-  type WalletChain,
 } from "@/lib/wallet-scanner";
 import {
   WEB3_WALLETS,
@@ -130,7 +130,7 @@ function AddAssetForm({
     message: string;
   }>({ status: "idle", message: "" });
   const [walletAddress, setWalletAddress] = useState("");
-  const [walletChain, setWalletChain] = useState<WalletChain>("auto");
+  const [walletChain, setWalletChain] = useState("auto");
   const [walletBalances, setWalletBalances] = useState<ScannedWalletBalance[]>([]);
   const [scanningWallet, setScanningWallet] = useState(false);
   const [walletScanError, setWalletScanError] = useState("");
@@ -145,6 +145,29 @@ function AddAssetForm({
   const [customBankSelected, setCustomBankSelected] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const isCash = type === "cash";
+  /**
+   * The chain filter: the built-in chains this app can also read directly, plus
+   * every other chain the last scan found — DeBank indexes far more chains than
+   * the app lists by hand, and a wallet holding one of them should still be
+   * filterable by it.
+   */
+  const walletChainOptions = useMemo<Array<{ value: string; label: string }>>(() => {
+    const options = WALLET_CHAINS.map((chain) => ({
+      value: chain as string,
+      label: WALLET_CHAIN_LABELS[chain],
+    }));
+    const seen = new Set(WALLET_CHAINS.map((chain) => canonicalChainId(chain)));
+    for (const item of walletBalances) {
+      const key = canonicalChainId(item.chain);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      options.push({ value: item.chain, label: item.chainLabel });
+    }
+    return options;
+  }, [walletBalances]);
+
+  /** How many distinct chains the last scan found balances on. */
+  const walletScanChainCount = new Set(walletBalances.map((item) => item.chain)).size;
   /** Folder the scan would be filed into; blank means "name it after the address". */
   const walletFolderPlaceholder = shortWalletAddress(walletAddress.trim()) || "0x1234…abcd";
   const walletFolderLabel = walletFolderName.trim() || walletFolderPlaceholder;
@@ -719,7 +742,8 @@ function AddAssetForm({
                   >
                     DeBank
                   </a>{" "}
-                  — every chain, prices and logos in one call — and fall back to a direct on-chain read.
+                  — every EVM chain it indexes (100+), prices and logos in one call — and fall back to a
+                  direct on-chain read if it cannot answer.
                   <strong className="font-medium text-slate-600"> Import all</strong> files the tokens into
                   one folder for this wallet.
                 </p>
@@ -760,12 +784,12 @@ function AddAssetForm({
               <select
                 className="input sm:w-36"
                 value={walletChain}
-                onChange={(event) => setWalletChain(event.target.value as WalletChain)}
+                onChange={(event) => setWalletChain(event.target.value)}
                 aria-label="Wallet blockchain"
               >
-                {WALLET_CHAINS.map((c) => (
-                  <option key={c} value={c}>
-                    {WALLET_CHAIN_LABELS[c]}
+                {walletChainOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
                   </option>
                 ))}
               </select>
@@ -814,7 +838,8 @@ function AddAssetForm({
             {walletScanDone && !walletScanError && walletBalances.length > 0 && (
               <div className="mt-3 space-y-2">
                 <p className="text-xs text-slate-500">
-                  Found {walletBalances.length} on-chain balance{walletBalances.length === 1 ? "" : "s"}
+                  Found {walletBalances.length} balance{walletBalances.length === 1 ? "" : "s"}
+                  {walletScanChainCount > 1 ? ` on ${walletScanChainCount} chains` : ""}
                   {walletScanSource === "debank" ? " via DeBank" : ""} · click a token to fill the form
                   below, or click <strong>Import all</strong> above.
                 </p>

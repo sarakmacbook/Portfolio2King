@@ -2,7 +2,12 @@ import type { CryptoCategory } from "@/db/schema";
 import { fetchDebankBalances, type DebankBalance } from "@/lib/debank";
 import { fetchPreferredMarketPrice } from "@/lib/market-prices";
 import { STABLECOIN_SYMBOLS } from "@/lib/stablecoins";
-import { detectWalletAddressKind, type WalletAddressKind, type WalletChain } from "@/lib/wallet-chains";
+import {
+  detectWalletAddressKind,
+  normaliseWalletChain,
+  type WalletAddressKind,
+  type WalletChain,
+} from "@/lib/wallet-chains";
 
 /**
  * The chain vocabulary lives in `wallet-chains` so the DeBank client can share
@@ -11,8 +16,10 @@ import { detectWalletAddressKind, type WalletAddressKind, type WalletChain } fro
 export {
   WALLET_CHAINS,
   WALLET_CHAIN_LABELS,
+  canonicalChainId,
   detectWalletAddressKind,
   isValidWalletChain,
+  normaliseWalletChain,
   shortWalletAddress,
 } from "@/lib/wallet-chains";
 export type { WalletAddressKind, WalletChain } from "@/lib/wallet-chains";
@@ -21,7 +28,13 @@ export type ScannedWalletBalance = {
   id: string;
   symbol: string;
   name: string;
-  chain: Exclude<WalletChain, "auto">;
+  /**
+   * The chain the balance sits on. Known chains use the app's id (`ethereum`,
+   * `arbitrum`, …); any other chain DeBank indexes keeps its DeBank id
+   * (`sonic`, `zora`, …), so a token is never dropped for being on a chain this
+   * app does not list by hand.
+   */
+  chain: string;
   chainLabel: string;
   quantity: number;
   price: number;
@@ -35,7 +48,8 @@ export type ScannedWalletBalance = {
 export type WalletScanResult = {
   address: string;
   addressKind: WalletAddressKind;
-  chain: WalletChain;
+  /** `auto`, or the chain id the scan was narrowed to (app or DeBank spelling). */
+  chain: string;
   balances: ScannedWalletBalance[];
   /**
    * Where the balances came from: DeBank (one call, all EVM chains, prices
@@ -571,8 +585,9 @@ async function resolveSymbolPriceUsd(symbol: string): Promise<number> {
 
 export async function scanWalletAddress(
   rawAddress: string,
-  requestedChain: WalletChain = "auto",
+  chainFilter: string = "auto",
 ): Promise<WalletScanResult> {
+  const requestedChain = normaliseWalletChain(chainFilter);
   const address = rawAddress.trim();
   const addressKind = detectWalletAddressKind(address);
   if (!addressKind) {
