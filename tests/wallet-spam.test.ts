@@ -97,13 +97,13 @@ const read = (path: string) => readFileSync(resolve(__dirname, "../src", path), 
 
 test("the wallet importer hides spam and says what it hid", () => {
   const dialog = read("components/AddAssetDialog.tsx");
-  assert.ok(dialog.includes("splitSpam("), "the picker uses the shared rule");
+  assert.ok(dialog.includes("filterScanBalances("), "the picker uses the shared rules");
   assert.ok(dialog.includes("Hide spam tokens"), "the control exists");
   assert.ok(dialog.includes("walletHideSpam"), "it can be switched off");
   assert.ok(dialog.includes("skipSpam: walletHideSpam"), "the server is told about it");
   assert.ok(dialog.includes("skippedSpam"), "the import message reports it");
-  assert.ok(dialog.includes("Spam is hidden, not dropped"), "it can be revealed");
-  assert.ok(dialog.includes("balances: walletVisibleBalances"), "spam never reaches Import all");
+  assert.ok(dialog.includes("look") && dialog.includes("like airdrop spam"), "it can be revealed");
+  assert.ok(dialog.includes("balances: walletChosen"), "only ticked, filtered tokens are imported");
 });
 
 test("the server re-applies the spam rule so a stale page cannot import junk", () => {

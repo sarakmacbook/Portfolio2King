@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { normaliseWalletChain, scanWalletAddress } from "@/lib/wallet-scanner";
+import { enrichTokenTrust } from "@/lib/wallet-trust";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +12,10 @@ export const dynamic = "force-dynamic";
  * public RPCs and block explorers otherwise; Solana, Bitcoin and Tron always use
  * the direct read. `chain` may be `auto` (every chain) or any chain id DeBank
  * knows — the filter is alias-aware, so `ethereum` and `eth` are the same. The response carries `source: "debank" | "onchain"` so the dialog can
- * say where the numbers came from. Read-only — no keys or signatures.
+ * say where the numbers came from. Each balance is then matched against the
+ * official contract table and looked up for organic trading volume
+ * (`wallet-trust`) — best-effort, so a slow or rate-limited lookup leaves the
+ * token "unknown" rather than hidden. Read-only — no keys or signatures.
  */
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
@@ -27,8 +31,11 @@ export async function GET(request: Request) {
 
   try {
     const result = await scanWalletAddress(address, chain);
+    // Contract match + market depth, so the picker can rank real tokens above
+    // look-alikes and tokens nobody trades. Never throws, never drops a balance.
+    const balances = await enrichTokenTrust(result.balances);
     return NextResponse.json(
-      { ok: true, ...result },
+      { ok: true, ...result, balances },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

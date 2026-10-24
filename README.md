@@ -126,8 +126,10 @@ the form for you (or imports everything it finds):
 2. Click **Scan wallet**. Every non-zero balance comes back with its quantity,
    USD price, value, chain and logo — across every chain DeBank indexes, not
    just the popular ones this app can read by itself.
-3. Click one token to fill the form below, or **Import all** to book them all as
-   holdings in one go. The import files them into a **folder** — name it in the
+3. Every token arrives **ticked**. Untick anything you do not want, or use
+   *Select all* / *Select none*, then **Import selected (N)** books the ticked
+   ones as holdings in one go. *Fill form* on a card copies it into the manual
+   form instead. The import files them into a **folder** — name it in the
    *File into a folder* box, or leave the name blank and it is called after the
    address (`0x1234…abcd`). Untick the box to import without a folder. Importing
    the same wallet again reuses the same folder instead of making a second one.
@@ -154,6 +156,29 @@ the form for you (or imports everything it finds):
    position at the top of the portfolio — through `computeTotals`, which means the
    value header, the allocation donut, the daily snapshots and the alert
    thresholds all skip it together.
+6. **Hide look-alike contracts** (on by default) is the official-address check.
+   Anyone can deploy a token called `USDT`; what separates it from the real one is
+   the contract. `src/lib/token-trust.ts` holds the issuers' own addresses for the
+   well-known tokens on the chains this app prices (USDT, USDC, DAI, WETH, WBTC,
+   cbBTC, LINK, UNI, AAVE, ARB, OP, AERO, BNB, AVAX, and the bridged `USDC.e` /
+   `USDBTC` variants), keyed by chain. A scan balance is then:
+   **official** (the address matches, and the card shows *official ✓*),
+   **different** (right symbol, wrong contract — hidden and counted as a
+   look-alike), or **unknown** (not in the table, which is most real tokens, and
+   is never a reason to hide anything). The same check runs again server-side in
+   `importWalletBalances`, so a stale page cannot import a fake `USDT`.
+7. **Only tokens with trading volume** (on by default) answers "is anyone
+   actually trading this?". For each contract the scan asks DexScreener for its
+   pairs and counts **organic 24h volume**: pools under $500 of liquidity are
+   ignored (anyone can create one to fake activity), volume above 200× a pool's
+   own liquidity is dropped as wash trading, and what is left has to clear $100 a
+   day. The card shows the figure (`$12.3k/24h`). No answer from DexScreener means
+   *unknown*, which is kept — a rate limit must never hide a real holding. The
+   volume floor is re-applied server-side too.
+
+Each hidden bucket (look-alike, spam, no volume, dust) is counted in the line
+under the scan with its own *Show them* link, so a filter never silently swallows
+a token.
 
 The same switch sits on the holdings table (*Hide spam*, on by default): rows
 that look like spam are skipped with a count and a *Show them* link, and once
