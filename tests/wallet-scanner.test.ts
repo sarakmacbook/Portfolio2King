@@ -211,10 +211,11 @@ test("the chain filter accepts any chain DeBank knows, not just the built-in lis
   assert.equal(body.chain, "sonic");
 });
 
-test("the wallet dialog offers every chain a scan found, not only the built-in ones", () => {
+test("a scan always covers every chain — there is no chain filter to set", () => {
   const dialog = readFileSync(resolve(__dirname, "../src/components/AddAssetDialog.tsx"), "utf8");
-  assert.ok(dialog.includes("walletChainOptions"), "the filter is built from the scan result");
-  assert.ok(dialog.includes("canonicalChainId(item.chain)"), "chains are compared canonically");
+  assert.equal(dialog.includes("walletChainOptions"), false, "no chain dropdown");
+  assert.equal(dialog.includes("Wallet blockchain"), false, "and no chain select either");
+  assert.ok(dialog.includes('chain: "auto"'), "every scan asks for all chains");
   assert.ok(dialog.includes("walletScanChainCount"), "the result says how many chains were hit");
 });
 

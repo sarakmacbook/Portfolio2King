@@ -31,7 +31,7 @@ export const WALLET_CHAINS = [
 export type WalletChain = (typeof WALLET_CHAINS)[number];
 
 export const WALLET_CHAIN_LABELS: Record<WalletChain, string> = {
-  auto: "All chains (DeBank)",
+  auto: "All chains",
   ethereum: "Ethereum",
   bsc: "BNB Chain",
   arbitrum: "Arbitrum",
