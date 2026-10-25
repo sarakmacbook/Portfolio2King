@@ -13,6 +13,7 @@ import {
   fetchCmcContracts,
   mergeContractStatus,
   parseCmcInfo,
+  parseCmcQuoteDetails,
   parseCmcQuotes,
   sameTicker,
 } from "../src/lib/coinmarketcap";
@@ -406,4 +407,77 @@ test("only tokens CoinMarketCap lists, applied by the page and re-applied by the
   assert.ok(body.includes("skippedUnlisted"), "and reports what it skipped");
   assert.ok(body.includes("hasCmcAnswer"), "but never applies it when the scan had no CMC answer");
   assert.ok(body.includes("item.cmcId === undefined"), "a native coin has no contract and is kept");
+});
+
+test("the quotes answer carries a market cap, which the scan keeps", async () => {
+  const payload = {
+    status: { error_code: 0 },
+    data: {
+      "29210": {
+        id: 29210,
+        quote: { USD: { price: 0.8, market_cap: 120_000_000, volume_24h: 9_000_000 } },
+      },
+      // A cap but no price (or the other way round) is still worth reading.
+      "7": { id: 7, quote: { USD: { market_cap: 4_000_000 } } },
+      // Nothing usable.
+      "9": { id: 9, quote: { USD: {} } },
+    },
+  };
+  const details = parseCmcQuoteDetails(payload);
+  assert.equal(details.get(29210)?.price, 0.8);
+  assert.equal(details.get(29210)?.marketCapUsd, 120_000_000);
+  assert.equal(details.get(29210)?.volume24hUsd, 9_000_000);
+  assert.equal(details.get(7)?.marketCapUsd, 4_000_000);
+  assert.equal(details.has(9), false, "an empty quote is not a number");
+  // The price-only view is unchanged for its callers.
+  assert.deepEqual([...parseCmcQuotes(payload).entries()], [[29210, 0.8]]);
+
+  const { impl } = stubCmc((url) => {
+    if (url.includes("quotes/latest")) return payload;
+    return infoPayload({
+      [LONGTAIL]: [listed(29210, "Pendle", "PENDLE", LONGTAIL)],
+      [FAKE]: [listed(7, "Long Tail", "LONGX", FAKE)],
+    });
+  });
+
+  const balances = [
+    { symbol: "PENDLE", name: "Pendle", contract: LONGTAIL, chain: "ethereum", quantity: 10, price: 0, valueUsd: 0, priced: false },
+    // DexScreener would say 20k; CoinMarketCap's figure is the coin's, so it wins.
+    { symbol: "LONGX", name: "Long Tail", contract: FAKE, chain: "ethereum", quantity: 1, price: 1, valueUsd: 1, priced: true, marketCapUsd: 20_000 },
+  ];
+  const market = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("dexscreener")) {
+      return new Response(
+        JSON.stringify({
+          pairs: [
+            {
+              chainId: "ethereum",
+              dexId: "uniswap",
+              baseToken: { address: FAKE, symbol: "LONGX" },
+              quoteToken: { address: "0x0000000000000000000000000000000000000000", symbol: "WETH" },
+              liquidity: { usd: 40_000 },
+              volume: { h24: 20_000 },
+              marketCap: 20_000,
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    }
+    return new Response("{}", { status: 404 });
+  }) as unknown as typeof fetch;
+
+  const enriched = await enrichTokenTrust(balances, market, {
+    cmcApiKey: "KEY",
+    cmcFetchImpl: impl,
+  });
+  assert.equal(enriched[0].marketCapUsd, 120_000_000, "CoinMarketCap caps the long tail");
+  assert.equal(enriched[0].verification, "verified", "and a cap that size is proof");
+  assert.equal(enriched[1].marketCapUsd, 4_000_000, "a CMC cap beats the pool's own figure");
+
+  // Without a key, DexScreener's figure is what the picker gets.
+  const noKey = await enrichTokenTrust(balances, market, { cmcApiKey: "" });
+  assert.equal(noKey[1].marketCapUsd, 20_000);
+  assert.equal(noKey[0].marketCapUsd, undefined, "nothing invents a cap");
 });

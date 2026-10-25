@@ -184,9 +184,11 @@ test("a wallet import is filed into a folder named after the wallet", () => {
   assert.ok(importBody.includes("folderName !== null"), "a caller can still import without a folder");
 
   const dialog = readFileSync(resolve(__dirname, "../src/components/AddAssetDialog.tsx"), "utf8");
-  assert.ok(dialog.includes("File into a folder"), "the dialog offers the folder");
+  assert.ok(dialog.includes("Import as one folder"), "the dialog offers the folder");
   assert.ok(dialog.includes("walletFolderName"), "the folder can be named");
   assert.ok(dialog.includes("folderName: walletFileIntoFolder"), "the choice reaches the action");
+  assert.ok(dialog.includes("folderId: walletFileIntoFolder"), "a picked folder is sent by id");
+  assert.ok(importBody.includes("pickedId"), "the action resolves the picked folder");
   assert.ok(
     !dialog.includes("DeBank was unavailable"),
     "the 404 notice is worded as a chain read, not a DeBank error",

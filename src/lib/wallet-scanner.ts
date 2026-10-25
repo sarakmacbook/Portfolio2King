@@ -94,6 +94,8 @@ export type ScannedWalletBalance = {
   cmcSymbolMismatch?: boolean;
   /** USD price from CoinMarketCap, used only when nothing else priced the token. */
   cmcPriceUsd?: number;
+  /** Market capitalisation in USD (CoinMarketCap first, then DexScreener). */
+  marketCapUsd?: number;
 };
 
 export type WalletScanResult = {

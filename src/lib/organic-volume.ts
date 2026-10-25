@@ -57,6 +57,15 @@ export type MarketSignals = {
   deepestPoolUsd: number;
   /** Enough depth to be sure the token is real. */
   deepLiquidity: boolean;
+  /**
+   * The token's market capitalisation in USD, as DexScreener reports it on the
+   * pairs it knows (0 when it reports none). A real token carries a real cap;
+   * a token minted yesterday has none or a made-up one, so this is one of the
+   * cheapest ways to tell the two apart.
+   */
+  marketCapUsd: number;
+  /** Fully-diluted value, when DexScreener sent one (0 otherwise). */
+  fdvUsd: number;
   /** True when a pool's volume was implausibly larger than its liquidity. */
   washSuspected: boolean;
   /** Organic volume clears the floor — i.e. the token is actually traded. */
@@ -72,6 +81,8 @@ const EMPTY: Omit<MarketSignals, "contract"> = {
   liquidityUsd: 0,
   deepestPoolUsd: 0,
   deepLiquidity: false,
+  marketCapUsd: 0,
+  fdvUsd: 0,
   washSuspected: false,
   hasMarket: false,
 };
@@ -106,6 +117,8 @@ export function signalsFromPairs(pairs: readonly unknown[], contract: string): M
   let chain: string | null = null;
   let deepestLiquidity = 0;
   let deepestPoolUsd = 0;
+  let marketCapUsd = 0;
+  let fdvUsd = 0;
 
   for (const item of pairs) {
     const pair = record(item);
@@ -119,6 +132,12 @@ export function signalsFromPairs(pairs: readonly unknown[], contract: string): M
 
     const liquidity = amount(record(pair.liquidity)?.usd);
     const volume = amount(record(pair.volume)?.h24);
+    // DexScreener repeats the token's cap on every pair; the largest one is the
+    // pair it prices most confidently. A missing cap (0) never overwrites one.
+    const cap = amount(pair.marketCap);
+    if (cap > marketCapUsd) marketCapUsd = cap;
+    const fdv = amount(pair.fdv);
+    if (fdv > fdvUsd) fdvUsd = fdv;
     volume24hUsd += volume;
 
     const holdsOnItsOwn = liquidity >= MIN_PAIR_LIQUIDITY_USD;
@@ -152,6 +171,8 @@ export function signalsFromPairs(pairs: readonly unknown[], contract: string): M
     deepestPoolUsd: Number(deepestPoolUsd.toFixed(2)),
     deepLiquidity:
       liquidityUsd >= DEEP_LIQUIDITY_USD && deepestPoolUsd >= MIN_DEEPEST_POOL_USD,
+    marketCapUsd: Number(marketCapUsd.toFixed(2)),
+    fdvUsd: Number(fdvUsd.toFixed(2)),
     washSuspected,
     hasMarket: organicVolume24hUsd >= MIN_ORGANIC_VOLUME_USD,
   };

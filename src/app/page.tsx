@@ -87,6 +87,15 @@ export default async function Dashboard() {
   }
 
   const cashAccounts = list.filter((a) => a.type === "cash").map((a) => ({ id: a.id, name: a.name, quantity: a.quantity }));
+  /**
+   * The folders a wallet import can be filed into. Only the three fields the
+   * dialog needs, so the client does not receive the whole folder record.
+   */
+  const foldersForDialog = holdingsFolders.map((folder) => ({
+    id: folder.id,
+    name: folder.name,
+    color: folder.color,
+  }));
 
   const rows: HoldingRow[] = list.map((a) => {
     const spam = isSpamToken(a);
@@ -169,7 +178,10 @@ export default async function Dashboard() {
         />
         <div className="flex gap-2">
           <RefreshPricesButton />
-          <AddAssetDialog cashAccounts={cashAccounts} />
+          <AddAssetDialog
+            cashAccounts={cashAccounts}
+            folders={foldersForDialog}
+          />
         </div>
       </div>
 
