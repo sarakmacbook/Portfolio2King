@@ -135,13 +135,19 @@ the form for you (or imports everything it finds):
    filters by ticker, name, chain or CoinMarketCap's name as you type, *Select
    all* / *Select none* act on what the search shows, and the line above the
    grid keeps a running `N selected · $X` so the size of the import is obvious
-   before you commit to it.
+   before you commit to it. The **Sort** box orders them **Real & big first** by
+   default (verified tokens, then market cap, then value), or by *Biggest
+   holding* / *Biggest market cap*.
 4. Untick anything you do not want, then **Import selected (N)** books the ticked
-   ones as holdings in one go. *Fill form* on a card copies it into the manual
-   form instead. The import files them into a **folder** — name it in the
-   *File into a folder* box, or leave the name blank and it is called after the
-   address (`0x1234…abcd`). Untick the box to import without a folder. Importing
-   the same wallet again reuses the same folder instead of making a second one.
+   ones as holdings in one go — always **as one folder**, so a wallet reads as a
+   group on the dashboard instead of forty loose rows. The **folder dropdown**
+   under *Import as one folder* lists the folders you already have: pick one and
+   every ticked token is filed into exactly that folder (by id, so a re-scan of
+   the same wallet tops it up instead of making a near-duplicate). Leave it on
+   *New folder* to name one in the box below — blank names it after the address
+   (`0x1234…abcd`) — and a name that matches an existing folder reuses it.
+   Untick the box to import loose. *Fill form* on a card copies it into the
+   manual form instead of importing it.
 5. **Skip tokens under $** (on by default, $1) keeps dust out of the list and out
    of *Import all* — the wash-trading airdrops and leftover cents that would
    otherwise become 40-row holdings. It is measured in **dollars**, not quantity,
@@ -221,6 +227,26 @@ the *Scanner API keys* panel), which answers three things the table cannot:
 - **A price when nothing else had one.** The coins CMC recognised are priced in
   one `quotes/latest` call, which turns a *no price yet* row into a real USD value
   (and therefore a real dust decision) instead of leaving it unpriced.
+
+### Market cap: the size test
+
+Every scanned token gets a **market cap** — CoinMarketCap's figure when the
+contract is listed (it is the coin's cap across every chain), DexScreener's
+otherwise — and it does two jobs:
+
+- **It is evidence.** Any token with a cap of `VERIFIED_MARKET_CAP_USD` ($50M) or
+  more counts as `verified` on its own, because a ticker is free to copy and a
+  cap is not. Deeper than liquidity can be rented for a day; a capitalisation
+  cannot.
+- **It can be a filter.** *Only real market cap ($1M+)* is on by default:
+  `minMarketCapUsd` hides a token whose **known** cap is under
+  `MIN_MARKET_CAP_USD` ($1M), counts it (`· N under $1.0M market cap hidden`) and
+  offers *Show them*. A token whose cap could not be looked up is always kept —
+  not knowing is not evidence of being small, and a rate limit must never empty
+  the picker.
+
+The cards show the number as a chip (`$60.0B cap`, green for a $1B+ or $50M+ cap,
+grey for $1M+, amber below), so the size of a coin is visible next to its value.
 
 Precedence is deliberate: the local table's **different** always wins, because
 that is the case where the app knows the right address (a token called `USDT` at

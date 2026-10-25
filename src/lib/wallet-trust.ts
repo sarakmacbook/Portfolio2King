@@ -79,6 +79,13 @@ export type TrustSignals = {
   cmcSymbolMismatch?: boolean;
   /** USD price from CoinMarketCap, used only when nothing else priced the token. */
   cmcPriceUsd?: number;
+  /**
+   * The coin's market capitalisation in USD — CoinMarketCap's figure when the
+   * contract is listed, DexScreener's otherwise. A ticker is free to copy; a cap
+   * is not, which makes this the cheapest "is this a real coin?" signal there
+   * is, and the number the picker sorts by when you ask for the serious tokens.
+   */
+  marketCapUsd?: number;
 };
 
 type TrustableBalance = {
@@ -128,6 +135,29 @@ export const VERIFIED_LIQUIDITY_USD = 25_000;
 export const VERIFIED_DEEPEST_POOL_USD = 5_000;
 
 /**
+ * A market cap big enough to be evidence on its own.
+ *
+ * Deep liquidity can be rented for a day; a $50M capitalisation cannot. Anything
+ * this size is an established coin, so it counts as verified even when the local
+ * contract table has never heard of it and DexScreener had nothing to say.
+ */
+export const VERIFIED_MARKET_CAP_USD = 50_000_000;
+
+/**
+ * The floor the picker's *Only tokens with a real market cap* box starts at.
+ *
+ * Far below `VERIFIED_MARKET_CAP_USD`: this is "has a real cap at all", not
+ * "is blue chip". A known cap under it is a token a few people hold; a token
+ * whose cap is *unknown* is never hidden by it.
+ */
+export const MIN_MARKET_CAP_USD = 1_000_000;
+
+/** Is this cap big enough to be evidence the token is real? */
+export function isLargeCap(value: number | undefined): boolean {
+  return Number.isFinite(value) && (value as number) >= VERIFIED_MARKET_CAP_USD;
+}
+
+/**
  * The verification verdict for one balance, from what the scan already knows.
  *
  * Verified by any of: the official-contract table, the indexer's own verdict, or
@@ -144,6 +174,9 @@ export function verificationOf(
   if (status === "official") return "verified";
   if (balance.cmcVerified === true) return "verified";
   if (balance.verified === true) return "verified";
+
+  // A cap this size is proof on its own — no ticker-forger funds one.
+  if (isLargeCap(balance.marketCapUsd)) return "verified";
 
   const volume = balance.organicVolumeUsd;
   const liquidity = balance.liquidityUsd;
@@ -168,6 +201,7 @@ export function verifiedByOf(balance: TrustableBalance & TrustSignals): string[]
   if (status === "official") reasons.push("official contract");
   if (balance.cmcVerified === true) reasons.push("CoinMarketCap");
   if (balance.verified === true) reasons.push("indexer");
+  if (isLargeCap(balance.marketCapUsd)) reasons.push("large market cap");
   if (
     reasons.length === 0 &&
     (balance.liquidityUsd ?? 0) >= VERIFIED_LIQUIDITY_USD &&
@@ -240,6 +274,8 @@ export async function enrichTokenTrust<T extends TrustableBalance>(
     const match: CmcMatch | null = contract && cmc ? cmcMatchFor(balance, cmc.info) : null;
     const local = contractStatusOf(balance);
     const cmcPriceUsd = match?.token ? cmc?.prices.get(match.token.id) : undefined;
+    /** CoinMarketCap's cap beats DexScreener's: it is the coin, not one pool. */
+    const cmcCapUsd = match?.token ? cmc?.caps.get(match.token.id) : undefined;
 
     /**
      * A token nothing else could price takes CoinMarketCap's price, so it stops
@@ -271,6 +307,7 @@ export async function enrichTokenTrust<T extends TrustableBalance>(
           }
         : {}),
       ...(cmcPriceUsd && cmcPriceUsd > 0 ? { cmcPriceUsd } : {}),
+      ...(cmcCapUsd && cmcCapUsd > 0 ? { marketCapUsd: cmcCapUsd } : {}),
     };
   });
 
@@ -313,6 +350,12 @@ export async function enrichTokenTrust<T extends TrustableBalance>(
     }
     const enriched = {
       ...balance,
+      // A cap CoinMarketCap sent is about the coin across every chain; keep it.
+      ...(balance.marketCapUsd && balance.marketCapUsd > 0
+        ? {}
+        : market.marketCapUsd > 0
+          ? { marketCapUsd: market.marketCapUsd }
+          : {}),
       organicVolumeUsd: market.organicVolume24hUsd,
       liquidityUsd: market.liquidityUsd,
       deepestPoolUsd: market.deepestPoolUsd,
@@ -368,6 +411,12 @@ export type ScanFilters = {
    * rename or a bridge), which is how a real token like `USDC.e` survives.
    */
   onlyCmc?: boolean;
+  /**
+   * Hide tokens whose known market capitalisation is under this many dollars
+   * (0 = off). A token with **no** cap is always kept: not knowing the cap is
+   * not evidence that it is small, and a rate limit must never empty the picker.
+   */
+  minMarketCapUsd?: number;
   /** Hide tokens with no real market (unknown data is always kept). */
   requireMarket?: boolean;
   /** Volume floor for `requireMarket`. */
@@ -397,6 +446,8 @@ export type ScanSelection<T> = {
   unverified: T[];
   /** CoinMarketCap does not list this contract (see `onlyCmc`). */
   unlisted: T[];
+  /** A known market cap below the floor (see `minMarketCapUsd`). */
+  smallcap: T[];
   counts: {
     total: number;
     kept: number;
@@ -406,6 +457,7 @@ export type ScanSelection<T> = {
     dust: number;
     unverified: number;
     unlisted: number;
+    smallcap: number;
   };
   /** Combined USD value of the dust bucket. */
   dustValue: number;
@@ -437,6 +489,10 @@ export function filterScanBalances<T extends ScannableBalance>(
   const requireMarket = filters.requireMarket !== false;
   const requireVerified = filters.requireVerified !== false;
   const onlyCmc = filters.onlyCmc === true;
+  const minMarketCap =
+    Number.isFinite(filters.minMarketCapUsd) && (filters.minMarketCapUsd as number) > 0
+      ? (filters.minMarketCapUsd as number)
+      : 0;
   const dustCut = Number.isFinite(filters.dustCut) && (filters.dustCut as number) > 0 ? (filters.dustCut as number) : 0;
   const minVolume =
     Number.isFinite(filters.minOrganicVolumeUsd) && (filters.minOrganicVolumeUsd as number) > 0
@@ -454,6 +510,7 @@ export function filterScanBalances<T extends ScannableBalance>(
   const dust: T[] = [];
   const unverified: T[] = [];
   const unlisted: T[] = [];
+  const smallcap: T[] = [];
 
   for (const balance of balances) {
     // The scan already answered this; recomputing keeps a hand-built balance
@@ -481,6 +538,19 @@ export function filterScanBalances<T extends ScannableBalance>(
      * market that cannot back its price). Only `unverified` is hidden — a token
      * with no answer stays, because a rate-limited lookup is not evidence.
      */
+    /**
+     * Market capitalisation: the size test. Only a *known* cap can hide a token —
+     * a lookup that did not answer leaves the field empty, and empty is kept.
+     */
+    if (
+      minMarketCap > 0 &&
+      typeof balance.marketCapUsd === "number" &&
+      balance.marketCapUsd > 0 &&
+      balance.marketCapUsd < minMarketCap
+    ) {
+      smallcap.push(balance);
+      continue;
+    }
     if (requireVerified && balance.verification === "unverified") {
       unverified.push(balance);
       continue;
@@ -513,6 +583,7 @@ export function filterScanBalances<T extends ScannableBalance>(
     dust,
     unverified,
     unlisted,
+    smallcap,
     counts: {
       total: balances.length,
       kept: kept.length,
@@ -522,6 +593,7 @@ export function filterScanBalances<T extends ScannableBalance>(
       dust: dust.length,
       unverified: unverified.length,
       unlisted: unlisted.length,
+      smallcap: smallcap.length,
     },
     dustValue: sum(dust),
     keptValue: sum(kept),

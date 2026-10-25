@@ -16,8 +16,24 @@ import { DEFAULT_DUST_THRESHOLD_USD, normaliseDustThreshold } from "@/lib/wallet
 import { MIN_LIQUIDITY_USD, MIN_ORGANIC_VOLUME_USD, shortUsd } from "@/lib/organic-volume";
 import { BLOCKSCAN_CHAINS } from "@/lib/blockscan";
 import { MORALIS_CHAINS } from "@/lib/moralis";
-import { VERIFIED_LIQUIDITY_USD, depthOf, filterScanBalances } from "@/lib/wallet-trust";
-import { groupWalletBalancesByChain, searchWalletBalances, walletValueUsd } from "@/lib/wallet-results";
+import {
+  MIN_MARKET_CAP_USD,
+  VERIFIED_LIQUIDITY_USD,
+  VERIFIED_MARKET_CAP_USD,
+  depthOf,
+  filterScanBalances,
+} from "@/lib/wallet-trust";
+import {
+  SCAN_SORTS,
+  groupWalletBalancesByChain,
+  marketCapTier,
+  searchWalletBalances,
+  shortMarketCap,
+  sortWalletBalances,
+  walletValueUsd,
+  type ScanSort,
+} from "@/lib/wallet-results";
+import { MAX_FOLDER_NAME_LENGTH, type HoldingFolder } from "@/lib/holdings-folders";
 import { CAMBODIAN_BANKS, CUSTOM_BANK, type CambodianBank } from "@/lib/cambodian-banks";
 import type { DiscoveredStock } from "@/lib/stock-search";
 import {
@@ -65,11 +81,14 @@ function todayStr() {
 
 export default function AddAssetDialog({
   cashAccounts,
+  folders = [],
   defaultType = "stock",
   label = "+ Add asset",
   className = "btn-primary",
 }: {
   cashAccounts: CashAccount[];
+  /** Existing holdings folders, offered as the scan's filing target. */
+  folders?: Pick<HoldingFolder, "id" | "name" | "color">[];
   defaultType?: AssetType;
   label?: string;
   className?: string;
@@ -84,6 +103,7 @@ export default function AddAssetDialog({
         {open && (
           <AddAssetForm
             cashAccounts={cashAccounts}
+            folders={folders}
             defaultType={defaultType}
             onDone={() => setOpen(false)}
           />
@@ -95,10 +115,12 @@ export default function AddAssetDialog({
 
 function AddAssetForm({
   cashAccounts,
+  folders,
   defaultType,
   onDone,
 }: {
   cashAccounts: CashAccount[];
+  folders: Pick<HoldingFolder, "id" | "name" | "color">[];
   defaultType: AssetType;
   onDone?: () => void;
 }) {
@@ -162,7 +184,13 @@ function AddAssetForm({
   const [importingWallet, setImportingWallet] = useState(false);
   /** Import the wallet's tokens into a folder, named by the user or by the address. */
   const [walletFileIntoFolder, setWalletFileIntoFolder] = useState(true);
+  /** An existing folder to file into (`""` = make one, named below). */
+  const [walletFolderId, setWalletFolderId] = useState("");
   const [walletFolderName, setWalletFolderName] = useState("");
+  /** Order of the results: real & big first by default. */
+  const [walletSort, setWalletSort] = useState<ScanSort>("best");
+  /** Hide tokens whose known market cap is under the floor. */
+  const [walletMinMarketCap, setWalletMinMarketCap] = useState(true);
   /** Hide scanned balances worth less than `walletDustThreshold` (dust). */
   const [walletHideDust, setWalletHideDust] = useState(true);
   const [walletDustThreshold, setWalletDustThreshold] = useState(
@@ -224,6 +252,9 @@ function AddAssetForm({
         // Only when CoinMarketCap actually answered: otherwise every token would
         // look "unlisted" and the picker would come back empty.
         onlyCmc: walletOnlyCmc && walletCmcChecked,
+        // Market cap: only a *known* small cap is hidden, so a lookup that did
+        // not answer can never shrink the list.
+        minMarketCapUsd: walletMinMarketCap ? MIN_MARKET_CAP_USD : 0,
       }),
     [
       walletBalances,
@@ -234,6 +265,7 @@ function AddAssetForm({
       walletRequireVerified,
       walletOnlyCmc,
       walletCmcChecked,
+      walletMinMarketCap,
     ],
   );
   const walletVisibleBalances = walletSelection.kept;
@@ -242,13 +274,24 @@ function AddAssetForm({
   const walletChosenIds = new Set(walletChosen.map((item) => item.id));
   /** What the ticked tokens add up to, so the total is visible before importing. */
   const walletChosenValue = walletValueUsd(walletChosen);
-  /** The kept tokens that match the search box (an empty box matches everything). */
-  const walletMatched = searchWalletBalances(walletVisibleBalances, walletQuery);
+  /**
+   * The kept tokens that match the search box (an empty box matches everything),
+   * in the order the user asked for — real & big first unless they chose
+   * otherwise.
+   */
+  const walletMatched = sortWalletBalances(
+    searchWalletBalances(walletVisibleBalances, walletQuery),
+    walletSort,
+  );
   /** One group per chain, biggest first — see `wallet-results`. */
   const walletChainGroups = groupWalletBalancesByChain(walletMatched);
   /** Folder the scan would be filed into; blank means "name it after the address". */
   const walletFolderPlaceholder = shortWalletAddress(walletAddress.trim()) || "0x1234…abcd";
-  const walletFolderLabel = walletFolderName.trim() || walletFolderPlaceholder;
+  /** The folder picked from the dropdown, when it still exists. */
+  const walletPickedFolder = folders.find((folder) => folder.id === walletFolderId);
+  const walletFolderLabel = walletPickedFolder
+    ? walletPickedFolder.name
+    : walletFolderName.trim() || walletFolderPlaceholder;
   const total = (Number(q) || 0) * (Number(cost) || 0) + (Number(fee) || 0);
   const selectedBank = CAMBODIAN_BANKS.find((bank) => bank.name === name);
   const isCustomBank = !selectedBank && (customBankSelected || Boolean(name.trim()));
@@ -547,7 +590,10 @@ function AddAssetForm({
         address: walletAddress.trim(),
         walletLogo,
         priceSource,
+        // A picked folder is sent by id so the server files into that exact one;
+        // otherwise the name (blank = named after the address) creates or reuses.
         folderName: walletFileIntoFolder ? walletFolderName.trim() : null,
+        folderId: walletFileIntoFolder && walletPickedFolder ? walletPickedFolder.id : null,
         // The server applies the same rules, so a stale client cannot slip
         // dust or spam into the portfolio.
         minValueUsd: walletDustCut,
@@ -775,6 +821,24 @@ function AddAssetForm({
               title={`CoinMarketCap lists this contract as ${item.cmcName}. The ticker shown is the one the wallet scan reported — bridged tokens and renamed tickers differ like this.`}
             >
               CMC: {item.cmcName}
+            </span>
+          ) : null}
+          {item.marketCapUsd ? (
+            <span
+              className={`rounded-full px-1.5 py-0.5 font-medium ${
+                marketCapTier(item.marketCapUsd) === "major"
+                  ? "bg-emerald-50 text-emerald-700"
+                  : marketCapTier(item.marketCapUsd) === "large"
+                    ? "bg-emerald-50 text-emerald-700"
+                    : marketCapTier(item.marketCapUsd) === "mid"
+                      ? "bg-slate-50 text-slate-600"
+                      : "bg-amber-50 text-amber-800"
+              }`}
+              title={`Market cap ${money(item.marketCapUsd)} — ${
+                item.cmcId !== undefined ? "from CoinMarketCap" : "from DexScreener"
+              }. A ticker is free to copy; a cap this size is not.`}
+            >
+              {shortMarketCap(item.marketCapUsd)} cap
             </span>
           ) : null}
           {item.liquidityUsd !== undefined ? (
@@ -1195,25 +1259,55 @@ function AddAssetForm({
               </p>
             )}
 
-            <div className="mt-2 flex flex-col gap-2 rounded-xl border border-indigo-100 bg-white/70 p-2 sm:flex-row sm:items-center">
-              <label className="flex shrink-0 items-center gap-2 text-xs font-medium text-slate-600">
+            <div className="mt-2 space-y-2 rounded-xl border border-indigo-100 bg-white/70 p-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <label className="flex shrink-0 items-center gap-2 text-xs font-medium text-slate-600">
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5 accent-indigo-600"
+                    checked={walletFileIntoFolder}
+                    onChange={(event) => setWalletFileIntoFolder(event.target.checked)}
+                  />
+                  Import as one folder
+                </label>
+                <select
+                  className="input min-w-0 flex-1 text-xs disabled:opacity-50"
+                  value={walletPickedFolder?.id ?? ""}
+                  onChange={(event) => setWalletFolderId(event.target.value)}
+                  disabled={!walletFileIntoFolder}
+                  aria-label="Folder to import the scanned tokens into"
+                >
+                  <option value="">
+                    New folder{walletFolderName.trim() ? `: ${walletFolderName.trim()}` : ` — ${walletFolderPlaceholder}`}
+                  </option>
+                  {folders.map((folder) => (
+                    <option key={folder.id} value={folder.id}>
+                      {folder.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {walletFileIntoFolder && !walletPickedFolder && (
                 <input
-                  type="checkbox"
-                  className="h-3.5 w-3.5 accent-indigo-600"
-                  checked={walletFileIntoFolder}
-                  onChange={(event) => setWalletFileIntoFolder(event.target.checked)}
+                  className="input w-full text-xs"
+                  value={walletFolderName}
+                  onChange={(event) => setWalletFolderName(event.target.value)}
+                  maxLength={MAX_FOLDER_NAME_LENGTH}
+                  placeholder={`Folder name (optional) — ${walletFolderPlaceholder}`}
+                  aria-label="Folder name for the imported holdings"
                 />
-                File into a folder
-              </label>
-              <input
-                className="input min-w-0 flex-1 text-xs disabled:opacity-50"
-                value={walletFolderName}
-                onChange={(event) => setWalletFolderName(event.target.value)}
-                disabled={!walletFileIntoFolder}
-                maxLength={28}
-                placeholder={`Folder name (optional) — ${walletFolderPlaceholder}`}
-                aria-label="Folder name for the imported holdings"
-              />
+              )}
+              <p className="text-[11px] leading-relaxed text-slate-500">
+                {!walletFileIntoFolder
+                  ? "The tokens are imported loose, with no folder."
+                  : walletPickedFolder
+                    ? folders.length > 0
+                      ? `All ${walletChosen.length || 0} ticked token${
+                          walletChosen.length === 1 ? "" : "s"
+                        } go into your existing “${walletPickedFolder.name}” folder — scanning the same wallet again tops up the same folder.`
+                      : ""
+                    : `All ticked tokens go into one new folder, called “${walletFolderLabel}”.`}
+              </p>
             </div>
 
             <div className="mt-2 flex flex-col gap-2 rounded-xl border border-indigo-100 bg-white/70 p-2 sm:flex-row sm:items-center">
@@ -1303,6 +1397,18 @@ function AddAssetForm({
                   onChange={(event) => setWalletOnlyCmc(event.target.checked)}
                 />
                 Only tokens on CoinMarketCap
+              </label>
+              <label
+                className="flex items-center gap-2"
+                title={`A market cap of at least $${(MIN_MARKET_CAP_USD / 1_000_000).toFixed(0)}M. A ticker can be faked; a cap cannot. A token whose cap could not be looked up is always kept.`}
+              >
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-indigo-600"
+                  checked={walletMinMarketCap}
+                  onChange={(event) => setWalletMinMarketCap(event.target.checked)}
+                />
+                Only real market cap (${(MIN_MARKET_CAP_USD / 1_000_000).toFixed(0)}M+)
               </label>
               <span className="font-normal text-[11px] text-slate-400">
                 Official contract, an indexer&apos;s verification, or{" "}
@@ -1418,6 +1524,9 @@ function AddAssetForm({
                   {walletSelection.counts.unlisted > 0
                     ? ` · ${walletSelection.counts.unlisted} not on CoinMarketCap hidden`
                     : ""}
+                  {walletSelection.counts.smallcap > 0
+                    ? ` · ${walletSelection.counts.smallcap} under ${shortUsd(MIN_MARKET_CAP_USD)} market cap hidden`
+                    : ""}
                   {walletSelection.counts.thin > 0
                     ? ` · ${walletSelection.counts.thin} with no real market hidden`
                     : ""}
@@ -1508,6 +1617,23 @@ function AddAssetForm({
                   </p>
                 ) : null}
 
+                {walletSelection.counts.smallcap > 0 ? (
+                  <p className="text-[11px] text-slate-500">
+                    {walletSelection.counts.smallcap} token
+                    {walletSelection.counts.smallcap === 1 ? " has" : "s have"} a known market cap
+                    under {shortUsd(MIN_MARKET_CAP_USD)} — small enough that a fake could hold one,
+                    though some are honest micro-caps. A token whose cap could not be looked up is
+                    never counted here.{" "}
+                    <button
+                      type="button"
+                      className="font-medium text-indigo-600 hover:underline"
+                      onClick={() => setWalletMinMarketCap(false)}
+                    >
+                      Show them
+                    </button>
+                  </p>
+                ) : null}
+
                 {walletSelection.counts.dust > 0 ? (
                   <p className="text-[11px] text-slate-500">
                     {walletSelection.counts.dust} token
@@ -1551,6 +1677,21 @@ function AddAssetForm({
                           Clear
                         </button>
                       ) : null}
+                      <label className="flex items-center gap-1.5" title="How the tokens are ordered">
+                        <span>Sort</span>
+                        <select
+                          className="input h-7 py-0 text-[11px]"
+                          value={walletSort}
+                          onChange={(event) => setWalletSort(event.target.value as ScanSort)}
+                          aria-label="Order of the scanned tokens"
+                        >
+                          {SCAN_SORTS.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                       {walletChainGroups.length > 1 ? (
                         <label
                           className="flex items-center gap-1.5"

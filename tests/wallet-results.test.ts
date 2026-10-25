@@ -3,8 +3,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { test } from "node:test";
 import {
+  SCAN_SORTS,
   groupWalletBalancesByChain,
+  marketCapTier,
   searchWalletBalances,
+  shortMarketCap,
+  sortWalletBalances,
   walletValueUsd,
 } from "../src/lib/wallet-results";
 
@@ -96,4 +100,92 @@ test("the picker searches, groups and totals with those helpers", () => {
   assert.ok(dialog.includes("for (const item of walletMatched) next.delete(item.id)"));
   // The cards are a responsive grid, not one long horizontal scroll.
   assert.ok(dialog.includes('grid max-h-[24rem] grid-cols-2'));
+});
+
+type Ranked = {
+  id: string;
+  valueUsd: number;
+  marketCapUsd?: number;
+  verification?: "verified" | "unverified" | "unknown";
+};
+
+const ranked: Ranked[] = [
+  // A big holding of a token nobody could verify.
+  { id: "junk", valueUsd: 5_000, verification: "unverified", marketCapUsd: 20_000 },
+  // A small holding of a blue chip.
+  { id: "blue", valueUsd: 50, verification: "verified", marketCapUsd: 60_000_000_000 },
+  // Verified, mid cap.
+  { id: "mid", valueUsd: 800, verification: "verified", marketCapUsd: 300_000_000 },
+  // No data at all.
+  { id: "unknown", valueUsd: 10 },
+];
+
+test("the default order puts real, big tokens first", () => {
+  assert.deepEqual(sortWalletBalances(ranked, "best").map((row) => row.id), [
+    "blue",
+    "mid",
+    "junk",
+    "unknown",
+  ]);
+  // Verified comes before unverified even when the unverified one is worth more.
+  assert.ok(
+    sortWalletBalances(ranked, "best").findIndex((row) => row.id === "blue") <
+      sortWalletBalances(ranked, "best").findIndex((row) => row.id === "junk"),
+  );
+
+  assert.deepEqual(sortWalletBalances(ranked, "value").map((row) => row.id), [
+    "junk",
+    "mid",
+    "blue",
+    "unknown",
+  ]);
+  assert.deepEqual(sortWalletBalances(ranked, "marketCap").map((row) => row.id), [
+    "blue",
+    "mid",
+    "junk",
+    "unknown",
+  ]);
+
+  // Nothing is dropped by any order, and the input is left alone.
+  for (const sort of SCAN_SORTS) {
+    assert.equal(sortWalletBalances(ranked, sort.id).length, ranked.length);
+  }
+  assert.deepEqual(ranked.map((row) => row.id), ["junk", "blue", "mid", "unknown"]);
+  // The default is the first option offered, and it is labelled plainly.
+  assert.equal(SCAN_SORTS[0].id, "best");
+});
+
+test("a market cap is labelled by size, and an unknown cap is never a judgement", () => {
+  assert.equal(marketCapTier(2_500_000_000), "major");
+  assert.equal(marketCapTier(120_000_000), "large");
+  assert.equal(marketCapTier(4_000_000), "mid");
+  assert.equal(marketCapTier(50_000), "small");
+  assert.equal(marketCapTier(0), "unknown");
+  assert.equal(marketCapTier(undefined), "unknown");
+  assert.equal(marketCapTier(Number.NaN), "unknown");
+
+  assert.equal(shortMarketCap(60_000_000_000), "$60.0B");
+  assert.equal(shortMarketCap(45_000_000), "$45.0M");
+  assert.equal(shortMarketCap(820_000), "$820k");
+  assert.equal(shortMarketCap(0), "");
+  assert.equal(shortMarketCap(undefined), "");
+});
+
+test("the folder dropdown files the wallet into one existing folder", () => {
+  const dialog = readFileSync(resolve(__dirname, "../src/components/AddAssetDialog.tsx"), "utf8");
+  assert.ok(dialog.includes("Import as one folder"), "the choice is worded as one folder");
+  assert.ok(dialog.includes('aria-label="Folder to import the scanned tokens into"'), "there is a dropdown");
+  assert.ok(dialog.includes("folders.map((folder) => ("), "it lists the existing folders");
+  assert.ok(dialog.includes("New folder"), "and offers a new one");
+  assert.ok(dialog.includes("folderId: walletFileIntoFolder && walletPickedFolder ?"), "a picked folder is sent by id");
+  assert.ok(dialog.includes("walletPickedFolder.name"), "the copy names the target folder");
+
+  const actions = readFileSync(resolve(__dirname, "../src/app/actions.ts"), "utf8");
+  const body = actions.slice(actions.indexOf("export async function importWalletBalances"));
+  assert.ok(body.includes("folderId?: string | null"), "the action accepts a folder id");
+  assert.ok(body.includes("folders.find((item) => item.id === pickedId)"), "and files into that exact folder");
+  assert.ok(body.includes("folderForImport(folders, wanted)"), "falling back to the name when it is gone");
+
+  const page = readFileSync(resolve(__dirname, "../src/app/page.tsx"), "utf8");
+  assert.ok(page.includes("folders={foldersForDialog}"), "the dashboard hands the folders to the dialog");
 });

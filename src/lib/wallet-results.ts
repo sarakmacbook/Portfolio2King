@@ -73,6 +73,88 @@ function positiveUsd(value: number | undefined): number {
   return Number.isFinite(value) && (value as number) > 0 ? (value as number) : 0;
 }
 
+/** The fields the ranking needs: a value, a cap and how sure the app is. */
+export type RankableBalance = {
+  valueUsd?: number;
+  marketCapUsd?: number;
+  verification?: "verified" | "unverified" | "unknown";
+};
+
+/** How to order the picker. */
+export type ScanSort = "best" | "value" | "marketCap";
+
+/**
+ * The order options offered in the dialog, best first — which is also the
+ * default: the tokens the app is *sure* about and that are worth something come
+ * to the top, instead of the biggest airdrop ahead of the biggest holding.
+ */
+export const SCAN_SORTS: ReadonlyArray<{ id: ScanSort; label: string }> = [
+  { id: "best", label: "Real & big first" },
+  { id: "value", label: "Biggest holding" },
+  { id: "marketCap", label: "Biggest market cap" },
+];
+
+function cap(value: number | undefined): number {
+  return Number.isFinite(value) && (value as number) > 0 ? (value as number) : 0;
+}
+
+/**
+ * Orders the tokens a scan found.
+ *
+ *   best      — verified tokens first, then by market cap, then by value: the
+ *               "show me the serious ones" order.
+ *   value     — what the holding is worth today.
+ *   marketCap — how big the coin is, with anything uncapped last.
+ *
+ * Every order is a stable sort on a copy; nothing is dropped, and a token with no
+ * data sorts last instead of disappearing.
+ */
+export function sortWalletBalances<T extends RankableBalance>(
+  balances: readonly T[],
+  sort: ScanSort,
+): T[] {
+  const rows = [...balances];
+  if (sort === "value") {
+    return rows.sort((a, b) => cap(b.valueUsd) - cap(a.valueUsd));
+  }
+  if (sort === "marketCap") {
+    return rows.sort((a, b) => cap(b.marketCapUsd) - cap(a.marketCapUsd) || cap(b.valueUsd) - cap(a.valueUsd));
+  }
+  const verified = (row: T) => (row.verification === "verified" ? 1 : 0);
+  return rows.sort(
+    (a, b) =>
+      verified(b) - verified(a) ||
+      cap(b.marketCapUsd) - cap(a.marketCapUsd) ||
+      cap(b.valueUsd) - cap(a.valueUsd),
+  );
+}
+
+/**
+ * How big the coin is, in words the picker can colour: `major` ($1B+), `large`
+ * ($50M+, the point where a cap is evidence of being real), `mid` ($1M+) and
+ * `small` (a known cap below that). `unknown` is the absence of an answer, never
+ * a judgement.
+ */
+export type MarketCapTier = "major" | "large" | "mid" | "small" | "unknown";
+
+export function marketCapTier(value: number | undefined): MarketCapTier {
+  const usd = cap(value);
+  if (usd <= 0) return "unknown";
+  if (usd >= 1_000_000_000) return "major";
+  if (usd >= 50_000_000) return "large";
+  if (usd >= 1_000_000) return "mid";
+  return "small";
+}
+
+/** `$1.2B`, `$45.0M`, `$820k` — a cap, short enough for a badge. */
+export function shortMarketCap(value: number | undefined): string {
+  const usd = cap(value);
+  if (usd <= 0) return "";
+  if (usd >= 1_000_000_000) return `$${(usd / 1_000_000_000).toFixed(1)}B`;
+  if (usd >= 1_000_000) return `$${(usd / 1_000_000).toFixed(1)}M`;
+  return `$${(usd / 1_000).toFixed(0)}k`;
+}
+
 /** What a set of tokens adds up to; an unpriced token counts as nothing. */
 export function walletValueUsd(balances: readonly { valueUsd?: number }[]): number {
   return balances.reduce((sum, item) => sum + positiveUsd(item.valueUsd), 0);

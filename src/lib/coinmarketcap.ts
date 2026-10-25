@@ -161,9 +161,25 @@ export function parseCmcInfo(payload: unknown): Map<string, CmcToken> {
   return found;
 }
 
-/** Shapes a `quotes/latest` answer into `id → USD price`. */
-export function parseCmcQuotes(payload: unknown): Map<number, number> {
-  const prices = new Map<number, number>();
+/** One coin's USD numbers from a `quotes/latest` answer. */
+export type CmcQuote = {
+  /** USD price, or 0 when CMC sent none. */
+  price: number;
+  /** Market capitalisation in USD — how big and established the coin is. */
+  marketCapUsd: number;
+  /** 24h USD volume across every market CMC tracks. */
+  volume24hUsd: number;
+};
+
+/**
+ * Shapes a `quotes/latest` answer into `id → numbers`.
+ *
+ * The price is what the scan needs to value a holding; the market cap is what
+ * separates a real, established coin from a token somebody minted last week —
+ * a fake can copy a ticker, but it cannot buy a cap.
+ */
+export function parseCmcQuoteDetails(payload: unknown): Map<number, CmcQuote> {
+  const details = new Map<number, CmcQuote>();
   const data = dataRecord(payload);
 
   const readOne = (raw: unknown): void => {
@@ -174,8 +190,12 @@ export function parseCmcQuotes(payload: unknown): Map<number, number> {
     if (id <= 0 || !quote || typeof quote !== "object") return;
     const usd = (quote as Record<string, unknown>).USD;
     if (!usd || typeof usd !== "object") return;
-    const price = numberOf((usd as Record<string, unknown>).price);
-    if (price > 0) prices.set(id, price);
+    const entry = usd as Record<string, unknown>;
+    const price = numberOf(entry.price);
+    const marketCapUsd = numberOf(entry.market_cap) || numberOf(entry.self_reported_market_cap);
+    const volume24hUsd = numberOf(entry.volume_24h);
+    if (price <= 0 && marketCapUsd <= 0) return;
+    details.set(id, { price, marketCapUsd, volume24hUsd });
   };
 
   for (const value of Object.values(data)) {
@@ -183,6 +203,15 @@ export function parseCmcQuotes(payload: unknown): Map<number, number> {
     else readOne(value);
   }
 
+  return details;
+}
+
+/** Shapes a `quotes/latest` answer into `id → USD price`. */
+export function parseCmcQuotes(payload: unknown): Map<number, number> {
+  const prices = new Map<number, number>();
+  for (const [id, quote] of parseCmcQuoteDetails(payload)) {
+    if (quote.price > 0) prices.set(id, quote.price);
+  }
   return prices;
 }
 
@@ -250,6 +279,8 @@ export type CmcLookup = {
   ok: boolean;
   info: Map<string, CmcToken>;
   prices: Map<number, number>;
+  /** Coin id → market cap in USD, for the coins the quotes call priced. */
+  caps: Map<number, number>;
   error?: string;
   needsKey?: boolean;
   /** How many contracts were asked about. */
@@ -314,10 +345,18 @@ export async function fetchCmcContracts(
 
   const apiKey = (options.apiKey ?? cmcApiKey()).trim();
   if (!apiKey) {
-    return { ok: false, info: new Map(), prices: new Map(), needsKey: true, looked: 0, error: CMC_NEEDS_KEY_MESSAGE };
+    return {
+      ok: false,
+      info: new Map(),
+      prices: new Map(),
+      caps: new Map(),
+      needsKey: true,
+      looked: 0,
+      error: CMC_NEEDS_KEY_MESSAGE,
+    };
   }
   if (unique.length === 0) {
-    return { ok: true, info: new Map(), prices: new Map(), looked: 0 };
+    return { ok: true, info: new Map(), prices: new Map(), caps: new Map(), looked: 0 };
   }
 
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -358,12 +397,16 @@ export async function fetchCmcContracts(
   }
 
   const prices = new Map<number, number>();
+  const caps = new Map<number, number>();
   if (options.prices !== false && info.size > 0 && now() - started < budgetMs) {
     const ids = [...new Set([...info.values()].map((token) => token.id))];
     if (ids.length > 0) {
       const payload = await getJson(cmcQuotesUrl(ids), apiKey, fetchImpl, timeoutMs);
       if (!cmcErrorText(payload)) {
-        for (const [id, price] of parseCmcQuotes(payload)) prices.set(id, price);
+        for (const [id, quote] of parseCmcQuoteDetails(payload)) {
+          if (quote.price > 0) prices.set(id, quote.price);
+          if (quote.marketCapUsd > 0) caps.set(id, quote.marketCapUsd);
+        }
       }
     }
   }
@@ -373,11 +416,19 @@ export async function fetchCmcContracts(
       ok: false,
       info,
       prices,
+      caps,
       looked: unique.length,
       ...(needsKey ? { needsKey: true } : {}),
       error: firstError || "CoinMarketCap did not answer.",
     };
   }
 
-  return { ok: true, info, prices, looked: unique.length, ...(firstError ? { error: firstError } : {}) };
+  return {
+    ok: true,
+    info,
+    prices,
+    caps,
+    looked: unique.length,
+    ...(firstError ? { error: firstError } : {}),
+  };
 }

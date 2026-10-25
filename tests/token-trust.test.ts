@@ -18,7 +18,15 @@ import {
   shortUsd,
   signalsFromPairs,
 } from "../src/lib/organic-volume";
-import { depthOf, enrichTokenTrust, filterScanBalances } from "../src/lib/wallet-trust";
+import {
+  MIN_MARKET_CAP_USD,
+  VERIFIED_MARKET_CAP_USD,
+  depthOf,
+  enrichTokenTrust,
+  filterScanBalances,
+  isLargeCap,
+  verificationOf,
+} from "../src/lib/wallet-trust";
 
 const USDT_ETH = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 const USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
@@ -148,6 +156,24 @@ test("organic volume ignores dust pools and wash trading", () => {
   assert.equal(twoPools.dexes, 1);
 
   assert.deepEqual(signalsFromPairs([], USDT_ETH).organicVolume24hUsd, 0);
+
+  // The market cap DexScreener sends with a pair, taken from the biggest one.
+  const capped = signalsFromPairs(
+    [
+      pair({ marketCap: 4_000_000, fdv: 9_000_000 }),
+      pair({ marketCap: 12_000_000, fdv: 30_000_000 }),
+    ],
+    USDT_ETH,
+  );
+  assert.equal(capped.marketCapUsd, 12_000_000);
+  assert.equal(capped.fdvUsd, 30_000_000);
+  // A pair with no cap cannot wipe out one that had it.
+  assert.equal(
+    signalsFromPairs([pair({ marketCap: 5_000_000 }), pair()], USDT_ETH).marketCapUsd,
+    5_000_000,
+  );
+  // Nothing reported: 0, which every caller reads as "unknown", never as "small".
+  assert.equal(signalsFromPairs([pair()], USDT_ETH).marketCapUsd, 0);
 
   // Depth: a $50,000 pool is deep, so the token reads as real.
   assert.equal(deepestOf([pair()]), 50_000);
@@ -335,4 +361,55 @@ test("the scan route, the action and the dialog all use the trust checks", () =>
   assert.ok(body.includes("minLiquidityUsd"), "the action accepts a depth floor");
   assert.ok(body.includes("skippedShallow"), "and reports what it skipped");
   assert.ok(MIN_ORGANIC_VOLUME_USD > 0 && MIN_LIQUIDITY_USD > MIN_ORGANIC_VOLUME_USD);
+});
+
+test("a big market cap is evidence a token is real, and a small one can be hidden", () => {
+  // The cap is proof on its own: no contract table, no market answer needed.
+  assert.equal(
+    verificationOf({ symbol: "BIGX", contract: FAKE, chain: "ethereum", marketCapUsd: VERIFIED_MARKET_CAP_USD }),
+    "verified",
+  );
+  assert.equal(isLargeCap(VERIFIED_MARKET_CAP_USD), true);
+  assert.equal(isLargeCap(VERIFIED_MARKET_CAP_USD - 1), false);
+  assert.equal(isLargeCap(undefined), false);
+  // A small cap proves nothing either way, so it stays unknown.
+  assert.equal(
+    verificationOf({ symbol: "TINY", contract: FAKE, chain: "ethereum", marketCapUsd: 5_000 }),
+    "unknown",
+  );
+
+  const rows = [
+    // Big and real.
+    { id: "big", symbol: "BIGX", name: "Big X", contract: FAKE, chain: "ethereum", valueUsd: 900, organicVolumeUsd: 5_000_000, marketCapUsd: 4_000_000_000 },
+    // A known small cap: the token somebody minted last week.
+    { id: "tiny", symbol: "TINY", name: "Tiny Token", contract: FAKE, chain: "ethereum", valueUsd: 400, organicVolumeUsd: 5_000_000, marketCapUsd: 20_000 },
+    // No cap at all: unknown, and therefore kept.
+    { id: "nocap", symbol: "NOCAP", name: "No Cap Token", contract: FAKE, chain: "ethereum", valueUsd: 300, organicVolumeUsd: 5_000_000 },
+  ];
+
+  const filtered = filterScanBalances(rows, { dustCut: 0, minMarketCapUsd: MIN_MARKET_CAP_USD });
+  assert.deepEqual(filtered.kept.map((row) => row.id), ["big", "nocap"]);
+  assert.deepEqual(filtered.smallcap.map((row) => row.id), ["tiny"]);
+  assert.equal(filtered.counts.smallcap, 1);
+
+  // Off, and nothing is hidden — this is a filter, not a delete.
+  const off = filterScanBalances(rows, { dustCut: 0 });
+  assert.equal(off.kept.length, 3);
+  assert.equal(off.counts.smallcap, 0);
+  assert.ok(MIN_MARKET_CAP_USD < VERIFIED_MARKET_CAP_USD, "the floor is not the blue-chip line");
+});
+
+test("the picker shows the market cap and offers the big-cap filter", () => {
+  const read = (path: string) => readFileSync(resolve(__dirname, "../src", path), "utf8");
+
+  const trust = read("lib/wallet-trust.ts");
+  assert.ok(trust.includes("VERIFIED_MARKET_CAP_USD"), "the blue-chip line exists");
+  assert.ok(trust.includes("cmc?.caps.get("), "CoinMarketCap's cap is read");
+
+  const dialog = read("components/AddAssetDialog.tsx");
+  assert.ok(dialog.includes("Only real market cap"), "the switch exists");
+  assert.ok(dialog.includes("minMarketCapUsd: walletMinMarketCap ? MIN_MARKET_CAP_USD : 0"), "it reaches the filter");
+  assert.ok(dialog.includes("shortMarketCap(item.marketCapUsd)"), "a card shows the cap");
+  assert.ok(dialog.includes("SCAN_SORTS.map("), "the order can be chosen");
+  assert.ok(dialog.includes('useState<ScanSort>("best")'), "real & big first is the default");
 });

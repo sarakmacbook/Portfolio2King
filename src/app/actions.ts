@@ -433,9 +433,17 @@ export async function saveHoldingFolderAssignment(input: {
  *
  * Importing a wallet used to leave its tokens loose in the table. They now land
  * in one folder — the folder keeps the wallet together and can be collapsed,
- * renamed or dragged like any other. `folderName` is what the user typed; left
- * blank it falls back to the short address (`0x1234…abcd`). Pass
- * `folderName: null` to import without a folder at all.
+ * renamed or dragged like any other.
+ *
+ * Three ways to say where they go:
+ *
+ *   - `folderId` — the folder the user picked from the dropdown. Filed into it
+ *     exactly, by id, so a re-scan of the same wallet tops up the same folder
+ *     even if another folder has a similar name;
+ *   - `folderName` — a name to file into, reusing an existing folder when the
+ *     name matches (case-insensitively) and creating one otherwise; left blank
+ *     it falls back to the short address (`0x1234…abcd`);
+ *   - `folderName: null` — import without a folder at all.
  */
 export async function importWalletBalances(input: {
   address: string;
@@ -443,6 +451,11 @@ export async function importWalletBalances(input: {
   priceSource?: string;
   /** Folder to file the holdings into; omit / empty for the short address, `null` for no folder. */
   folderName?: string | null;
+  /**
+   * An existing folder picked in the dialog. Wins over `folderName`, and is
+   * ignored (falling back to the name) if that folder no longer exists.
+   */
+  folderId?: string | null;
   /**
    * Skip balances worth less than this many USD. `0` / omitted imports
    * everything. Applied here as well as in the dialog so a stale page cannot
@@ -692,8 +705,14 @@ export async function importWalletBalances(input: {
     let folderNote: string | undefined;
     if (input.folderName !== null) {
       const folders = await loadHoldingsFolders();
+      // A picked folder is used by id: the name may since have been reused for a
+      // different folder, and filing into the wrong one is worse than a new one.
+      const pickedId = String(input.folderId ?? "").trim().toLowerCase();
+      const picked = pickedId ? folders.find((item) => item.id === pickedId) : undefined;
       const wanted = String(input.folderName ?? "").trim() || shortAddr;
-      const result = folderForImport(folders, wanted);
+      const result = picked
+        ? { folders, folder: picked }
+        : folderForImport(folders, wanted);
       if (result.folder) {
         if (result.folders.length !== folders.length) {
           await saveHoldingsFolders(result.folders);
