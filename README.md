@@ -124,6 +124,23 @@ the form for you (or imports everything it finds):
    Bitcoin `bc1…` / `1…` address, or a Tron `T…` address — and choose where to
    scan: **DeBank** (the default) or **Blockscan** (Etherscan). Every chain the
    chosen source knows is covered; there is no chain filter to set.
+
+   The box does not need a bare address (`src/lib/wallet-address.ts`): paste an
+   **explorer link** (`etherscan.io/address/0x…`, `solscan.io/account/…`,
+   `tronscan.org/#/address/…`, `mempool.space/address/…`) or a line of chat
+   containing one and the address is taken out of it — on paste, immediately, so
+   the box shows what will be scanned. Below the box a badge says what the value
+   is (**EVM**, **Solana**, **Bitcoin**, **Tron**), the short form, and what the
+   scan will do with it; anything wrong is explained there in red
+   (*"Use 0x… (EVM), a Solana base58 address, bc1… / 1… (Bitcoin), or T… (Tron)"*)
+   and **Scan wallet** stays disabled until the address is one the scanner knows.
+   A **mixed-case EVM address** is checked against its **EIP-55 checksum** (a
+   self-contained Keccak-256 — `node:crypto` ships SHA-3, whose padding is
+   different) and one mistyped character is called out before a scan is spent on
+   it, while an all-lower-case address, which claims no checksum, is never
+   nagged about. The last addresses you scanned are kept on the device (six at
+   most, `ledgerly-recent-wallet-addresses`) and shown as **Recent:** chips you
+   can click to rescan or × to forget.
 2. Click **Scan wallet**. Every non-zero balance comes back with its quantity,
    USD price, value, chain and logo — across every chain DeBank indexes, not
    just the popular ones this app can read by itself.

@@ -34,6 +34,15 @@ import {
   type ScanSort,
 } from "@/lib/wallet-results";
 import { MAX_FOLDER_NAME_LENGTH, type HoldingFolder } from "@/lib/holdings-folders";
+import {
+  RECENT_ADDRESSES_KEY,
+  addressKindHint,
+  forgetAddress,
+  parseRecentAddresses,
+  parseWalletAddress,
+  rememberAddress,
+  type RecentAddress,
+} from "@/lib/wallet-address";
 import { CAMBODIAN_BANKS, CUSTOM_BANK, type CambodianBank } from "@/lib/cambodian-banks";
 import type { DiscoveredStock } from "@/lib/stock-search";
 import {
@@ -160,6 +169,20 @@ function AddAssetForm({
   }>({ status: "idle", message: "" });
   const [walletAddress, setWalletAddress] = useState("");
   /**
+   * The addresses already scanned on this device (localStorage). Read in the
+   * initialiser rather than an effect, which is safe here because the form only
+   * mounts once the dialog is opened — always on the client, never during SSR.
+   */
+  const [walletRecent, setWalletRecent] = useState<RecentAddress[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      return parseRecentAddresses(window.localStorage.getItem(RECENT_ADDRESSES_KEY));
+    } catch {
+      // Storage refused (private mode, quota): the box simply has no history.
+      return [];
+    }
+  });
+  /**
    * Which index answers the scan: DeBank (every chain it indexes) or Blockscan /
    * Etherscan V2. There is no chain filter any more — every scan covers every
    * chain both sources know, which is what the picker listed anyway.
@@ -234,6 +257,39 @@ function AddAssetForm({
   /** How many distinct chains the last scan found balances on. */
   const walletScanChainCount = new Set(walletBalances.map((item) => item.chain)).size;
 
+  /**
+   * What is in the address box, parsed: the bare address to scan, what kind it
+   * is, and what is wrong with it when something is. `parseWalletAddress` also
+   * pulls the address out of a pasted explorer link.
+   */
+  const walletAddressParsed = useMemo(() => parseWalletAddress(walletAddress), [walletAddress]);
+
+  /** Adds one address to the remembered list, in storage and on screen. */
+  function rememberScannedAddress(address: string) {
+    setWalletRecent((current) => {
+      const next = rememberAddress(current, address);
+      try {
+        window.localStorage.setItem(RECENT_ADDRESSES_KEY, JSON.stringify(next));
+      } catch {
+        // Not being able to remember it is not a reason to fail the scan.
+      }
+      return next;
+    });
+  }
+
+  /** Drops one remembered address. */
+  function forgetScannedAddress(address: string) {
+    setWalletRecent((current) => {
+      const next = forgetAddress(current, address);
+      try {
+        window.localStorage.setItem(RECENT_ADDRESSES_KEY, JSON.stringify(next));
+      } catch {
+        // Ignored, as above.
+      }
+      return next;
+    });
+  }
+
   const walletDustCut = walletHideDust ? normaliseDustThreshold(walletDustThreshold) : 0;
   /**
    * What is worth importing, in order of how sure the app is: the right
@@ -286,7 +342,9 @@ function AddAssetForm({
   /** One group per chain, biggest first — see `wallet-results`. */
   const walletChainGroups = groupWalletBalancesByChain(walletMatched);
   /** Folder the scan would be filed into; blank means "name it after the address". */
-  const walletFolderPlaceholder = shortWalletAddress(walletAddress.trim()) || "0x1234…abcd";
+  /** The address that will actually be scanned / imported, link or not. */
+  const walletCleanAddress = walletAddressParsed.address || walletAddress.trim();
+  const walletFolderPlaceholder = shortWalletAddress(walletCleanAddress) || "0x1234…abcd";
   /** The folder picked from the dropdown, when it still exists. */
   const walletPickedFolder = folders.find((folder) => folder.id === walletFolderId);
   const walletFolderLabel = walletPickedFolder
@@ -394,12 +452,24 @@ function AddAssetForm({
     }
   }
 
-  async function scanWallet() {
-    const trimmed = walletAddress.trim();
-    if (!trimmed) {
+  async function scanWallet(rawInput: string = walletAddress) {
+    // Whatever was pasted is reduced to the address first: an explorer link, a
+    // line of chat, or a trailing space all scan the same wallet.
+    const parsed = parseWalletAddress(rawInput);
+    if (parsed.status === "empty") {
       setWalletScanError("Paste a wallet address first (0x…, Solana, bc1…, or T…).");
       return;
     }
+    if (parsed.status === "invalid" || !parsed.address) {
+      setWalletScanError(parsed.message ?? "That is not a wallet address this app can scan.");
+      return;
+    }
+    const trimmed = parsed.address;
+    // The box shows the bare address from here on, so it is obvious what is
+    // being scanned when a link or a line of text was pasted.
+    if (walletAddress.trim() !== trimmed) setWalletAddress(trimmed);
+    if (parsed.checksumFailed) setWalletScanError(parsed.message ?? "");
+    else setWalletScanError("");
     setScanningWallet(true);
     setWalletScanError("");
     setWalletImportMessage("");
@@ -440,6 +510,8 @@ function AddAssetForm({
       // A new scan starts with everything ticked again.
       setWalletDeselected(new Set());
       setWalletScanDone(true);
+      // Remembered on this device, so the next scan is one click.
+      rememberScannedAddress(trimmed);
       setWalletScanSource(data.source ?? null);
       setWalletCmcChecked(data.cmcChecked === true);
       setScannerKeyPrompt(
@@ -587,7 +659,7 @@ function AddAssetForm({
     setWalletImportMessage("");
     try {
       const result = await importWalletBalances({
-        address: walletAddress.trim(),
+        address: walletCleanAddress,
         walletLogo,
         priceSource,
         // A picked folder is sent by id so the server files into that exact one;
@@ -1194,9 +1266,23 @@ function AddAssetForm({
             <div className="mt-3 flex flex-col gap-2 sm:flex-row">
               <div className="min-w-0 flex-1">
                 <input
-                  className="input"
+                  className={`input ${
+                    walletAddressParsed.error && walletAddress.trim() ? "border-rose-300" : ""
+                  }`}
                   value={walletAddress}
                   onChange={(event) => setWalletAddress(event.target.value)}
+                  // A pasted link is reduced to the address straight away, so the
+                  // box shows what will be scanned rather than a URL.
+                  onPaste={(event) => {
+                    const text = event.clipboardData.getData("text");
+                    if (!text) return;
+                    const parsed = parseWalletAddress(text);
+                    if (parsed.status === "valid" && parsed.address !== text.trim()) {
+                      event.preventDefault();
+                      setWalletAddress(parsed.address);
+                      setWalletScanError("");
+                    }
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
                       event.preventDefault();
@@ -1206,7 +1292,34 @@ function AddAssetForm({
                   placeholder="0x… (Ethereum, BNB, Base, Arbitrum, Polygon), Solana, bc1…, or T…"
                   autoComplete="off"
                   spellCheck={false}
+                  aria-label="Wallet address to scan"
+                  aria-invalid={walletAddressParsed.error && Boolean(walletAddress.trim())}
                 />
+                {walletAddress.trim() ? (
+                  <p
+                    className={`mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] ${
+                      walletAddressParsed.error ? "text-rose-600" : "text-slate-500"
+                    }`}
+                  >
+                    {walletAddressParsed.kindLabel ? (
+                      <span
+                        className="rounded-full bg-indigo-50 px-1.5 py-0.5 font-medium text-indigo-700"
+                        title={addressKindHint(walletAddressParsed.kind ?? "evm")}
+                      >
+                        {walletAddressParsed.kindLabel}
+                      </span>
+                    ) : null}
+                    {walletAddressParsed.short ? (
+                      <span className="tabular-nums text-slate-500">{walletAddressParsed.short}</span>
+                    ) : null}
+                    <span>
+                      {walletAddressParsed.message ??
+                        (walletAddressParsed.kind && walletAddressParsed.kind !== "evm"
+                          ? addressKindHint(walletAddressParsed.kind)
+                          : "")}
+                    </span>
+                  </p>
+                ) : null}
               </div>
               <select
                 className="input sm:w-44"
@@ -1228,11 +1341,62 @@ function AddAssetForm({
                 type="button"
                 className="btn-primary shrink-0"
                 onClick={() => void scanWallet()}
-                disabled={scanningWallet || !walletAddress.trim()}
+                disabled={scanningWallet || walletAddressParsed.status !== "valid"}
+                title={
+                  walletAddressParsed.status === "valid"
+                    ? undefined
+                    : "Paste a complete address — 0x…, Solana base58, bc1… / 1…, or T…"
+                }
               >
                 {scanningWallet ? "Scanning…" : "Scan wallet"}
               </button>
             </div>
+
+            {walletRecent.length > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                <span className="font-medium text-slate-600">Recent:</span>
+                {walletRecent.map((item) => {
+                  const itemKind = parseWalletAddress(item.address).kindLabel;
+                  const selected = item.address === walletAddress.trim();
+                  return (
+                    <span
+                      key={item.address}
+                      className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 ${
+                        selected
+                          ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+                          : "border-slate-200 bg-white text-slate-600"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        className="font-medium hover:underline"
+                        onClick={() => {
+                          setWalletAddress(item.address);
+                          setWalletScanError("");
+                          void scanWallet(item.address);
+                        }}
+                        title={`Scan ${item.address} again${itemKind ? ` (${itemKind})` : ""}`}
+                      >
+                        {item.label ? `${item.label} · ` : ""}
+                        {item.address.slice(0, 6)}…{item.address.slice(-4)}
+                      </button>
+                      <button
+                        type="button"
+                        className="text-slate-400 hover:text-rose-600"
+                        onClick={() => forgetScannedAddress(item.address)}
+                        aria-label={`Forget ${item.address}`}
+                        title="Forget this address on this device"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  );
+                })}
+                <span aria-label="Recently scanned wallet addresses" className="sr-only">
+                  Recently scanned wallet addresses
+                </span>
+              </div>
+            )}
 
             {walletSource === "blockscan" && (
               <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
