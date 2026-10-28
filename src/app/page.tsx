@@ -8,6 +8,8 @@ import DashboardLayout from "@/components/DashboardLayout";
 import HoldingsTable, { type HoldingRow } from "@/components/HoldingsTable";
 import PortfolioValueHeader from "@/components/PortfolioValueHeader";
 import RefreshPricesButton from "@/components/RefreshPricesButton";
+import { getAlertSettings } from "@/lib/alerts";
+import { dayKeyInTimeZone } from "@/lib/daily-realized";
 import {
   loadDashboardOrder,
   loadDashboardStatLabels,
@@ -26,6 +28,7 @@ import {
   getAllAssets,
   getAllPriceSnapshots,
   getRecentActivity,
+  getRealizedOnDay,
   getSnapshots,
   localDateString,
   today,
@@ -49,6 +52,7 @@ export default async function Dashboard() {
     holdingOrder,
     holdingsFolders,
     walletLogos,
+    alertSettings,
   ] = await Promise.all([
     getSnapshots(),
     getAllPriceSnapshots(),
@@ -60,8 +64,16 @@ export default async function Dashboard() {
     loadHoldingsOrder(),
     loadHoldingsFolders(),
     loadAssetWalletLogos(),
+    getAlertSettings(),
   ]);
   const holdingAssignments = await loadHoldingFolderAssignments(holdingsFolders);
+  /**
+   * The realised card shows only what was booked today. "Today" is read in the
+   * same timezone the portfolio alerts are scheduled in, so the number resets at
+   * the user's own 12am rather than at the server's.
+   */
+  const realizedDay = dayKeyInTimeZone(new Date(), alertSettings.portfolio.timezone);
+  const realizedToday = await getRealizedOnDay(realizedDay);
   /**
    * Spam tokens are left out of every total. Their "price" is invented by
    * whoever minted them, so a $40,000 scam token would otherwise become the
@@ -209,9 +221,13 @@ export default async function Dashboard() {
             hintClass: pnlColor(totals.unrealized),
           },
           realized: {
-            value: money(totals.realized, { sign: true }),
-            valueClass: pnlColor(totals.realized),
-            hint: "From sells, dividends & interest",
+            // Today's sells and income only — the card goes back to $0.00 at 12am.
+            value: money(realizedToday.total, { sign: true }),
+            valueClass: pnlColor(realizedToday.total),
+            hint:
+              realizedToday.count > 0
+                ? `Since 12am · all-time ${money(totals.realized, { sign: true })}`
+                : `Resets at 12am · all-time ${money(totals.realized, { sign: true })}`,
           },
         }}
         blocks={{

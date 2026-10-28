@@ -7,12 +7,15 @@ import {
   type Asset,
   type AssetType,
   type PriceSnapshot,
-  type Transaction,
 } from "@/db/schema";
+import { replay, type ReplayResult } from "@/lib/asset-replay";
+import { groupTxsByAsset, realizedOnDay, sumDayRealized, type DayRealized } from "@/lib/daily-realized";
 import { fetchPreferredMarketPrice } from "@/lib/market-prices";
 import { fetchStockQuote } from "@/lib/stock-prices";
 import { isSpamToken } from "@/lib/wallet-spam";
 import { asc, desc, eq, inArray, sql } from "drizzle-orm";
+
+export { replay, type ReplayResult };
 
 let schemaReady: Promise<void> | null = null;
 let schemaDatabaseUrl: string | undefined;
@@ -184,71 +187,6 @@ export function ensureSchema() {
   return schemaReady;
 }
 
-export type ReplayResult = {
-  quantity: number;
-  avgCost: number;
-  realizedPnl: number;
-  error?: string;
-};
-
-const EPS = 1e-9;
-
-/** Replays transactions in chronological order to compute holdings. */
-export function replay(type: AssetType, txs: Pick<Transaction, "kind" | "quantity" | "price" | "fee">[]): ReplayResult {
-  let quantity = 0;
-  let avgCost = type === "cash" ? 1 : 0;
-  let realizedPnl = 0;
-
-  for (const t of txs) {
-    const fee = t.fee || 0;
-    switch (t.kind) {
-      case "buy":
-      case "deposit": {
-        if (type === "cash") {
-          quantity += t.quantity;
-          realizedPnl -= fee;
-        } else {
-          const newQty = quantity + t.quantity;
-          avgCost = newQty > EPS ? (quantity * avgCost + t.quantity * t.price + fee) / newQty : 0;
-          quantity = newQty;
-        }
-        break;
-      }
-      case "sell":
-      case "withdraw": {
-        if (t.quantity - quantity > EPS) {
-          return {
-            quantity,
-            avgCost,
-            realizedPnl,
-            error: `Cannot ${t.kind} ${t.quantity} — only ${+quantity.toFixed(8)} available at that point.`,
-          };
-        }
-        if (type === "cash") {
-          quantity -= t.quantity;
-          realizedPnl -= fee;
-        } else {
-          realizedPnl += t.quantity * (t.price - avgCost) - fee;
-          quantity -= t.quantity;
-          if (quantity < EPS) {
-            quantity = 0;
-            avgCost = 0;
-          }
-        }
-        break;
-      }
-      case "dividend": {
-        // Income: quantity = amount, price = 1
-        const amount = t.quantity * t.price - fee;
-        realizedPnl += amount;
-        if (type === "cash") quantity += amount;
-        break;
-      }
-    }
-  }
-  return { quantity, avgCost, realizedPnl };
-}
-
 export async function getAssetTransactions(assetId: number) {
   return db
     .select()
@@ -319,6 +257,44 @@ export function computeTotals(list: Asset[]): Totals {
     cashValue: byType.cash,
     byType,
   };
+}
+
+/**
+ * The portfolio's realised P/L + income booked since 12am on `day`.
+ *
+ * The all-time figure lives on each asset (`realizedPnl`); this asks the same
+ * replay what it earned *today*, so the dashboard card starts each morning at
+ * zero and only shows what was actually sold or paid out since midnight.
+ * Spam tokens are skipped for the same reason `computeTotals` skips them: their
+ * invented price would otherwise show up as a gain.
+ */
+export async function getRealizedOnDay(day = today()): Promise<DayRealized> {
+  await ensureSchema();
+  const [assetRows, txRows] = await Promise.all([
+    db
+      .select({ id: assets.id, name: assets.name, symbol: assets.symbol, type: assets.type })
+      .from(assets),
+    db
+      .select({
+        assetId: transactions.assetId,
+        kind: transactions.kind,
+        quantity: transactions.quantity,
+        price: transactions.price,
+        fee: transactions.fee,
+        date: transactions.date,
+      })
+      .from(transactions)
+      .orderBy(asc(transactions.date), asc(transactions.id)),
+  ]);
+
+  const byId = new Map(assetRows.map((asset) => [asset.id, asset]));
+  const parts: DayRealized[] = [];
+  for (const [assetId, txs] of groupTxsByAsset(txRows)) {
+    const asset = byId.get(assetId);
+    if (!asset || isSpamToken(asset)) continue;
+    parts.push(realizedOnDay(asset.type, txs, day));
+  }
+  return sumDayRealized(parts);
 }
 
 export async function recordAssetPriceSnapshot(assetId: number, snapshotDate: string, price: number, overwrite = true) {

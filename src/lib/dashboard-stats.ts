@@ -18,7 +18,10 @@ export const DASHBOARD_STATS: Record<DashboardStatKey, DashboardStatMeta> = {
   cash: { label: "Cash", hint: "Cash balance" },
   invested: { label: "Invested (cost basis)", hint: "What the open positions cost" },
   unrealized: { label: "Unrealized P/L", hint: "Open profit and loss" },
-  realized: { label: "Realized P/L + income", hint: "Sells, dividends and interest" },
+  realized: {
+    label: "Realized P/L + income",
+    hint: "Today's sells, dividends and interest — back to $0 at 12am",
+  },
 };
 
 /** Default heading on each of the four stat cards. */
