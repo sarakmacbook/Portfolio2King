@@ -19,7 +19,7 @@ export const DASHBOARD_STATS: Record<DashboardStatKey, DashboardStatMeta> = {
   invested: { label: "Invested (cost basis)", hint: "What the open positions cost" },
   unrealized: { label: "Unrealized P/L", hint: "Open profit and loss" },
   realized: {
-    label: "Realized P/L + income",
+    label: "Today's realized P/L + income",
     hint: "Today's sells, dividends and interest — back to $0 at 12am",
   },
 };

@@ -1,5 +1,5 @@
 /**
- * "Realized P/L + income" as *today's* number.
+ * The dashboard's "Today's realized P/L + income" card, as *today's* number.
  *
  * The dashboard card used to show the all-time figure, which only ever grows and
  * so says nothing about how today went. This module slices the ledger at the
