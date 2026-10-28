@@ -130,7 +130,7 @@ test("the four stat cards can be renamed and blank names fall back to defaults",
     cash: "Cash",
     invested: "Invested (cost basis)",
     unrealized: "Unrealized P/L",
-    realized: "Realized P/L + income",
+    realized: "Today's realized P/L + income",
   });
   assert.deepEqual(normaliseDashboardStatLabels(undefined), DEFAULT_DASHBOARD_STAT_LABELS);
   assert.deepEqual(normaliseDashboardStatLabels(""), DEFAULT_DASHBOARD_STAT_LABELS);
@@ -151,7 +151,7 @@ test("the four stat cards can be renamed and blank names fall back to defaults",
       cash: "Dry powder",
       invested: "Invested (cost basis)",
       unrealized: "Open gain",
-      realized: "Realized P/L + income",
+      realized: "Today's realized P/L + income",
     },
   );
 

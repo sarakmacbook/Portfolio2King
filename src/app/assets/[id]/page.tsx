@@ -137,7 +137,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               subCls={pnlColor(pnl)}
             />
             <Stat
-              label="Realized P/L + income"
+              label="All-time realized P/L + income"
               value={money(asset.realizedPnl, { sign: true })}
               cls={pnlColor(asset.realizedPnl)}
             />

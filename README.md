@@ -601,14 +601,17 @@ Details:
   cards stack in the saved order.
 - Saving the layout does not touch any holdings, balances or snapshots.
 
-### Realized P/L + income is today's number
+### The dashboard card is today's realized P/L + income
 
-The **Realized P/L + income** stat card shows what was actually booked **today**
-— the profit or loss on today's sells plus any dividends and interest paid
-today — and goes back to `$0.00` at **12am**, so it answers "how did today go?"
-instead of growing forever. The all-time figure is still one glance away in the
-card's second line (`Since 12am · all-time +$1,240.00`, or `Resets at 12am · …` once nothing has been booked yet), and the per-asset
-history on each asset page is unchanged.
+The **Today's realized P/L + income** stat card shows what was actually booked
+**today** — the profit or loss on today's sells plus any dividends and interest
+paid today — and goes back to `$0.00` at **12am**, so it answers "how did today
+go?" instead of growing forever. The label says *today* because that is the
+whole point of the number: the same figures summed over the full history would
+only ever grow. The all-time figure is still one glance away in the card's
+second line (`Since 12am · all-time +$1,240.00`, or `Resets at 12am · …` once
+nothing has been booked yet), and each asset page keeps its own **All-time
+realized P/L + income** total.
 
 Details:
 
