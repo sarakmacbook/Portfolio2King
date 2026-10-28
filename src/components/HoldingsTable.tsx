@@ -149,6 +149,10 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
   const setFolders = arrange?.onFoldersChange ?? setLocalFolders;
   const assignments = arrange?.assignments ?? localAssignments;
   const setAssignments = arrange?.onAssignmentsChange ?? setLocalAssignments;
+  const clearAllGroupsState = arrange?.onClearGroups ?? (() => {
+    setLocalFolders([]);
+    setLocalAssignments({});
+  });
 
   const [query, setQuery] = useState("");
   // A saved arrangement is what the table shows until a column is sorted on.
@@ -1088,6 +1092,11 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
         arranging={arranging}
         onFoldersChange={(next) => setFolders([...next, ...nestedFolders])}
         onAssignmentsChange={setAssignments}
+        onGroupsCleared={() => {
+          clearAllGroupsState();
+          setFolderFilter("all");
+          setCollapsedGroups(new Set());
+        }}
         onFileHolding={fileHolding}
       />
 

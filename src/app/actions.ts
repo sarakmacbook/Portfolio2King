@@ -192,6 +192,18 @@ export async function createAsset(_prev: ActionState, fd: FormData): Promise<Act
   redirect(`/assets/${newId}`);
 }
 
+/** Removes all groups and their filing assignments while keeping holdings intact. */
+export async function clearAllHoldingGroups(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await ensureSchema();
+    await saveHoldingsFolders([]);
+    refresh();
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Could not remove the groups." };
+  }
+}
+
 /** Creates a top-level group directly from the main Holdings section. */
 export async function createHoldingGroup(name: string): Promise<{
   ok: boolean;
