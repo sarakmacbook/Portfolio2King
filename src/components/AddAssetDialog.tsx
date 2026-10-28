@@ -62,6 +62,7 @@ import { ErrorNote, Modal, SubmitButton } from "./ui";
 import CryptoLogo, { Web3WalletBadge } from "./CryptoLogo";
 
 export type CashAccount = { id: number; name: string; quantity: number };
+export type AssetFolderChoice = Pick<HoldingFolder, "id" | "name" | "color"> & { label?: string };
 
 /** Data source names shown under search results (the API falls back automatically). */
 const SEARCH_SOURCE_LABELS: Record<string, string> = {
@@ -92,13 +93,19 @@ export default function AddAssetDialog({
   cashAccounts,
   folders = [],
   defaultType = "stock",
+  defaultFolderId,
+  allowCreateFolder = true,
   label = "+ Add asset",
   className = "btn-primary",
 }: {
   cashAccounts: CashAccount[];
   /** Existing holdings folders, offered as the scan's filing target. */
-  folders?: Pick<HoldingFolder, "id" | "name" | "color">[];
+  folders?: AssetFolderChoice[];
   defaultType?: AssetType;
+  /** Folder preselected when adding directly into one. */
+  defaultFolderId?: string;
+  /** Disable creating a top-level folder when adding directly into a child folder. */
+  allowCreateFolder?: boolean;
   label?: string;
   className?: string;
 }) {
@@ -114,6 +121,8 @@ export default function AddAssetDialog({
             cashAccounts={cashAccounts}
             folders={folders}
             defaultType={defaultType}
+            defaultFolderId={defaultFolderId}
+            allowCreateFolder={allowCreateFolder}
             onDone={() => setOpen(false)}
           />
         )}
@@ -126,11 +135,15 @@ function AddAssetForm({
   cashAccounts,
   folders,
   defaultType,
+  defaultFolderId,
+  allowCreateFolder,
   onDone,
 }: {
   cashAccounts: CashAccount[];
-  folders: Pick<HoldingFolder, "id" | "name" | "color">[];
+  folders: AssetFolderChoice[];
   defaultType: AssetType;
+  defaultFolderId?: string;
+  allowCreateFolder: boolean;
   onDone?: () => void;
 }) {
   const router = useRouter();
@@ -139,7 +152,7 @@ function AddAssetForm({
   const [cryptoCategory, setCryptoCategory] = useState<CryptoCategory>("volatile");
   const [walletLogo, setWalletLogo] = useState<Web3WalletId | "">("");
   const [priceSource, setPriceSource] = useState<PriceProvider | "">("");
-  const [folderId, setFolderId] = useState("");
+  const [folderId, setFolderId] = useState(defaultFolderId ?? "");
   const [newFolderName, setNewFolderName] = useState("");
   const [quoteCurrency, setQuoteCurrency] = useState<"USD" | "USDT">("USDT");
   const [quoteState, setQuoteState] = useState<{ status: "idle" | "loading" | "ok" | "error"; message: string }>({
@@ -210,7 +223,7 @@ function AddAssetForm({
   /** Import the wallet's tokens into a folder, named by the user or by the address. */
   const [walletFileIntoFolder, setWalletFileIntoFolder] = useState(true);
   /** An existing folder to file into (`""` = make one, named below). */
-  const [walletFolderId, setWalletFolderId] = useState("");
+  const [walletFolderId, setWalletFolderId] = useState(defaultFolderId ?? "");
   const [walletFolderName, setWalletFolderName] = useState("");
   /** Order of the results: real & big first by default. */
   const [walletSort, setWalletSort] = useState<ScanSort>("best");
@@ -1448,7 +1461,7 @@ function AddAssetForm({
                   </option>
                   {folders.map((folder) => (
                     <option key={folder.id} value={folder.id}>
-                      {folder.name}
+                      {folder.label ?? folder.name}
                     </option>
                   ))}
                 </select>
@@ -2173,10 +2186,12 @@ function AddAssetForm({
           <option value="">No folder</option>
           {folders.map((folder) => (
             <option key={folder.id} value={folder.id}>
-              {folder.name}
+              {folder.label ?? folder.name}
             </option>
           ))}
-          {folders.length < MAX_FOLDERS && <option value="__new__">Create a new folder…</option>}
+          {allowCreateFolder && folders.length < MAX_FOLDERS && (
+            <option value="__new__">Create a new folder…</option>
+          )}
         </select>
         {folderId === "__new__" ? (
           <div className="mt-2">

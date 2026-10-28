@@ -192,6 +192,35 @@ export async function createAsset(_prev: ActionState, fd: FormData): Promise<Act
   redirect(`/assets/${newId}`);
 }
 
+/** Creates a nested folder owned by one holding, for filing other holdings inside it. */
+export async function createAssetSubfolder(parentAssetId: number, name: string): Promise<{
+  ok: boolean;
+  folder?: HoldingFolder;
+  error?: string;
+}> {
+  try {
+    await ensureSchema();
+    if (!Number.isInteger(parentAssetId) || parentAssetId <= 0) throw new Error("Choose a valid parent holding.");
+    const [parent] = await db
+      .select({ id: assets.id })
+      .from(assets)
+      .where(eq(assets.id, parentAssetId))
+      .limit(1);
+    if (!parent) throw new Error("That holding no longer exists.");
+    const current = await loadHoldingsFolders();
+    if (!name.trim()) throw new Error("Enter a name for the folder.");
+    if (current.length >= MAX_FOLDERS) throw new Error(`You can have at most ${MAX_FOLDERS} folders.`);
+    const folder = makeFolder({ name, parentAssetId }, current);
+    if (!folder) throw new Error("Could not create that folder.");
+    await saveHoldingsFolders([...current, folder]);
+    refresh();
+    revalidatePath(`/assets/${parentAssetId}`);
+    return { ok: true, folder };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Could not create the folder." };
+  }
+}
+
 export async function updateAsset(_prev: ActionState, fd: FormData): Promise<ActionState> {
   try {
     const id = Number(str(fd, "id"));
@@ -364,6 +393,21 @@ export async function deleteTransaction(fd: FormData) {
 
 export async function deleteAsset(fd: FormData) {
   const id = Number(fd.get("id"));
+  await ensureSchema();
+  const folders = await loadHoldingsFolders();
+  // Folders nested under a deleted holding become ordinary portfolio folders;
+  // their child assets and their filing are preserved.
+  const promoted = folders.map((folder) => {
+    if (folder.parentAssetId !== id) return folder;
+    const { parentAssetId: _parentAssetId, ...rootFolder } = folder;
+    return rootFolder;
+  });
+  const assignments = await loadHoldingFolderAssignments(folders);
+  delete assignments[id];
+  if (promoted.some((folder, index) => folder !== folders[index])) {
+    await saveHoldingsFolders(promoted);
+  }
+  await saveHoldingFolderAssignments(assignments, promoted);
   await db.delete(assets).where(eq(assets.id, id));
   await recordSnapshot();
   refresh();
@@ -384,7 +428,20 @@ export async function removeSpamHoldings(): Promise<{ removed: number }> {
   const list = await db.select().from(assets);
   const junk = list.filter((asset) => isSpamToken(asset));
   if (junk.length === 0) return { removed: 0 };
-  await db.delete(assets).where(inArray(assets.id, junk.map((asset) => asset.id)));
+  const junkIds = new Set(junk.map((asset) => asset.id));
+  const folders = await loadHoldingsFolders();
+  const promoted = folders.map((folder) => {
+    if (!folder.parentAssetId || !junkIds.has(folder.parentAssetId)) return folder;
+    const { parentAssetId: _parentAssetId, ...rootFolder } = folder;
+    return rootFolder;
+  });
+  const assignments = await loadHoldingFolderAssignments(folders);
+  for (const id of junkIds) delete assignments[id];
+  if (promoted.some((folder, index) => folder !== folders[index])) {
+    await saveHoldingsFolders(promoted);
+  }
+  await saveHoldingFolderAssignments(assignments, promoted);
+  await db.delete(assets).where(inArray(assets.id, [...junkIds]));
   await recordSnapshot();
   refresh();
   return { removed: junk.length };

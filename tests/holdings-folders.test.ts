@@ -44,10 +44,12 @@ test("normaliseFolders keeps valid folders and clamps everything else", () => {
     { id: "long-term", name: "Again" },
     { id: "nameless", name: "   " },
     { id: "weird", name: "Weird", icon: "exchange", glyph: "not-an-exchange" },
+    { id: "inside-wallet", name: "Exchange wallet", parentAssetId: 42 },
+    { id: "bad-parent", name: "Bad parent", parentAssetId: -3 },
     { id: "Bad Id!", name: "Bad" },
   ]);
 
-  assert.deepEqual(folders.map((f) => f.id), ["long-term", "binance", "weird"]);
+  assert.deepEqual(folders.map((f) => f.id), ["long-term", "binance", "weird", "inside-wallet", "bad-parent"]);
   assert.equal(folders[0].icon, "emoji");
   assert.equal(folders[0].glyph, "🌱");
   assert.equal(folders[0].color, "#22c55e");
@@ -59,6 +61,8 @@ test("normaliseFolders keeps valid folders and clamps everything else", () => {
   // An exchange icon needs a known exchange, otherwise it becomes a letter.
   assert.equal(folders[2].icon, "auto");
   assert.equal(folders[2].glyph, "");
+  assert.equal(folders[3].parentAssetId, 42, "nested-folder ownership is preserved");
+  assert.equal(folders[4].parentAssetId, undefined, "invalid parent ids become top-level folders");
 });
 
 test("normaliseFolders also reads a JSON string and caps the number of folders", () => {
@@ -95,6 +99,9 @@ test("makeFolder builds a folder with a unique id, colour and clamped name", () 
 
   const second = makeFolder({ name: "Long term" }, [first]);
   assert.equal(second?.id, "long-term-2");
+
+  const nested = makeFolder({ name: "Custody", parentAssetId: 42 }, [first]);
+  assert.equal(nested?.parentAssetId, 42);
 
   const long = makeFolder({ name: "x".repeat(80) }, []);
   assert.equal(long?.name.length, MAX_FOLDER_NAME_LENGTH);

@@ -252,8 +252,12 @@ export async function setHoldingFolder(
 
   const folders = await loadHoldingsFolders();
   const requested = typeof folderId === "string" ? folderId.trim() : "";
-  const target = requested && folders.some((folder) => folder.id === requested) ? requested : null;
+  const targetFolder = folders.find((folder) => folder.id === requested);
+  const target = requested && targetFolder ? requested : null;
   if (requested && !target) throw new Error("That folder no longer exists.");
+  if (targetFolder?.parentAssetId === assetId) {
+    throw new Error("A holding cannot be filed into a folder nested inside itself.");
+  }
 
   const current = await loadHoldingFolderAssignments(folders);
   return saveHoldingFolderAssignments(assignHolding(current, assetId, target), folders);

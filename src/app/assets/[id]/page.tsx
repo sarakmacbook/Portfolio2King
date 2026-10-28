@@ -8,6 +8,8 @@ import { assets } from "@/db/schema";
 import { deleteAsset, deleteTransaction } from "@/app/actions";
 import AutoDailySnapshot from "@/components/AutoDailySnapshot";
 import { EditAssetButton, PriceForm, TransactionForm } from "@/components/AssetForms";
+import AddAssetDialog, { type AssetFolderChoice } from "@/components/AddAssetDialog";
+import AssetSubfolders from "@/components/AssetSubfolders";
 import CryptoLogo from "@/components/CryptoLogo";
 import PriceHistorySection from "@/components/PriceHistorySection";
 import { ConfirmSubmit } from "@/components/ui";
@@ -25,6 +27,7 @@ import {
 import { buildAssetPriceSeries, latestDailyPriceChange } from "@/lib/price-history";
 import { describePriceSource } from "@/lib/market-prices";
 import { loadAssetWalletLogos } from "@/lib/web3-wallets-db";
+import { loadHoldingFolderAssignments, loadHoldingsFolders } from "@/lib/dashboard-order-db";
 
 export const dynamic = "force-dynamic";
 
@@ -38,11 +41,13 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   if (!asset) notFound();
 
   const all = await getAllAssets();
-  const [txs, priceSnaps, walletLogos] = await Promise.all([
+  const [txs, priceSnaps, walletLogos, folders] = await Promise.all([
     getAssetTransactions(id),
     getAssetPriceSnapshots(id),
     loadAssetWalletLogos(),
+    loadHoldingsFolders(),
   ]);
+  const assignments = await loadHoldingFolderAssignments(folders);
   const walletLogo = walletLogos[asset.id] ?? "";
   const t = today();
   const stalePrices = all.some(
@@ -54,6 +59,31 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   const cashAccounts = all
     .filter((a) => a.type === "cash" && a.id !== id)
     .map((a) => ({ id: a.id, name: a.name, quantity: a.quantity }));
+  const assetNames = new Map(all.map((item) => [item.id, item.name]));
+  const folderChoices: AssetFolderChoice[] = folders.map((folder) => ({
+    id: folder.id,
+    name: folder.name,
+    color: folder.color,
+    label: folder.parentAssetId
+      ? `${assetNames.get(folder.parentAssetId) ?? "Holding"} / ${folder.name}`
+      : folder.name,
+  }));
+  const nestedFolders = folders.filter((folder) => folder.parentAssetId === id);
+  const childrenByFolder = Object.fromEntries(
+    nestedFolders.map((folder) => [
+      folder.id,
+      all
+        .filter((child) => child.id !== id && assignments[child.id] === folder.id)
+        .map((child) => ({
+          id: child.id,
+          name: child.name,
+          symbol: child.symbol,
+          type: child.type,
+          quantity: child.quantity,
+          value: assetValue(child),
+        })),
+    ]),
+  );
   const portfolioTotal = all.reduce((s, a) => s + assetValue(a), 0);
 
   const isCash = asset.type === "cash";
@@ -144,6 +174,15 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           </>
         )}
       </div>
+
+      <AssetSubfolders
+        parentAssetId={asset.id}
+        parentAssetName={asset.name}
+        folders={nestedFolders}
+        childrenByFolder={childrenByFolder}
+        folderChoices={folderChoices}
+        cashAccounts={cashAccounts}
+      />
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-1">
