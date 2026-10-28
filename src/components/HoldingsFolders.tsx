@@ -36,6 +36,7 @@ import GripIcon from "./GripIcon";
  */
 export default function HoldingsFolders({
   folders,
+  allFolders,
   assignments,
   counts,
   totals,
@@ -48,6 +49,8 @@ export default function HoldingsFolders({
   totalRows,
 }: {
   folders: HoldingFolder[];
+  /** Full inventory, including folders nested under assets. */
+  allFolders: HoldingFolder[];
   assignments: FolderAssignments;
   /** Holdings per folder id. */
   counts: Record<string, number>;
@@ -81,7 +84,7 @@ export default function HoldingsFolders({
     setCreating(true);
     setEditing(null);
     setDraftName("");
-    setDraftColor(FOLDER_COLORS[folders.length % FOLDER_COLORS.length]);
+    setDraftColor(FOLDER_COLORS[allFolders.length % FOLDER_COLORS.length]);
     setDraftIcon("auto");
     setDraftGlyph("");
   }
@@ -98,7 +101,7 @@ export default function HoldingsFolders({
   function commitCreate() {
     const folder = makeFolder(
       { name: draftName, color: draftColor, icon: draftIcon, glyph: draftGlyph },
-      folders,
+      allFolders,
     );
     if (!folder) {
       setAnnouncement(
@@ -355,7 +358,7 @@ export default function HoldingsFolders({
               type="button"
               className="rounded-xl border border-dashed border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-indigo-300 hover:text-indigo-700"
               onClick={startCreate}
-              disabled={folders.length >= MAX_FOLDERS}
+              disabled={allFolders.length >= MAX_FOLDERS}
               title={`Group holdings into folders (up to ${MAX_FOLDERS})`}
             >
               ＋ New folder

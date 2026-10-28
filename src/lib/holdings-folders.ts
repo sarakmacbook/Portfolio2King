@@ -3,9 +3,8 @@
  *
  * A holding can be filed into one folder ("Long term", "Binance", "Play money")
  * so a large portfolio reads as a handful of groups instead of one long table.
- * Folders are *labels*, not containers: a holding keeps its own quantity, price
- * and P/L, and totals are never split or double-counted — a folder header simply
- * sums the holdings filed into it.
+ * Folders are labels, not duplicate assets: a nested folder can be owned by a
+ * holding's detail page, and each holding keeps its own quantity, price and P/L.
  *
  * Two `app_settings` keys hold the state:
  *
@@ -48,6 +47,8 @@ export type HoldingFolder = {
   glyph: string;
   /** Remembered collapse state on the dashboard. */
   collapsed: boolean;
+  /** When set, this folder is nested inside the corresponding holding's page. */
+  parentAssetId?: number;
 };
 
 /** asset id → folder id */
@@ -98,6 +99,7 @@ export function normaliseFolders(value: unknown): HoldingFolder[] {
     const color = readString(item.color, 16);
     const icon = readString(item.icon, 16);
     const glyph = readString(item.glyph, 8);
+    const parentAssetId = Number(item.parentAssetId);
     const iconKind: FolderIconKind =
       icon === "exchange" && isPriceProvider(glyph)
         ? "exchange"
@@ -113,6 +115,7 @@ export function normaliseFolders(value: unknown): HoldingFolder[] {
       icon: iconKind,
       glyph: iconKind === "auto" ? "" : glyph,
       collapsed: item.collapsed === true,
+      ...(Number.isInteger(parentAssetId) && parentAssetId > 0 ? { parentAssetId } : {}),
     });
     if (folders.length >= MAX_FOLDERS) break;
   }
@@ -168,7 +171,7 @@ export function nextFolderId(name: string, existing: readonly string[]): string 
 
 /** Builds a folder, clamping the name and picking the next free colour. */
 export function makeFolder(
-  input: { name: string; color?: string; icon?: FolderIconKind; glyph?: string },
+  input: { name: string; color?: string; icon?: FolderIconKind; glyph?: string; parentAssetId?: number },
   existing: readonly HoldingFolder[],
 ): HoldingFolder | null {
   if (existing.length >= MAX_FOLDERS) return null;
@@ -190,6 +193,9 @@ export function makeFolder(
     icon: icon === "exchange" && !glyph ? "auto" : icon,
     glyph,
     collapsed: false,
+    ...(Number.isInteger(input.parentAssetId) && Number(input.parentAssetId) > 0
+      ? { parentAssetId: Number(input.parentAssetId) }
+      : {}),
   };
 }
 

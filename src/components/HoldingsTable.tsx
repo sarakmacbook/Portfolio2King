@@ -454,16 +454,23 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
     setSort((current) => (current.key === "custom" ? { key: "value", dir: -1 } : current));
   }, [arranging, assetOrder.length]);
 
+  const rootFolders = useMemo(() => folders.filter((folder) => !folder.parentAssetId), [folders]);
+  const nestedFolders = useMemo(() => folders.filter((folder) => folder.parentAssetId), [folders]);
   const hasFolders = folders.length > 0;
   /** Order + Asset + Folder + Quantity + Avg cost + Price + Value + P/L + Weight. */
   const columnCount = 7 + (arranging ? 1 : 0) + (hasFolders ? 1 : 0);
   const folderIds = useMemo(() => folders.map((folder) => folder.id), [folders]);
 
-  /** Counts and value per folder, for the chips and the group headers. */
+  function folderLabel(folder: HoldingFolder) {
+    const parent = folder.parentAssetId ? rows.find((row) => row.id === folder.parentAssetId) : undefined;
+    return parent ? `${parent.name} / ${folder.name}` : folder.name;
+  }
+
+  /** Counts and value per top-level folder, for the chips and group headers. */
   const folderStats = useMemo(() => {
     const counts: Record<string, number> = {};
     const totals: Record<string, number> = {};
-    for (const folder of folders) {
+    for (const folder of rootFolders) {
       counts[folder.id] = countInFolder(assignments, folder.id);
       totals[folder.id] = 0;
     }
@@ -473,7 +480,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
       totals[folderId] += row.value;
     }
     return { counts, totals };
-  }, [folders, assignments, rows]);
+  }, [rootFolders, assignments, rows]);
 
   /**
    * Dust: holdings worth less than the cut-off. Hidden only when asked for, and
@@ -503,9 +510,9 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
    * no folders at all, every row is one flat list.
    */
   const { ungrouped, groups } = useMemo(() => {
-    if (!hasFolders) return { ungrouped: folderRows, groups: [] as FolderGroup<HoldingRow>[] };
-    return splitByFolder(folderRows, folders, assignments);
-  }, [hasFolders, folderRows, folders, assignments]);
+    if (rootFolders.length === 0) return { ungrouped: folderRows, groups: [] as FolderGroup<HoldingRow>[] };
+    return splitByFolder(folderRows, rootFolders, assignments);
+  }, [rootFolders, folderRows, assignments]);
 
   /**
    * Folders that currently hold nothing. They have no group of their own to drop
@@ -514,8 +521,8 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
    */
   const emptyFolders = useMemo(() => {
     const filled = new Set(groups.map((group) => group.folder.id));
-    return folders.filter((folder) => !filled.has(folder.id));
-  }, [groups, folders]);
+    return rootFolders.filter((folder) => !filled.has(folder.id));
+  }, [groups, rootFolders]);
 
   function toggleGroup(key: string) {
     setCollapsedGroups((current) => {
@@ -541,11 +548,13 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
     const previous = assignments;
     if ((previous[assetId] ?? null) === target) return;
 
-    const name = folders.find((folder) => folder.id === target)?.name;
+    const targetFolder = folders.find((folder) => folder.id === target);
     setAssignments(assignHolding(previous, assetId, target));
     setFilingError("");
     setAnnouncement(
-      name ? `${rowLabel(assetId)} moved to ${name}.` : `${rowLabel(assetId)} moved out of its folder.`,
+      targetFolder
+        ? `${rowLabel(assetId)} moved to ${folderLabel(targetFolder)}.`
+        : `${rowLabel(assetId)} moved out of its folder.`,
     );
     clearRowDrag();
     setGroupDrop(null);
@@ -582,7 +591,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
           <option value="">No folder</option>
           {folders.map((item) => (
             <option key={item.id} value={item.id}>
-              {item.name}
+              {folderLabel(item)}
             </option>
           ))}
         </select>
@@ -598,7 +607,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
           color={folder.color}
           className="h-3.5 w-3.5 rounded"
         />
-        <span className="truncate">{folder.name}</span>
+        <span className="truncate">{folderLabel(folder)}</span>
       </span>
     );
   }
@@ -1067,9 +1076,10 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
         </p>
       )}
 
-      {(hasFolders || arranging) && (
+      {(rootFolders.length > 0 || arranging) && (
         <HoldingsFolders
-          folders={folders}
+          folders={rootFolders}
+          allFolders={folders}
           assignments={assignments}
           counts={folderStats.counts}
           totals={folderStats.totals}
@@ -1077,7 +1087,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
           selected={folderFilter}
           onSelect={setFolderFilter}
           arranging={arranging}
-          onFoldersChange={setFolders}
+          onFoldersChange={(next) => setFolders([...next, ...nestedFolders])}
           onAssignmentsChange={setAssignments}
           onFileHolding={fileHolding}
         />

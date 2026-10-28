@@ -646,6 +646,14 @@ Folders turn a long table into a few groups without changing any numbers:
    **Save layout**. **Reset to default** removes the folders; holdings are never
    deleted, they just go back to being plain rows.
 
+On any holding's detail page, **Folders inside [holding name]** lets you create
+subfolders owned by that holding. Each subfolder has an **Add asset here** button
+that can add Cash, Stocks, Crypto or Other directly into it. The parent remains a
+normal holding and both parent and child positions count toward portfolio totals.
+Nested folders appear as `Parent / Folder` in folder selectors; deleting the
+parent promotes its subfolders to ordinary portfolio folders so no holdings are
+lost.
+
 **Dragging works outside arrange mode too**, which is the quick way to tidy up:
 
 - Every holding gets a grip on hover (always visible on touch screens, and the

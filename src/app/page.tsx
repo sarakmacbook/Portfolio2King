@@ -132,10 +132,14 @@ export default async function Dashboard() {
    * The folders a wallet import can be filed into. Only the three fields the
    * dialog needs, so the client does not receive the whole folder record.
    */
+  const assetNames = new Map(list.map((asset) => [asset.id, asset.name]));
   const foldersForDialog = holdingsFolders.map((folder) => ({
     id: folder.id,
     name: folder.name,
     color: folder.color,
+    label: folder.parentAssetId
+      ? `${assetNames.get(folder.parentAssetId) ?? "Holding"} / ${folder.name}`
+      : folder.name,
   }));
 
   const rows: HoldingRow[] = list.map((a) => {
