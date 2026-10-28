@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, type DragEvent } from "react";
+import { useState, useTransition, type DragEvent } from "react";
+import { createHoldingGroup } from "@/app/actions";
 import {
   FOLDER_COLORS,
   MAX_FOLDERS,
@@ -25,14 +26,15 @@ import GripIcon from "./GripIcon";
  * The folder strip above the Holdings table.
  *
  * Outside arrange mode it is a filter bar: **All** and one chip per folder with
- * its count and value. Inside arrange mode the chips become
- * draggable (and nudgeable with ◀ / ▶), can be renamed, recoloured, given an
- * exchange or emoji icon, and deleted — and a holding dragged from the table can
- * be dropped straight onto a folder to file it.
+ * its count and value, plus a quick **Add group** action. Inside arrange mode the
+ * chips become draggable (and nudgeable with ◀ / ▶), can be renamed, recoloured,
+ * given an exchange or emoji icon, and deleted — and a holding dragged from the
+ * table can be dropped straight onto a folder to file it.
  *
  * Filing goes through `onFileHolding`, so the table decides whether a drop is
  * pending (arrange mode, saved by **Save layout**) or persisted straight away
- * (normal view). Editing folders themselves is always deferred to that save.
+ * (normal view). Folder edits and arrangement-mode creation are deferred to that
+ * save; quick-created groups persist immediately.
  */
 export default function HoldingsFolders({
   folders,
@@ -76,14 +78,18 @@ export default function HoldingsFolders({
   const [drop, setDrop] = useState<{ id: string; after: boolean } | null>(null);
   const [dropFolder, setDropFolder] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
+  const [groupError, setGroupError] = useState("");
+  const [savingGroup, startSavingGroup] = useTransition();
 
   /** The editor exists only while arranging; changes are saved with the layout. */
   const showEditor = arranging && (creating || editing !== null);
+  const showQuickCreate = !arranging && creating;
 
   function startCreate() {
     setCreating(true);
     setEditing(null);
     setDraftName("");
+    setGroupError("");
     setDraftColor(FOLDER_COLORS[allFolders.length % FOLDER_COLORS.length]);
     setDraftIcon("auto");
     setDraftGlyph("");
@@ -114,6 +120,22 @@ export default function HoldingsFolders({
     onFoldersChange([...folders, folder]);
     setAnnouncement(`${folder.name} folder created.`);
     setCreating(false);
+  }
+
+  function commitQuickCreate() {
+    if (savingGroup || !draftName.trim()) return;
+    setGroupError("");
+    startSavingGroup(async () => {
+      const result = await createHoldingGroup(draftName);
+      if (!result.ok || !result.folder) {
+        setGroupError(result.error ?? "Could not create the group.");
+        return;
+      }
+      onFoldersChange([...folders, result.folder]);
+      setDraftName("");
+      setCreating(false);
+      setAnnouncement(`${result.folder.name} group created.`);
+    });
   }
 
   function commitEdit(id: string) {
@@ -247,6 +269,18 @@ export default function HoldingsFolders({
           </>
         )}
 
+        {!arranging && !creating && (
+          <button
+            type="button"
+            className="rounded-xl border border-dashed border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-indigo-300 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={startCreate}
+            disabled={savingGroup || allFolders.length >= MAX_FOLDERS}
+            title={`Create a group for holdings (up to ${MAX_FOLDERS})`}
+          >
+            ＋ Add group
+          </button>
+        )}
+
         {arranging && (
           <>
             {folders.map((folder, position) => {
@@ -371,6 +405,52 @@ export default function HoldingsFolders({
           </>
         )}
       </div>
+
+      {showQuickCreate && (
+        <div className="mt-3 rounded-xl border border-indigo-200 bg-white p-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <input
+              className="input min-w-0 flex-1"
+              placeholder="Group name (e.g. Long term, Retirement)"
+              value={draftName}
+              maxLength={MAX_FOLDER_NAME_LENGTH}
+              onChange={(event) => setDraftName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  commitQuickCreate();
+                }
+                if (event.key === "Escape") setCreating(false);
+              }}
+              aria-label="New holdings group name"
+              autoFocus
+            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="btn-primary text-xs"
+                onClick={commitQuickCreate}
+                disabled={savingGroup || !draftName.trim()}
+              >
+                {savingGroup ? "Creating…" : "Create group"}
+              </button>
+              <button
+                type="button"
+                className="btn-ghost text-xs"
+                onClick={() => {
+                  setCreating(false);
+                  setGroupError("");
+                }}
+                disabled={savingGroup}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+          {groupError && <p role="alert" className="mt-2 text-sm text-rose-700">{groupError}</p>}
+          <p className="mt-2 text-xs text-slate-500">The group will be added to Holdings now. You can file assets into it from the table.</p>
+        </div>
+      )}
 
       {showEditor && (
         <div className="mt-3 rounded-xl border border-indigo-200 bg-white p-3">

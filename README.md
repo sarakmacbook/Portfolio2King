@@ -634,10 +634,11 @@ Folders turn a long table into a few groups without changing any numbers:
 1. In **Add holding**, choose **Folder → Create a new folder…**, enter a name,
    and submit the holding. It creates the folder and files the new holding there
    in one step. Existing folders can be chosen from the same menu.
-2. To create an empty folder or customize one, click **⇅ Arrange layout**, then
-   **＋ New folder** in the strip above the table. Name it (28 characters), pick
-   a colour, and choose an icon: the first letter, an exchange logo (Binance,
-   OKX, Bybit, Coinbase, Kraken, DexScreener) or any emoji you type.
+2. To create an empty group directly in **Holdings**, click **＋ Add group** in
+   the strip above the table and enter its name. To customize groups, click **⇅
+   Arrange layout**, then **＋ New folder**. You can pick a colour and choose an
+   icon: the first letter, an exchange logo (Binance, OKX, Bybit, Coinbase,
+   Kraken, DexScreener) or any emoji you type.
 3. File existing holdings by dragging a row onto a folder chip, or use the
    **Folder** dropdown on every row. A holding can be in one folder; holdings
    with no folder are simply plain rows above the folder groups.
