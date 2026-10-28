@@ -65,8 +65,10 @@ test("the table implements in-place drag-and-drop filing, with an immediate save
     table.includes("setAssignments(previous)"),
     "a refused move is rolled back to the previous filing",
   );
-  // Empty folders get their own drop target so they can be filled by dragging.
-  assert.ok(table.includes("emptyFolders"), "empty folders are droppable");
+  // Empty folders are visible group rows, so they can be filled by dragging too.
+  assert.ok(table.includes("const displayGroups = useMemo("), "empty folders appear as group rows in the list");
+  assert.ok(table.includes("return showEmptyGroups ? [{ folder, rows: [], totalValue: 0 }] : [];"));
+  assert.ok(table.includes("displayGroups.map((group) => {"), "the table and mobile list render those groups");
   assert.ok(table.includes("Drop to file here"), "the drop target says what dropping does");
   // The dropdown is the keyboard/touch path and is available in normal view too.
   assert.match(table, /if \(arranging \|\| hasFolders\) \{/);

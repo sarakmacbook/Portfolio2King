@@ -519,14 +519,21 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
   }, [rootFolders, folderRows, assignments]);
 
   /**
-   * Folders that currently hold nothing. They have no group of their own to drop
-   * on, so while a holding is being dragged each one becomes a thin dashed drop
-   * target — otherwise an empty folder could only be filled from the chip row.
+   * Show every top-level group as a table section, even while it is empty, so a
+   * newly created folder is visible alongside assets before anything is filed.
+   * With a category or search filter, retain only groups that have matching rows.
    */
-  const emptyFolders = useMemo(() => {
-    const filled = new Set(groups.map((group) => group.folder.id));
-    return rootFolders.filter((folder) => !filled.has(folder.id));
-  }, [groups, rootFolders]);
+  const displayGroups = useMemo(() => {
+    const showEmptyGroups = query.trim() === "" && filter === "all";
+    const visibleFolders = rootFolders.filter(
+      (folder) => folderFilter === "all" || folderFilter === `folder:${folder.id}`,
+    );
+    return visibleFolders.flatMap((folder) => {
+      const group = groups.find((item) => item.folder.id === folder.id);
+      if (group) return [group];
+      return showEmptyGroups ? [{ folder, rows: [], totalValue: 0 }] : [];
+    });
+  }, [rootFolders, groups, folderFilter, query, filter]);
 
   function toggleGroup(key: string) {
     setCollapsedGroups((current) => {
@@ -1123,7 +1130,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
             {/* Holdings in no folder are plain rows, exactly as they were before
                 folders existed — there is no "Unfiled" heading. */}
             {ungrouped.map((r) => renderDesktopRow(r))}
-            {groups.map((group) => {
+            {displayGroups.map((group) => {
               const groupKey = group.folder.id;
               const isCollapsed = collapsedGroups.has(groupKey);
               return (
@@ -1151,34 +1158,6 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                 </Fragment>
               );
             })}
-            {rowDragging !== null &&
-              emptyFolders.map((folder) => (
-                <tr
-                  key={`drop-${folder.id}`}
-                  {...groupDropProps(folder.id)}
-                  className={`border-l-2 border-dashed transition ${
-                    groupDrop === folder.id
-                      ? "border-indigo-500 bg-indigo-50/70"
-                      : "border-slate-200 bg-slate-50/40"
-                  }`}
-                >
-                  <td colSpan={columnCount} className="px-4 py-2">
-                    <span className="flex items-center gap-2 text-xs text-slate-500">
-                      <ExchangeIcon
-                        provider={folder.icon === "exchange" ? (folder.glyph as PriceProvider) : undefined}
-                        glyph={folder.icon === "emoji" ? folder.glyph : undefined}
-                        label={folder.name.slice(0, 1)}
-                        color={folder.color}
-                        className="h-4 w-4 rounded"
-                      />
-                      <span className="font-semibold uppercase tracking-wide text-slate-600">
-                        {folder.name}
-                      </span>
-                      <span>empty — drop a holding here to file it</span>
-                    </span>
-                  </td>
-                </tr>
-              ))}
             {folderRows.length === 0 && (
               <tr>
                 <td colSpan={columnCount} className="px-4 py-12 text-center text-sm text-slate-400">
@@ -1193,7 +1172,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
       {/* Phones: one card per holding instead of a 760px-wide table. */}
       <ul className="divide-y divide-slate-100 md:hidden">
         {ungrouped.map((r) => renderMobileCard(r))}
-        {groups.map((group) => {
+        {displayGroups.map((group) => {
           const groupKey = group.folder.id;
           const isCollapsed = collapsedGroups.has(groupKey);
           return (
@@ -1212,30 +1191,6 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
             </Fragment>
           );
         })}
-        {rowDragging !== null &&
-          emptyFolders.map((folder) => (
-            <li
-              key={`drop-${folder.id}`}
-              {...groupDropProps(folder.id)}
-              className={`border-l-2 border-dashed px-4 py-2 text-xs transition ${
-                groupDrop === folder.id
-                  ? "border-indigo-500 bg-indigo-50/70"
-                  : "border-slate-200 bg-slate-50/40 text-slate-500"
-              }`}
-            >
-              <span className="flex items-center gap-2">
-                <ExchangeIcon
-                  provider={folder.icon === "exchange" ? (folder.glyph as PriceProvider) : undefined}
-                  glyph={folder.icon === "emoji" ? folder.glyph : undefined}
-                  label={folder.name.slice(0, 1)}
-                  color={folder.color}
-                  className="h-4 w-4 rounded"
-                />
-                <span className="font-semibold uppercase tracking-wide text-slate-600">{folder.name}</span>
-                <span>empty — drop here</span>
-              </span>
-            </li>
-          ))}
         {folderRows.length === 0 && (
           <li className="px-4 py-12 text-center text-sm text-slate-400">No holdings match.</li>
         )}
