@@ -601,6 +601,28 @@ Details:
   cards stack in the saved order.
 - Saving the layout does not touch any holdings, balances or snapshots.
 
+### Realized P/L + income is today's number
+
+The **Realized P/L + income** stat card shows what was actually booked **today**
+— the profit or loss on today's sells plus any dividends and interest paid
+today — and goes back to `$0.00` at **12am**, so it answers "how did today go?"
+instead of growing forever. The all-time figure is still one glance away in the
+card's second line (`Since 12am · all-time +$1,240.00`, or `Resets at 12am · …` once nothing has been booked yet), and the per-asset
+history on each asset page is unchanged.
+
+Details:
+
+- Today's realised P/L is the all-time replay minus the replay of everything
+  dated before today, so the average cost used for a sell is the one that was
+  true on that day — a buy made today cannot retroactively change the cost of a
+  sale made today.
+- "Today" is read in the timezone set under **Alerts → Portfolio update →
+  timezone** (the browser's zone by default), so the reset happens at *your*
+  midnight even though the server may run in UTC. With no timezone saved it
+  falls back to the server's zone.
+- Income (dividends / interest) is split out from trades internally, and spam
+  tokens are skipped exactly as they are in every other total.
+
 ## Holdings folders
 
 Folders turn a long table into a few groups without changing any numbers:
