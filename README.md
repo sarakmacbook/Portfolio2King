@@ -774,12 +774,36 @@ moves beyond a threshold, and send a scheduled summary of your **whole
 portfolio** in money and percent. Alerts are delivered over **Web Push** (to a
 browser or an installed web clip) and/or **Telegram**.
 
+### Settings → General: background updates and auto refresh
+
+The two switches that decide whether the app keeps itself current while it is
+open live on **Settings → General** (`/settings`). They are deliberately
+separate, because fetching a price and painting a price are different jobs:
+
+- **Update prices in the background** — the on/off switch for the in-app timer,
+  with the interval picker beside it (5 minutes to 12 hours). Off is a real
+  state: nothing is fetched and the numbers only move when you refresh them
+  yourself. The timer pauses while the tab is hidden and catches up on the first
+  tick after you come back, so a backgrounded browser is not polling a price
+  provider all night.
+- **Auto refresh** — whether a fetch that lands new prices immediately redraws
+  the page. Turning it off gives **silent updates**: the stored data stays
+  current (so alerts, history and the next scheduled recap are unaffected) while
+  the numbers on screen hold still until you navigate or reload. It is greyed out
+  while background updates are off, but the choice is remembered — switching the
+  feed back on restores it instead of quietly resetting it.
+
+Saving on that page writes only the two `refresh.*` keys, so it can never reset a
+threshold, channel or portfolio schedule, and the open tab picks up the new
+interval immediately (no reload). Neither switch affects a cron/systemd schedule
+or the **Refresh prices** button — those keep working whatever the page says.
+
 ### What refreshes, and when
 
 | Trigger | When it runs | Sends alerts |
 | --- | --- | --- |
 | **Refresh prices** button (`/prices`) | You click it | No |
-| Open app tab | Every 5–120 minutes while a tab is visible (default 15) | Yes |
+| Open app tab | Every 5–720 minutes while a tab is visible (default 10) | Yes |
 | `GET /api/cron/refresh-prices` | Your scheduler | Yes |
 | `GET /api/cron/daily-snapshot` | Existing daily schedules / Vercel Cron | Yes |
 
@@ -1007,7 +1031,8 @@ Configure on `/alerts`; values live in the `app_settings` table.
 | Portfolio Telegram message | blank (standard text) | up to 1,000 characters, placeholders like `{total}` |
 | Portfolio Telegram note | blank | up to 500 characters, appended as the last line |
 | Channels | push + telegram | any combination (used by both alert types) |
-| Background refresh | 15 min | off, or 5 – 720 min |
+| Background refresh | 10 min | off, or 5 – 720 min |
+| Auto refresh | on | on/off — repaint the open page when new prices land |
 
 Turning on a channel without configuring it is harmless: push with no
 subscriptions and Telegram without credentials simply deliver nothing, and the

@@ -13,6 +13,7 @@ export const PRIMARY_NAV_LINKS: NavLink[] = [
 
 /** Links grouped inside the Settings submenu. */
 export const SETTINGS_NAV_LINKS: NavLink[] = [
+  { href: "/settings", label: "General", hint: "Price feed & auto refresh" },
   { href: "/exchanges", label: "Exchanges", hint: "Import read-only balances" },
   { href: "/prices", label: "Refresh prices", hint: "Update market prices" },
   { href: "/alerts", label: "Alerts", hint: "Price moves & scheduled recaps" },

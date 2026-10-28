@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { startTransition, useActionState, useRef, useState, useSyncExternalStore } from "react";
 import { useFormStatus } from "react-dom";
 import {
@@ -26,7 +27,6 @@ import { autoNoteForDate } from "@/lib/auto-notes";
 import type { PortfolioUpdate } from "@/lib/price-refresh";
 import { SubmitButton } from "./ui";
 
-const REFRESH_OPTIONS = [0, 5, 10, 15, 30, 60, 120];
 
 /** Common zones plus whatever the device reports, so everyone can find theirs. */
 const COMMON_TIME_ZONES = [
@@ -507,21 +507,20 @@ export default function AlertSettingsForm({
             </p>
           </div>
           <div>
-            <label className="label" htmlFor="backgroundRefreshMinutes">
-              Background refresh
-            </label>
-            <select
-              id="backgroundRefreshMinutes"
-              name="backgroundRefreshMinutes"
-              defaultValue={String(settings.backgroundRefreshMinutes)}
-              className="input"
-            >
-              {REFRESH_OPTIONS.map((minutes) => (
-                <option key={minutes} value={minutes}>
-                  {minutes === 0 ? "Off" : `Every ${minutes} minutes while the app is open`}
-                </option>
-              ))}
-            </select>
+            <span className="label">Background refresh</span>
+            {/*
+              Moved to Settings → General, where the feed and the page repaint
+              are two separate switches. Linked rather than duplicated: a form
+              field here would compete with that page for the same saved value.
+            */}
+            <p className="rounded-xl bg-white px-3 py-2 text-xs text-slate-500 ring-1 ring-slate-200">
+              {settings.backgroundRefreshMinutes === 0
+                ? "Off — prices only change when you refresh them."
+                : `Every ${settings.backgroundRefreshMinutes} minutes while the app is open.`}{" "}
+              <Link href="/settings" className="font-medium text-indigo-600 hover:underline">
+                Change in Settings
+              </Link>
+            </p>
             <p className="mt-1 text-xs text-slate-400">
               A server-side schedule keeps prices fresh when nobody has the app open — see below.
             </p>

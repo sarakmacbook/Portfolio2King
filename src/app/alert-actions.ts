@@ -92,15 +92,27 @@ export async function saveAlertSettingsAction(
 ): Promise<AlertActionState> {
   try {
     if (formData.get("kind") !== "alert-settings") throw new Error("Unknown form");
+    // Read first: the price-update keys are no longer part of this form, so the
+    // saved values have to be carried over rather than reset to defaults.
+    const previous = await getAlertSettings();
     const thresholdPct = parseThresholdPct(formData.get("thresholdPct"));
     if (thresholdPct === null) {
       throw new Error(`Threshold must be a number between ${MIN_THRESHOLD_PCT}% and ${MAX_THRESHOLD_PCT}%.`);
     }
+    // Both of these now live on Settings → General. This form does not submit
+    // them, so keep whatever that page saved.
     const rawMinutes = formData.get("backgroundRefreshMinutes");
-    const backgroundRefreshMinutes = rawMinutes === "0" ? 0 : parseRefreshMinutes(rawMinutes);
+    const backgroundRefreshMinutes =
+      rawMinutes === null
+        ? previous.backgroundRefreshMinutes
+        : rawMinutes === "0"
+          ? 0
+          : parseRefreshMinutes(rawMinutes);
     if (backgroundRefreshMinutes === null) {
       throw new Error(`Background refresh must be off (0) or between ${MIN_REFRESH_MINUTES} and ${MAX_REFRESH_MINUTES} minutes.`);
     }
+    const autoRefresh =
+      formData.get("autoRefresh") === null ? previous.autoRefresh : formData.get("autoRefresh") === "on";
     const window = parseAlertWindow(formData.get("window") ?? "day");
     if (window === null) {
       throw new Error("Comparison window must be a day or a month.");
@@ -163,7 +175,6 @@ export async function saveAlertSettingsAction(
       ...new Set([...unknownPortfolioPlaceholders(telegramTemplate), ...unknownPortfolioPlaceholders(telegramNote)]),
     ];
 
-    const previous = await getAlertSettings();
     const nextWeeklyDay = weeklyDay ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.weeklyDay;
     const nextMonthlyDay = monthlyDay ?? DEFAULT_PORTFOLIO_ALERT_SETTINGS.monthlyDay;
     const scheduleChanged =
@@ -177,6 +188,7 @@ export async function saveAlertSettingsAction(
       window,
       channels,
       backgroundRefreshMinutes,
+      autoRefresh,
       portfolio: {
         enabled: portfolioEnabled,
         time: portfolioTime,
