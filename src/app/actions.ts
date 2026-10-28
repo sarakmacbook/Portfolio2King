@@ -192,6 +192,27 @@ export async function createAsset(_prev: ActionState, fd: FormData): Promise<Act
   redirect(`/assets/${newId}`);
 }
 
+/** Creates a top-level group directly from the main Holdings section. */
+export async function createHoldingGroup(name: string): Promise<{
+  ok: boolean;
+  folder?: HoldingFolder;
+  error?: string;
+}> {
+  try {
+    await ensureSchema();
+    if (!name.trim()) throw new Error("Enter a name for the group.");
+    const current = await loadHoldingsFolders();
+    if (current.length >= MAX_FOLDERS) throw new Error(`You can have at most ${MAX_FOLDERS} groups.`);
+    const folder = makeFolder({ name }, current);
+    if (!folder) throw new Error("Could not create that group.");
+    await saveHoldingsFolders([...current, folder]);
+    refresh();
+    return { ok: true, folder };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Could not create the group." };
+  }
+}
+
 /** Creates a nested folder owned by one holding, for filing other holdings inside it. */
 export async function createAssetSubfolder(parentAssetId: number, name: string): Promise<{
   ok: boolean;
