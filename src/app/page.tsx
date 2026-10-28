@@ -253,7 +253,7 @@ export default async function Dashboard() {
           realized: {
             value: money(dailyCombined, { sign: true }),
             valueClass: pnlColor(dailyCombined),
-            hint: `Booked today + crypto movement · all-time realized ${money(totals.realized, { sign: true })}`,
+            hint: `Today’s P/L + crypto · All-time realized ${money(totals.realized, { sign: true })}`,
           },
         }}
         blocks={{
