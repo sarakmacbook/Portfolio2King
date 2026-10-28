@@ -130,7 +130,7 @@ test("the four stat cards can be renamed and blank names fall back to defaults",
     cash: "Cash",
     invested: "Invested (cost basis)",
     unrealized: "Unrealized P/L",
-    realized: "Today’s P/L + crypto change",
+    realized: "Real time change",
   });
   assert.deepEqual(normaliseDashboardStatLabels(undefined), DEFAULT_DASHBOARD_STAT_LABELS);
   assert.deepEqual(normaliseDashboardStatLabels(""), DEFAULT_DASHBOARD_STAT_LABELS);
@@ -151,9 +151,13 @@ test("the four stat cards can be renamed and blank names fall back to defaults",
       cash: "Dry powder",
       invested: "Invested (cost basis)",
       unrealized: "Open gain",
-      realized: "Today’s P/L + crypto change",
+      realized: "Real time change",
     },
   );
+
+  assert.equal(normaliseDashboardStatLabels({ realized: "Today’s P/L + crypto change" }).realized, "Real time change");
+  assert.equal(normaliseDashboardStatLabels({ realized: "Today's realized P/L + income" }).realized, "Real time change");
+  assert.equal(normaliseDashboardStatLabels({ realized: "My custom label" }).realized, "My custom label");
 
   // Overlong labels are clipped to MAX_DASHBOARD_STAT_LABEL_LENGTH.
   const long = "x".repeat(MAX_DASHBOARD_STAT_LABEL_LENGTH + 20);
