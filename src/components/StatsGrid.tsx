@@ -8,6 +8,7 @@ import {
   moveStatTo,
   type DashboardStatKey,
 } from "@/lib/dashboard-stats";
+import DailyPerformance, { type DailyPerformanceProps } from "./DailyPerformance";
 import GripIcon from "./GripIcon";
 
 export type StatCardData = {
@@ -25,6 +26,7 @@ export type StatCardData = {
  */
 export default function StatsGrid({
   cards,
+  dailyPerformance,
   order,
   onOrderChange,
   labels,
@@ -32,6 +34,7 @@ export default function StatsGrid({
   arranging,
 }: {
   cards: Record<DashboardStatKey, StatCardData>;
+  dailyPerformance: DailyPerformanceProps;
   order: DashboardStatKey[];
   onOrderChange: (next: DashboardStatKey[]) => void;
   labels: Record<DashboardStatKey, string>;
@@ -161,6 +164,7 @@ export default function StatsGrid({
                     {label}
                   </p>
                 )}
+                {key === "realized" ? <DailyPerformance {...dailyPerformance} /> : <>
                 <p
                   className={`mt-2 truncate text-lg font-semibold tabular-nums sm:text-xl ${
                     card.valueClass ?? "text-slate-900"
@@ -171,6 +175,7 @@ export default function StatsGrid({
                 {card.hint && (
                   <p className={`mt-0.5 text-xs ${card.hintClass ?? "text-slate-500"}`}>{card.hint}</p>
                 )}
+                </>}
               </div>
             </div>
           );

@@ -19,6 +19,7 @@ import { DEFAULT_HOLDING_FILTER_ORDER, type HoldingFilter } from "@/lib/holdings
 import type { FolderAssignments, HoldingFolder } from "@/lib/holdings-folders";
 import GripIcon from "./GripIcon";
 import { HoldingsArrangeProvider } from "./holdings-arrange";
+import type { DailyPerformanceProps } from "./DailyPerformance";
 import StatsGrid, { type StatCardData } from "./StatsGrid";
 
 /** Column spans so the two charts stay side by side when they are adjacent. */
@@ -41,6 +42,7 @@ const SPAN: Record<DashboardBlockKey, string> = {
 export default function DashboardLayout({
   blocks,
   statsCards,
+  dailyPerformance,
   initialOrder = DEFAULT_DASHBOARD_ORDER,
   initialStatsOrder = DEFAULT_DASHBOARD_STAT_ORDER,
   initialStatsLabels = DEFAULT_DASHBOARD_STAT_LABELS,
@@ -52,6 +54,7 @@ export default function DashboardLayout({
   blocks: Record<Exclude<DashboardBlockKey, "stats">, ReactNode>;
   /** Values and hints for the four stat cards, keyed by stat id. */
   statsCards: Record<DashboardStatKey, StatCardData>;
+  dailyPerformance: DailyPerformanceProps;
   initialOrder?: DashboardBlockKey[];
   initialStatsOrder?: DashboardStatKey[];
   initialStatsLabels?: Record<DashboardStatKey, string>;
@@ -336,6 +339,7 @@ export default function DashboardLayout({
                   {key === "stats" ? (
                     <StatsGrid
                       cards={statsCards}
+                      dailyPerformance={dailyPerformance}
                       order={statsOrder}
                       onOrderChange={setStatsOrder}
                       labels={statsLabels}

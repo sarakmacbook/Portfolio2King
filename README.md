@@ -601,30 +601,28 @@ Details:
   cards stack in the saved order.
 - Saving the layout does not touch any holdings, balances or snapshots.
 
-### The dashboard card is today's realized P/L + income
+### Today's P/L + crypto change
 
-The **Today's realized P/L + income** stat card shows what was actually booked
-**today** — the profit or loss on today's sells plus any dividends and interest
-paid today — and goes back to `$0.00` at **12am**, so it answers "how did today
-go?" instead of growing forever. The label says *today* because that is the
-whole point of the number: the same figures summed over the full history would
-only ever grow. The all-time figure is still one glance away in the card's
-second line (`Since 12am · all-time +$1,240.00`, or `Resets at 12am · …` once
-nothing has been booked yet), and each asset page keeps its own **All-time
-realized P/L + income** total.
+The dashboard card combines today's booked realized P/L and income with the
+change in crypto's unrealized P/L. It uses the last price snapshot **before**
+today as an approximation of the midnight price, so the result is not an exact
+midnight-to-now return if that snapshot is older. Crypto positions without a
+prior snapshot are excluded from the market-change portion and flagged on the
+card; positions first opened today do not need a prior snapshot. Spam tokens are
+excluded.
 
-Details:
+The change in unrealized P/L is added to booked P/L rather than simply adding
+price changes on all holdings, avoiding double-counting when crypto is sold.
+The card also shows the all-time booked realized P/L separately. Today is
+measured in the portfolio alert timezone (or the server timezone by default),
+and the dashboard reloads its figures when that day changes.
 
-- Today's realised P/L is the all-time replay minus the replay of everything
-  dated before today, so the average cost used for a sell is the one that was
-  true on that day — a buy made today cannot retroactively change the cost of a
-  sale made today.
-- "Today" is read in the timezone set under **Alerts → Portfolio update →
-  timezone** (the browser's zone by default), so the reset happens at *your*
-  midnight even though the server may run in UTC. With no timezone saved it
-  falls back to the server's zone.
-- Income (dividends / interest) is split out from trades internally, and spam
-  tokens are skipped exactly as they are in every other total.
+While the dashboard is visible it requests fresh crypto quotes about once a
+second, waiting for each request to finish before starting another. Actual
+updates depend on the exchange's response time, availability and rate limits.
+The stored price or last successful quote is used if a quote fails, with a
+notice on the card; these display-only quotes do not change stored prices or
+send alerts. Assets without a selected exchange use Bybit for these quotes.
 
 ## Holdings folders
 

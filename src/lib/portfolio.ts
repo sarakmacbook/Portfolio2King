@@ -297,6 +297,21 @@ export async function getRealizedOnDay(day = today()): Promise<DayRealized> {
   return sumDayRealized(parts);
 }
 
+/** Ordered crypto transactions for reconstructing the start-of-day position. */
+export async function getCryptoTransactions() {
+  await ensureSchema();
+  return db.select({
+    assetId: transactions.assetId,
+    kind: transactions.kind,
+    quantity: transactions.quantity,
+    price: transactions.price,
+    fee: transactions.fee,
+    date: transactions.date,
+  }).from(transactions).innerJoin(assets, eq(assets.id, transactions.assetId))
+    .where(eq(assets.type, "crypto"))
+    .orderBy(asc(transactions.date), asc(transactions.id));
+}
+
 export async function recordAssetPriceSnapshot(assetId: number, snapshotDate: string, price: number, overwrite = true) {
   if (!Number.isFinite(price) || price <= 0) return;
   if (overwrite) {
