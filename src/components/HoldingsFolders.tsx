@@ -1,8 +1,6 @@
 "use client";
 
-import { useState, useTransition, type DragEvent } from "react";
-import { useRouter } from "next/navigation";
-import { createHoldingFolder } from "@/app/actions";
+import { useState, type DragEvent } from "react";
 import {
   FOLDER_COLORS,
   MAX_FOLDERS,
@@ -75,17 +73,11 @@ export default function HoldingsFolders({
   const [drop, setDrop] = useState<{ id: string; after: boolean } | null>(null);
   const [dropFolder, setDropFolder] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
-  const [folderError, setFolderError] = useState("");
-  const [creatingFolder, startCreatingFolder] = useTransition();
-  const router = useRouter();
 
-  /** The full folder editor is deferred until the user saves the layout. */
+  /** The editor exists only while arranging; changes are saved with the layout. */
   const showEditor = arranging && (creating || editing !== null);
-  /** In normal view, a simple create form saves the new folder immediately. */
-  const showQuickCreate = !arranging && creating;
 
   function startCreate() {
-    setFolderError("");
     setCreating(true);
     setEditing(null);
     setDraftName("");
@@ -119,22 +111,6 @@ export default function HoldingsFolders({
     onFoldersChange([...folders, folder]);
     setAnnouncement(`${folder.name} folder created.`);
     setCreating(false);
-  }
-
-  function commitQuickCreate() {
-    setFolderError("");
-    startCreatingFolder(async () => {
-      const result = await createHoldingFolder(draftName);
-      if (!result.ok || !result.folder || !result.folders) {
-        setFolderError(result.error ?? "Could not create the folder.");
-        return;
-      }
-      onFoldersChange(result.folders);
-      onSelect(`folder:${result.folder.id}`);
-      setCreating(false);
-      setAnnouncement(`${result.folder.name} folder created. Add a holding and choose it in the Folder menu.`);
-      router.refresh();
-    });
   }
 
   function commitEdit(id: string) {
@@ -265,15 +241,6 @@ export default function HoldingsFolders({
                 </button>
               );
             })}
-            <button
-              type="button"
-              className="rounded-xl border border-dashed border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-50"
-              onClick={startCreate}
-              disabled={folders.length >= MAX_FOLDERS}
-              title={`Create a folder for holdings (up to ${MAX_FOLDERS})`}
-            >
-              ＋ New folder
-            </button>
           </>
         )}
 
@@ -528,38 +495,6 @@ export default function HoldingsFolders({
         </div>
       )}
 
-      {showQuickCreate && (
-        <div className="mt-3 flex flex-col gap-2 rounded-xl border border-indigo-200 bg-white p-3 sm:flex-row sm:items-center">
-          <input
-            className="input min-w-0 flex-1"
-            placeholder="Folder name (e.g. Long term, Binance)"
-            value={draftName}
-            maxLength={MAX_FOLDER_NAME_LENGTH}
-            onChange={(event) => setDraftName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                commitQuickCreate();
-              }
-              if (event.key === "Escape") setCreating(false);
-            }}
-            aria-label="New folder name"
-            autoFocus
-          />
-          <button
-            type="button"
-            className="btn-primary text-xs"
-            onClick={commitQuickCreate}
-            disabled={creatingFolder || !draftName.trim()}
-          >
-            {creatingFolder ? "Creating…" : "Create folder"}
-          </button>
-          <button type="button" className="btn-ghost text-xs" onClick={() => setCreating(false)}>
-            Cancel
-          </button>
-          {folderError && <p role="alert" className="text-xs text-rose-700">{folderError}</p>}
-        </div>
-      )}
     </div>
   );
 }

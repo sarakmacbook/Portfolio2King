@@ -1067,19 +1067,21 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
         </p>
       )}
 
-      <HoldingsFolders
-        folders={folders}
-        assignments={assignments}
-        counts={folderStats.counts}
-        totals={folderStats.totals}
-        totalRows={rows.length}
-        selected={folderFilter}
-        onSelect={setFolderFilter}
-        arranging={arranging}
-        onFoldersChange={setFolders}
-        onAssignmentsChange={setAssignments}
-        onFileHolding={fileHolding}
-      />
+      {(hasFolders || arranging) && (
+        <HoldingsFolders
+          folders={folders}
+          assignments={assignments}
+          counts={folderStats.counts}
+          totals={folderStats.totals}
+          totalRows={rows.length}
+          selected={folderFilter}
+          onSelect={setFolderFilter}
+          arranging={arranging}
+          onFoldersChange={setFolders}
+          onAssignmentsChange={setAssignments}
+          onFileHolding={fileHolding}
+        />
+      )}
 
       <div className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[760px] text-sm">

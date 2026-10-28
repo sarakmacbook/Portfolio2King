@@ -103,6 +103,8 @@ async function settleCash(
 
 export async function createAsset(_prev: ActionState, fd: FormData): Promise<ActionState> {
   let newId: number;
+  let folderToCreate: HoldingFolder | null = null;
+  let foldersBeforeCreate: HoldingFolder[] = [];
   try {
     await ensureSchema();
     const type = str(fd, "type") as AssetType;
@@ -127,8 +129,18 @@ export async function createAsset(_prev: ActionState, fd: FormData): Promise<Act
     const date = validDate(str(fd, "date"));
     const notes = str(fd, "notes");
     const cashAccountId = Number(str(fd, "cashAccountId")) || 0;
-    const folderId = str(fd, "folderId");
-    if (folderId && !(await loadHoldingsFolders()).some((folder) => folder.id === folderId)) {
+    let folderId = str(fd, "folderId");
+    if (folderId === "__new__") {
+      foldersBeforeCreate = await loadHoldingsFolders();
+      const folderName = str(fd, "folderName");
+      if (!folderName) throw new Error("Enter a name for the new folder.");
+      if (foldersBeforeCreate.length >= MAX_FOLDERS) {
+        throw new Error(`You can have at most ${MAX_FOLDERS} folders.`);
+      }
+      folderToCreate = makeFolder({ name: folderName }, foldersBeforeCreate);
+      if (!folderToCreate) throw new Error("Could not create that folder.");
+      folderId = folderToCreate.id;
+    } else if (folderId && !(await loadHoldingsFolders()).some((folder) => folder.id === folderId)) {
       throw new Error("That folder no longer exists. Refresh and try again.");
     }
 
@@ -167,6 +179,9 @@ export async function createAsset(_prev: ActionState, fd: FormData): Promise<Act
       if (!isCash && (avgCost || currentPrice) > 0) {
         await recordAssetPriceSnapshot(newId, date, avgCost || currentPrice, false);
       }
+    }
+    if (folderToCreate) {
+      await saveHoldingsFolders([...foldersBeforeCreate, folderToCreate]);
     }
     if (folderId) await setHoldingFolder(newId, folderId);
     await recordSnapshot();
@@ -429,28 +444,6 @@ export async function saveHoldingFolderAssignment(input: {
     return { ok: true, assignments };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Could not move that holding." };
-  }
-}
-
-/** Creates and immediately persists a folder from the Holdings folder strip. */
-export async function createHoldingFolder(name: string): Promise<{
-  ok: boolean;
-  folder?: HoldingFolder;
-  folders?: HoldingFolder[];
-  error?: string;
-}> {
-  try {
-    await ensureSchema();
-    const current = await loadHoldingsFolders();
-    if (!String(name ?? "").trim()) throw new Error("Give the folder a name first.");
-    if (current.length >= MAX_FOLDERS) throw new Error(`You can have at most ${MAX_FOLDERS} folders.`);
-    const folder = makeFolder({ name: String(name) }, current);
-    if (!folder) throw new Error("Could not create that folder.");
-    const folders = await saveHoldingsFolders([...current, folder]);
-    refresh();
-    return { ok: true, folder, folders };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not create the folder." };
   }
 }
 
