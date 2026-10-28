@@ -97,6 +97,12 @@ export default function DashboardLayout({
       onAssetOrderChange: setAssetOrder,
       folders,
       onFoldersChange: setFolders,
+      onClearGroups: () => {
+        setFolders([]);
+        setAssignments({});
+        savedFolders.current = [];
+        savedAssignments.current = {};
+      },
       assignments,
       onAssignmentsChange: setAssignments,
     }),

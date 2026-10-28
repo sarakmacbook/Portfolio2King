@@ -645,7 +645,9 @@ Folders turn a long table into a few groups without changing any numbers:
 4. Pick *No folder* in a holding's dropdown to pull it out of its folder again.
    Folder and filing edits made in Arrange mode are applied when you click
    **Save layout**. **Reset to default** removes the folders; holdings are never
-   deleted, they just go back to being plain rows.
+   deleted, they just go back to being plain rows. Use **Remove all groups** in
+   the Holdings strip to clear every top-level and asset-owned group without
+   resetting the rest of the dashboard layout.
 
 On any holding's detail page, **Folders inside [holding name]** lets you create
 subfolders owned by that holding. Each subfolder has an **Add asset here** button

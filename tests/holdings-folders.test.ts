@@ -266,6 +266,9 @@ test("folders are saved, loaded and reset with the rest of the dashboard layout"
   assert.ok(strip.includes("＋ Add group"), "a group can be created from the Holdings section without arranging");
   assert.ok(strip.includes("createHoldingGroup(draftName)"), "the quick group form uses the server action");
   assert.ok(actions.includes("export async function createHoldingGroup"), "group creation is persisted server-side");
+  assert.ok(strip.includes("Remove all groups"), "all groups can be cleared directly from Holdings");
+  assert.ok(strip.includes("clearAllHoldingGroups()"), "clearing runs through a persistent server action");
+  assert.ok(actions.includes("export async function clearAllHoldingGroups"), "the clear action deletes folders and filing only");
   const dialog = read("src/components/AddAssetDialog.tsx");
   assert.ok(dialog.includes("Create a new folder…"), "folders can be created in the add-holding form");
   assert.ok(strip.includes("PRICE_PROVIDERS"), "a folder can wear an exchange icon");

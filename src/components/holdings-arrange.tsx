@@ -16,6 +16,8 @@ export type HoldingsArrangeState = {
   /** The Holdings folders, in display order. */
   folders: HoldingFolder[];
   onFoldersChange: (next: HoldingFolder[]) => void;
+  /** Clears folders and filing from persisted and in-memory dashboard state. */
+  onClearGroups: () => void;
   /** Which folder each holding is filed in (`assetId → folderId`). */
   assignments: FolderAssignments;
   onAssignmentsChange: (next: FolderAssignments) => void;
