@@ -55,7 +55,7 @@ export async function POST(request: Request) {
     try {
       await pool.query("SELECT 1");
       const result = await pool.query<{ allowed: boolean }>("SELECT has_schema_privilege(current_user, 'public', 'USAGE') AND has_schema_privilege(current_user, 'public', 'CREATE') AS allowed");
-      if (!result.rows[0]?.allowed) return Response.json({ error: "Connected, but this database user needs USAGE and CREATE permissions on the public schema to initialize Ledgerly." }, { status: 422 });
+      if (!result.rows[0]?.allowed) return Response.json({ error: "Connected, but this database user needs USAGE and CREATE permissions on the public schema to initialize Portfolio." }, { status: 422 });
     } catch {
       return Response.json({ error: "Connection failed. Check the host, database, username, password, network access, and TLS certificate. Use your provider’s pooled PostgreSQL URL for serverless hosting." }, { status: 422 });
     }

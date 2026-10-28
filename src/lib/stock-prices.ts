@@ -15,7 +15,7 @@ const CHART_HOSTS = ["https://query1.finance.yahoo.com", "https://query2.finance
 const REQUEST_TIMEOUT_MS = 8000;
 /** Yahoo dislikes unknown clients; a normal browser-style UA is the reliable choice. */
 const USER_AGENT =
-  "Mozilla/5.0 (compatible; Ledgerly/1.0; +https://github.com/sarakmacbook/Portfolio2King)";
+  "Mozilla/5.0 (compatible; Portfolio/1.0; +https://github.com/sarakmacbook/Portfolio2King)";
 /** Space requests out: a portfolio of 30 stocks is 30 calls, and Yahoo rate-limits bursts. */
 const MIN_GAP_MS = 120;
 const FX_CACHE_MS = 10 * 60_000;

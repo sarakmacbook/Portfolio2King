@@ -48,7 +48,7 @@ function baseSymbol(value: string) {
 async function getJson(url: string) {
   const response = await fetch(url, {
     cache: "no-store",
-    headers: { Accept: "application/json", "User-Agent": "Ledgerly/1.0" },
+    headers: { Accept: "application/json", "User-Agent": "Portfolio/1.0" },
     signal: AbortSignal.timeout(8000),
   });
   if (!response.ok) throw new Error(`Exchange returned ${response.status}`);

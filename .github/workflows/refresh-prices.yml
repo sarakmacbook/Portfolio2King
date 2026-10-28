@@ -2,7 +2,7 @@ name: Refresh crypto prices
 
 # Background refresh + alerts without a self-hosted scheduler.
 # Enable it by setting:
-#   Repository variable  APP_URL      e.g. https://ledgerly.example.com
+#   Repository variable  APP_URL      e.g. https://portfolio.example.com
 #   Repository secret    CRON_SECRET  the same value configured on the server
 # Scheduled workflows only run from the repository's default branch.
 on:

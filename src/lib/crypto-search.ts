@@ -49,7 +49,7 @@ const MAX_CACHE_ENTRIES = 100;
 const RESULT_LIMIT = 12;
 const TOP_LIMIT = 12;
 
-const HEADERS = { Accept: "application/json", "User-Agent": "Ledgerly/1.0" };
+const HEADERS = { Accept: "application/json", "User-Agent": "Portfolio/1.0" };
 
 class ProviderError extends Error {
   readonly status: number;

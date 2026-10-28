@@ -1,13 +1,13 @@
-# Ledgerly — Portfolio Manager
+# Portfolio
 
-A **self-hosted** portfolio tracker for cash, stocks and crypto. Ledgerly is a
+A **self-hosted** portfolio tracker for cash, stocks and crypto. Portfolio is a
 Next.js 16 (App Router) app backed by PostgreSQL through Drizzle ORM: you run it
 on your own machine, VPS, or home server, point it at your own database, and the
 data stays there.
 
 Prices are entered by hand, with optional one-click quotes from public exchange
 APIs (crypto) and Yahoo Finance (stocks). There is no hosted account, no
-analytics, and no proprietary backend. Ledgerly has **no authentication or per-user data isolation** — protect
+analytics, and no proprietary backend. Portfolio has **no authentication or per-user data isolation** — protect
 the deployment before storing real portfolio data (see the
 [self-hosting security checklist](#self-hosting-security-checklist)).
 
@@ -54,7 +54,7 @@ the deployment before storing real portfolio data (see the
 
 ## Supported currencies
 
-Ledgerly keeps a **single USD ledger**. USD is hard-coded as the reporting
+Portfolio keeps a **single USD ledger**. USD is hard-coded as the reporting
 currency (`CURRENCY` in [`src/lib/format.ts`](src/lib/format.ts)), and every
 amount is rendered with
 `Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })`. Totals,
@@ -95,7 +95,7 @@ and keep the original amount in the notes so you can audit it later:
 4. Re-value the account yourself when the rate moves by recording a deposit or
    withdrawal for the difference (cash balances change through transactions).
 
-Do **not** add `4,000,000` and tag it `KHR`: Ledgerly would count it as
+Do **not** add `4,000,000` and tag it `KHR`: Portfolio would count it as
 $4,000,000. If you keep one account per currency, treat them as USD accounts
 whose tags record the original currency.
 
@@ -753,7 +753,7 @@ supports `forgetDevice` so the browser can drop it on request.
 
 ### Install as an iPhone web clip
 
-Add Ledgerly to the Home Screen from Safari, then open it from the icon:
+Add Portfolio to the Home Screen from Safari, then open it from the icon:
 
 - `display: "standalone"` + `statusBarStyle: "black-translucent"` with
   `viewport-fit=cover`, so the header gradient runs under the status bar and the
@@ -766,7 +766,7 @@ Add Ledgerly to the Home Screen from Safari, then open it from the icon:
 
 ## Background refresh and alerts
 
-Ledgerly can keep crypto prices fresh on its own, notify you when a holding
+Portfolio can keep crypto prices fresh on its own, notify you when a holding
 moves beyond a threshold, and send a scheduled summary of your **whole
 portfolio** in money and percent. Alerts are delivered over **Web Push** (to a
 browser or an installed web clip) and/or **Telegram**.
@@ -869,7 +869,7 @@ box replaces the standard wording; leave it blank to keep the default.
 Portfolio ▲ +2.35% (+$1,222.00)
 Now $53,222.00 (+2.35% from $52,000.00)
 
-— sent from Ledgerly
+— sent from Portfolio
 ```
 
 That preview is produced by
@@ -880,7 +880,7 @@ That preview is produced by
 Now {total} ({percent} from {from})
 ```
 
-plus the note `— sent from Ledgerly`. The panel under the box is a live preview
+plus the note `— sent from Portfolio`. The panel under the box is a live preview
 of **your own** next message: the real totals, window and date are computed on
 the server and every placeholder is filled in, so it matches what Telegram
 receives and follows your edits (and the *Preview recap* picker) as you type. A
@@ -942,7 +942,7 @@ buttons above the box insert placeholders at the cursor.
 
 - Works in Chrome, Edge, Firefox, and Safari 16.4+.
 - **iOS/iPadOS:** Web Push is only available to web apps added to the Home
-  Screen. In Safari use Share → **Add to Home Screen**, then open Ledgerly from
+  Screen. In Safari use Share → **Add to Home Screen**, then open Portfolio from
   the icon and enable alerts there. The page shows this hint automatically on
   iPhone/iPad.
 - Android Chrome can also install the app from the menu.
@@ -1016,7 +1016,7 @@ page shows each channel’s status.
 [self-hosting step 7](#7-refresh-prices-in-the-background).
 
 **GitHub Actions** — `.github/workflows/refresh-prices.yml` runs every 15 minutes
-once you set the repository variable `APP_URL` (e.g. `https://ledgerly.example.com`)
+once you set the repository variable `APP_URL` (e.g. `https://portfolio.example.com`)
 and the secret `CRON_SECRET`. Scheduled workflows only run from the default
 branch.
 
@@ -1040,7 +1040,7 @@ the page triggers a throttled refresh on the interval above.
 
 ### Security and limits
 
-- `/alerts` and its endpoints are **unauthenticated**, like the rest of Ledgerly.
+- `/alerts` and its endpoints are **unauthenticated**, like the rest of Portfolio.
   Anyone who can reach the app can enable alerts on their own browser, change the
   threshold, and send test messages (throttled to one test per 15 seconds).
   Restrict access to the deployment as described in the
@@ -1088,8 +1088,8 @@ Nothing about it requires Vercel.
 ### 1. Get the code
 
 ```bash
-git clone <your-fork-url> /srv/ledgerly
-cd /srv/ledgerly
+git clone <your-fork-url> /srv/portfolio
+cd /srv/portfolio
 npm ci
 ```
 
@@ -1110,7 +1110,7 @@ chmod 600 .env.local
 | `TELEGRAM_BOT_TOKEN` | No | Telegram bot token from [@BotFather](https://t.me/BotFather). Optional — you can connect a bot on `/alerts` instead, which takes precedence. |
 | `TELEGRAM_CHAT_ID` | No | Chat, group, or `@channel` id that receives alerts. Optional when the bot is connected from `/alerts`. |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | No | Web Push key pair. When unset, a pair is generated once and stored in `app_settings`. |
-| `VAPID_SUBJECT` | No | Contact for push services, `mailto:` or `https:` (default `mailto:ledgerly@localhost`). |
+| `VAPID_SUBJECT` | No | Contact for push services, `mailto:` or `https:` (default `mailto:portfolio@localhost`). |
 
 Generate secrets with:
 
@@ -1133,7 +1133,7 @@ Notes:
 Either let the app create them on first dashboard load, or run:
 
 ```bash
-DATABASE_URL="postgresql://user:password@host:5432/ledgerly" npm run db:push
+DATABASE_URL="postgresql://user:password@host:5432/portfolio" npm run db:push
 ```
 
 For versioned schema changes, generate and apply SQL migrations instead:
@@ -1143,7 +1143,7 @@ DATABASE_URL="…" npm run db:generate   # writes ./drizzle/*.sql — commit the
 DATABASE_URL="…" npm run db:migrate
 ```
 
-Use a dedicated database and database user for Ledgerly. The user needs
+Use a dedicated database and database user for Portfolio. The user needs
 `USAGE` and `CREATE` on the public schema.
 
 ### 4. Build and start
@@ -1197,17 +1197,17 @@ server {
 
 ### 6. Keep it running
 
-A minimal systemd unit (`/etc/systemd/system/ledgerly.service`):
+A minimal systemd unit (`/etc/systemd/system/portfolio.service`):
 
 ```ini
 [Unit]
-Description=Ledgerly portfolio manager
+Description=Portfolio manager
 After=network.target postgresql.service
 
 [Service]
 Type=simple
-User=ledgerly
-WorkingDirectory=/srv/ledgerly
+User=portfolio
+WorkingDirectory=/srv/portfolio
 Environment=NODE_ENV=production
 ExecStart=/usr/bin/npm run start -- -H 127.0.0.1 -p 3000
 Restart=always
@@ -1219,11 +1219,11 @@ WantedBy=multi-user.target
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now ledgerly
+sudo systemctl enable --now portfolio
 ```
 
 Adjust `User`, paths, and the npm path for your host. Journald keeps the logs:
-`journalctl -u ledgerly -f`.
+`journalctl -u portfolio -f`.
 
 ### 7. Refresh prices in the background
 
@@ -1233,16 +1233,16 @@ prices while a tab is open (see
 instances, call the scheduled endpoint from the host.
 
 ```bash
-# /usr/local/bin/ledgerly-refresh  (chmod 700)
+# /usr/local/bin/portfolio-refresh  (chmod 700)
 #!/usr/bin/env sh
 set -eu
-. /etc/ledgerly/cron.env        # CRON_SECRET=…
+. /etc/portfolio/cron.env        # CRON_SECRET=…
 curl -fsS -H "Authorization: Bearer $CRON_SECRET" \
   http://127.0.0.1:3000/api/cron/refresh-prices
 ```
 
 ```cron
-*/15 * * * * /usr/local/bin/ledgerly-refresh
+*/15 * * * * /usr/local/bin/portfolio-refresh
 ```
 
 Every run refreshes live crypto and stock prices, records the daily snapshot, and sends
@@ -1260,43 +1260,43 @@ that reaches the internet.
 A systemd timer works too:
 
 ```ini
-# /etc/systemd/system/ledgerly-refresh.timer
+# /etc/systemd/system/portfolio-refresh.timer
 [Unit]
-Description=Refresh Ledgerly prices every 15 minutes
+Description=Refresh Portfolio prices every 15 minutes
 
 [Timer]
 OnBootSec=5min
 OnUnitActiveSec=15min
-Unit=ledgerly-refresh.service
+Unit=portfolio-refresh.service
 
 [Install]
 WantedBy=timers.target
 ```
 
 ```ini
-# /etc/systemd/system/ledgerly-refresh.service
+# /etc/systemd/system/portfolio-refresh.service
 [Unit]
-Description=Ledgerly price refresh
+Description=Portfolio price refresh
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/ledgerly-refresh
+ExecStart=/usr/local/bin/portfolio-refresh
 ```
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now ledgerly-refresh.timer
+sudo systemctl enable --now portfolio-refresh.timer
 ```
 
 ### 8. Update
 
 ```bash
-cd /srv/ledgerly
+cd /srv/portfolio
 git pull
 npm ci
 DATABASE_URL="…" npm run db:push   # only when the schema changed
 npm run build
-sudo systemctl restart ledgerly
+sudo systemctl restart portfolio
 ```
 
 Optional checks before restarting: `npm run typecheck`, `npm test`, `npm run lint`.
@@ -1311,8 +1311,8 @@ Two independent options:
 - **PostgreSQL level:**
 
   ```bash
-  pg_dump "$DATABASE_URL" -Fc -f "ledgerly-$(date +%F).dump"
-  pg_restore --clean --if-exists -d "$DATABASE_URL" ledgerly-YYYY-MM-DD.dump
+  pg_dump "$DATABASE_URL" -Fc -f "portfolio-$(date +%F).dump"
+  pg_restore --clean --if-exists -d "$DATABASE_URL" portfolio-YYYY-MM-DD.dump
   ```
 
 Backups contain your full portfolio; store and transfer them accordingly. Keep
@@ -1321,7 +1321,7 @@ is not part of the database.
 
 ### Self-hosting security checklist
 
-- **Ledgerly has no login.** Anyone who can reach it can read and change the
+- **Portfolio has no login.** Anyone who can reach it can read and change the
   entire portfolio. Keep it on a private network/VPN (e.g. Tailscale), or put
   basic authentication at the reverse proxy. Do not expose it to the open
   internet unauthenticated.
@@ -1359,7 +1359,7 @@ configured, the dashboard shows this same wizard.
    notes become a checklist for you to verify with the provider; they are not
    automatically analyzed or sent to any external service.
 2. Compare PostgreSQL, MySQL, SQLite, and MongoDB. **Only PostgreSQL is currently
-   supported** by Ledgerly’s Drizzle schema. The other types are informational,
+   supported** by Portfolio’s Drizzle schema. The other types are informational,
    not working database adapters.
 3. Choose Neon, Supabase, or an existing PostgreSQL server. Recommendations are
    deterministic guidance, not provisioning or a guarantee about provider prices.
@@ -1400,7 +1400,7 @@ Environment-variable configuration without the wizard remains supported.
   a trusted CA configured on the app server (e.g. `NODE_EXTRA_CA_CERTS`), not a
   disabled certificate check. URL certificate-file parameters are rejected.
 - Saving switches the database for the entire app. This is not per-user database
-  selection, and Ledgerly does not yet implement user authentication/data isolation.
+  selection, and Portfolio does not yet implement user authentication/data isolation.
   Restrict access to your deployment before storing sensitive portfolio data.
 - Self-hosted file saving applies to one server/process; restart other replicas
   with the same configuration. Prefer centrally managed environment variables
@@ -1411,7 +1411,7 @@ Environment-variable configuration without the wizard remains supported.
 Open **Database** → **Export & import database** (below the setup wizard):
 
 - **Export database** downloads one portable JSON file
-  (`ledgerly-backup-YYYY-MM-DD.json`, format version 1) containing every
+  (`portfolio-backup-YYYY-MM-DD.json`, format version 1) containing every
   asset, transaction, and snapshot in the currently connected PostgreSQL
   database. It is plain JSON — store it, diff it, or move your portfolio
   between providers (e.g. Neon → Supabase) without depending on `pg_dump`

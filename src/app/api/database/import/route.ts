@@ -41,7 +41,7 @@ export async function POST(request: Request) {
   }
 
   const file = form.get("file");
-  if (!(file instanceof File)) return Response.json({ error: "Choose a Ledgerly backup (.json) file to import." }, { status: 400 });
+  if (!(file instanceof File)) return Response.json({ error: "Choose a Portfolio backup (.json) file to import." }, { status: 400 });
   if (file.size === 0) return Response.json({ error: "The chosen file is empty." }, { status: 400 });
   if (file.size > MAX_BACKUP_BYTES) {
     return Response.json({ error: `Backup file is too large (limit ${Math.floor(MAX_BACKUP_BYTES / 1024 / 1024)} MB).` }, { status: 413 });

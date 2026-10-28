@@ -61,8 +61,8 @@ test("chatIdFromUpdates picks the most recent chat that messaged the bot", () =>
 
 test("chatIdFromUpdates handles channels and empty payloads", () => {
   assert.deepEqual(
-    chatIdFromUpdates({ ok: true, result: [{ channel_post: { chat: { id: -1001234567890, title: "Ledgerly news" } } }] }),
-    { chatId: "-1001234567890", title: "Ledgerly news" },
+    chatIdFromUpdates({ ok: true, result: [{ channel_post: { chat: { id: -1001234567890, title: "Portfolio news" } } }] }),
+    { chatId: "-1001234567890", title: "Portfolio news" },
   );
   assert.equal(chatIdFromUpdates({ ok: true, result: [] }), null);
   assert.equal(chatIdFromUpdates({ ok: false }), null);

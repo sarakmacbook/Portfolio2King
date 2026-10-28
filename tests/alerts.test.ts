@@ -160,7 +160,7 @@ test("settings rows round-trip through the parser", () => {
       sendUnchanged: true,
       autoNote: true,
       telegramTemplate: "Portfolio {arrow} {percent}",
-      telegramNote: "— sent from Ledgerly",
+      telegramNote: "— sent from Portfolio",
     },
   };
   const rows = settingsToRows({ ...settings, channels: [...settings.channels] });
@@ -184,7 +184,7 @@ test("settings rows round-trip through the parser", () => {
       sendUnchanged: true,
       autoNote: true,
       telegramTemplate: "Portfolio {arrow} {percent}",
-      telegramNote: "— sent from Ledgerly",
+      telegramNote: "— sent from Portfolio",
     },
   });
 });
@@ -727,12 +727,12 @@ test("the custom Telegram message fills placeholders, keeps the note, and falls 
   // A template replaces both standard lines and can re-use them.
   const custom = composePortfolioTelegramMessage(
     sampleMessage,
-    { telegramTemplate: "📊 {date} {time}\n{title}\nValue now {total}", telegramNote: "— Ledgerly" },
+    { telegramTemplate: "📊 {date} {time}\n{title}\nValue now {total}", telegramNote: "— Portfolio" },
     sampleContext,
   );
   assert.equal(
     custom,
-    "📊 2026-10-22 18:00\nPortfolio ▲ +2.35% (+$1,222.00)\nValue now $53,222.00\n\n— Ledgerly",
+    "📊 2026-10-22 18:00\nPortfolio ▲ +2.35% (+$1,222.00)\nValue now $53,222.00\n\n— Portfolio",
   );
 
   // Note on its own works with the standard message too.

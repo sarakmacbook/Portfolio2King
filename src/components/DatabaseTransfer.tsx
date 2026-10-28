@@ -48,7 +48,7 @@ export default function DatabaseTransfer() {
       }
       const blob = await response.blob();
       const disposition = response.headers.get("Content-Disposition") ?? "";
-      const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? "ledgerly-backup.json";
+      const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? "portfolio-backup.json";
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
       link.download = filename;
@@ -185,7 +185,7 @@ export default function DatabaseTransfer() {
                 disabled={busy !== null}
                 onChange={(e) => { setFile(e.target.files?.[0] ?? null); setMessage(""); setError(""); }}
               />
-              <span className="mt-1 block text-xs text-slate-500">Ledgerly backup (.json), up to 10 MB. The file is validated before anything is written, and the import runs as a single transaction — a failed import changes nothing.</span>
+              <span className="mt-1 block text-xs text-slate-500">Portfolio backup (.json), up to 10 MB. The file is validated before anything is written, and the import runs as a single transaction — a failed import changes nothing.</span>
             </label>
             <fieldset className="space-y-2">
               <legend className="label">Import mode</legend>
