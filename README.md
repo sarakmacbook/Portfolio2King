@@ -631,16 +631,20 @@ other providers. When any quotes fail, retries back off to reduce rate limiting.
 
 Folders turn a long table into a few groups without changing any numbers:
 
-1. Click **⇅ Arrange layout**, then **＋ New folder** in the strip above the
-   table. Name it (28 characters), pick a colour, and choose an icon: the first
-   letter, an exchange logo (Binance, OKX, Bybit, Coinbase, Kraken, DexScreener)
-   or any emoji you type.
-2. File holdings in: drag a row onto a folder chip, or use the **Folder** dropdown
-   on every row. A holding can be in one folder; holdings with no folder are
-   simply plain rows above the folder groups.
-3. Pick *No folder* in a holding's dropdown to pull it out of its folder again.
-4. Click **Save layout**. **Reset to default** removes the folders; the holdings
-   themselves are never deleted, they just go back to being plain rows.
+1. In **Add holding**, choose **Folder → Create a new folder…**, enter a name,
+   and submit the holding. It creates the folder and files the new holding there
+   in one step. Existing folders can be chosen from the same menu.
+2. To create an empty folder or customize one, click **⇅ Arrange layout**, then
+   **＋ New folder** in the strip above the table. Name it (28 characters), pick
+   a colour, and choose an icon: the first letter, an exchange logo (Binance,
+   OKX, Bybit, Coinbase, Kraken, DexScreener) or any emoji you type.
+3. File existing holdings by dragging a row onto a folder chip, or use the
+   **Folder** dropdown on every row. A holding can be in one folder; holdings
+   with no folder are simply plain rows above the folder groups.
+4. Pick *No folder* in a holding's dropdown to pull it out of its folder again.
+   Folder and filing edits made in Arrange mode are applied when you click
+   **Save layout**. **Reset to default** removes the folders; holdings are never
+   deleted, they just go back to being plain rows.
 
 **Dragging works outside arrange mode too**, which is the quick way to tidy up:
 
@@ -678,9 +682,9 @@ holdings into it, so a wallet reads as one group you can collapse or rename.
 Details:
 
 - Folders and filing are stored in `app_settings` under `holdings.folders` and
-  `holdings.folderAssignments`, are normalised on read (unknown ids, duplicates
-  and nameless folders are dropped) and are saved by the same **Save layout**
-  click as the cards, the tabs and the row order.
+  `holdings.folderAssignments`, and are normalised on read (unknown ids,
+  duplicates and nameless folders are dropped). A folder created while adding a
+  holding is saved with it; other folder edits are saved with **Save layout**.
 - A folder is a label, not a container: portfolio totals, weights, P/L and
   snapshots are unchanged, and a holding is never counted twice.
 - Deleting a folder unfiles its holdings; renaming or recolouring it keeps them.

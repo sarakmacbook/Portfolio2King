@@ -255,9 +255,10 @@ test("folders are saved, loaded and reset with the rest of the dashboard layout"
   assert.ok(table.includes("folderControl("), "each holding shows its folder");
 
   const strip = read("src/components/HoldingsFolders.tsx");
-  assert.ok(strip.includes("New folder"), "a folder can be created from Holdings outside arrange mode");
-  assert.ok(strip.includes("createHoldingFolder("), "new folders are persisted immediately");
-  assert.ok(strip.includes("onSelect(`folder:${result.folder.id}`)"), "the new folder becomes the selected category");
+  assert.ok(strip.includes("New folder"), "folders can still be created while arranging the layout");
+  assert.ok(!strip.includes("createHoldingFolder("), "the extra quick-create workflow is removed");
+  const dialog = read("src/components/AddAssetDialog.tsx");
+  assert.ok(dialog.includes("Create a new folder…"), "folders can be created in the add-holding form");
   assert.ok(strip.includes("PRICE_PROVIDERS"), "a folder can wear an exchange icon");
   assert.ok(strip.includes("aria-label=\"Custom folder icon"), "or a custom icon");
   assert.ok(strip.includes("onDragOver"), "holdings can be dragged onto a folder");

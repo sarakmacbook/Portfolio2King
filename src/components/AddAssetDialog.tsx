@@ -33,7 +33,7 @@ import {
   walletValueUsd,
   type ScanSort,
 } from "@/lib/wallet-results";
-import { MAX_FOLDER_NAME_LENGTH, type HoldingFolder } from "@/lib/holdings-folders";
+import { MAX_FOLDERS, MAX_FOLDER_NAME_LENGTH, type HoldingFolder } from "@/lib/holdings-folders";
 import {
   RECENT_ADDRESSES_KEY,
   addressKindHint,
@@ -140,6 +140,7 @@ function AddAssetForm({
   const [walletLogo, setWalletLogo] = useState<Web3WalletId | "">("");
   const [priceSource, setPriceSource] = useState<PriceProvider | "">("");
   const [folderId, setFolderId] = useState("");
+  const [newFolderName, setNewFolderName] = useState("");
   const [quoteCurrency, setQuoteCurrency] = useState<"USD" | "USDT">("USDT");
   const [quoteState, setQuoteState] = useState<{ status: "idle" | "loading" | "ok" | "error"; message: string }>({
     status: "idle",
@@ -2160,26 +2161,42 @@ function AddAssetForm({
         </div>
       </div>
 
-      {folders.length > 0 && (
-        <div>
-          <label className="label" htmlFor="new-holding-folder">Folder</label>
-          <select
-            id="new-holding-folder"
-            name="folderId"
-            className="input"
-            value={folderId}
-            onChange={(event) => setFolderId(event.target.value)}
-          >
-            <option value="">No folder</option>
-            {folders.map((folder) => (
-              <option key={folder.id} value={folder.id}>
-                {folder.name}
-              </option>
-            ))}
-          </select>
-          <p className="mt-1 text-xs text-slate-400">Choose a folder to file this holding there when it is added.</p>
-        </div>
-      )}
+      <div>
+        <label className="label" htmlFor="new-holding-folder">Folder</label>
+        <select
+          id="new-holding-folder"
+          name="folderId"
+          className="input"
+          value={folderId}
+          onChange={(event) => setFolderId(event.target.value)}
+        >
+          <option value="">No folder</option>
+          {folders.map((folder) => (
+            <option key={folder.id} value={folder.id}>
+              {folder.name}
+            </option>
+          ))}
+          {folders.length < MAX_FOLDERS && <option value="__new__">Create a new folder…</option>}
+        </select>
+        {folderId === "__new__" ? (
+          <div className="mt-2">
+            <label className="label" htmlFor="new-folder-name">New folder name</label>
+            <input
+              id="new-folder-name"
+              name="folderName"
+              className="input"
+              value={newFolderName}
+              maxLength={MAX_FOLDER_NAME_LENGTH}
+              onChange={(event) => setNewFolderName(event.target.value)}
+              placeholder="e.g. Long term, Binance"
+              required
+            />
+            <p className="mt-1 text-xs text-slate-400">This holding will be added to the new folder.</p>
+          </div>
+        ) : (
+          <p className="mt-1 text-xs text-slate-400">Choose an existing folder or create one while adding this holding.</p>
+        )}
+      </div>
 
       {isCash ? (
         <div className="grid gap-4 sm:grid-cols-2">
