@@ -30,6 +30,7 @@ import {
   getAllAssets,
   getAllPriceSnapshots,
   getCryptoTransactions,
+  getDailyCryptoFallbackPrices,
   getRecentActivity,
   getRealizedOnDay,
   getSnapshots,
@@ -73,9 +74,7 @@ export default async function Dashboard() {
   ]);
   const holdingAssignments = await loadHoldingFolderAssignments(holdingsFolders);
   /**
-   * The realised card shows only what was booked today. "Today" is read in the
-   * same timezone the portfolio alerts are scheduled in, so the number resets at
-   * the user's own 12am rather than at the server's.
+   * "Today" follows the portfolio alert timezone rather than the server's.
    */
   const realizedDay = dayKeyInTimeZone(new Date(), alertSettings.portfolio.timezone);
   const realizedToday = await getRealizedOnDay(realizedDay);
@@ -104,15 +103,28 @@ export default async function Dashboard() {
   }
 
   const cryptoTxByAsset = groupTxsByAsset(cryptoTransactions);
-  const dailyCrypto = valued.filter((asset) => asset.type === "crypto").map((asset) => ({
-    id: asset.id,
-    symbol: asset.symbol,
-    provider: asset.priceSource,
-    quantity: asset.quantity,
-    avgCost: asset.avgCost,
-    price: asset.currentPrice,
-    openingUnrealized: openingCryptoUnrealized(cryptoTxByAsset.get(asset.id) ?? [], byAsset.get(asset.id) ?? [], realizedDay),
-  }));
+  const cryptoAssets = valued.filter((asset) => asset.type === "crypto");
+  const openingById = new Map(cryptoAssets.map((asset) => [asset.id,
+    openingCryptoUnrealized(cryptoTxByAsset.get(asset.id) ?? [], byAsset.get(asset.id) ?? [], realizedDay),
+  ]));
+  const fallbackPrices = await getDailyCryptoFallbackPrices(realizedDay, cryptoAssets.map((asset) => asset.id),
+    cryptoAssets.filter((asset) => openingById.get(asset.id) === null).map((asset) => asset.id));
+  const dailyCrypto = cryptoAssets.map((asset) => {
+    const original = openingById.get(asset.id) ?? null;
+    const fallback = fallbackPrices.get(asset.id);
+    return {
+      id: asset.id,
+      symbol: asset.symbol,
+      provider: asset.priceSource,
+      quantity: asset.quantity,
+      avgCost: asset.avgCost,
+      price: asset.currentPrice,
+      openingUnrealized: fallback !== undefined
+        ? openingCryptoUnrealized(cryptoTxByAsset.get(asset.id) ?? [], [], realizedDay, fallback)
+        : original,
+      estimatedBaseline: fallback !== undefined,
+    };
+  });
   const dailyCombined = realizedToday.total + cryptoUnrealizedChange(dailyCrypto);
 
   const cashAccounts = list.filter((a) => a.type === "cash").map((a) => ({ id: a.id, name: a.name, quantity: a.quantity }));

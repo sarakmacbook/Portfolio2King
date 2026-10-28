@@ -109,6 +109,15 @@ export function ensureSchema() {
           telegram_sent integer NOT NULL DEFAULT 0,
           created_at timestamptz NOT NULL DEFAULT now()
         )`);
+      // Fixed first-observed daily price when no prior snapshot is available.
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS daily_crypto_baselines (
+          asset_id integer NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+          date date NOT NULL,
+          price double precision NOT NULL,
+          PRIMARY KEY (asset_id, date)
+        )`);
+
       // Per-exchange holdings, so re-syncing one venue never overwrites another.
       await db.execute(sql`
         CREATE TABLE IF NOT EXISTS exchange_balances (
@@ -310,6 +319,26 @@ export async function getCryptoTransactions() {
   }).from(transactions).innerJoin(assets, eq(assets.id, transactions.assetId))
     .where(eq(assets.type, "crypto"))
     .orderBy(asc(transactions.date), asc(transactions.id));
+}
+
+/** Persist one first-observed price per asset/day when no earlier snapshot exists.
+ * ON CONFLICT keeps concurrent dashboard loads from moving the baseline. */
+export async function getDailyCryptoFallbackPrices(day: string, ids: number[], missingIds: number[]): Promise<Map<number, number>> {
+  if (!ids.length) return new Map();
+  await ensureSchema();
+  if (missingIds.length) {
+    await db.execute(sql`
+      INSERT INTO daily_crypto_baselines (asset_id, date, price)
+      SELECT id, ${day}::date, current_price FROM assets
+      WHERE ${inArray(assets.id, missingIds)} AND current_price > 0
+      ON CONFLICT (asset_id, date) DO NOTHING
+    `);
+  }
+  const result = await db.execute<{ asset_id: number; price: number }>(sql`
+    SELECT asset_id, price FROM daily_crypto_baselines
+    WHERE date = ${day}::date AND asset_id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})
+  `);
+  return new Map(result.rows.map((row) => [Number(row.asset_id), Number(row.price)]));
 }
 
 export async function recordAssetPriceSnapshot(assetId: number, snapshotDate: string, price: number, overwrite = true) {

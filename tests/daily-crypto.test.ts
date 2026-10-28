@@ -17,6 +17,9 @@ test("opening uses latest valid prior snapshot, not today's overwritten snapshot
   assert.equal(openingCryptoUnrealized([before], [{ date: "2026-05-30", price: 90 }, ...snap], day), 40);
   assert.equal(openingCryptoUnrealized([before], [{ date: day, price: 150 }], day), null);
   assert.equal(openingCryptoUnrealized([], [], day), 0);
+  assert.equal(openingCryptoUnrealized([before], [], day, 125), 50);
+  assert.equal(openingCryptoUnrealized([before], [], day, 0), null);
+  assert.equal(openingCryptoUnrealized([before], snap, day, 125), 40);
 });
 
 test("live crypto movement changes the combined total without changing the baseline", () => {

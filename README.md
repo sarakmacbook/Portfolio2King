@@ -607,9 +607,11 @@ The dashboard card combines today's booked realized P/L and income with the
 change in crypto's unrealized P/L. It uses the last price snapshot **before**
 today as an approximation of the midnight price, so the result is not an exact
 midnight-to-now return if that snapshot is older. Crypto positions without a
-prior snapshot are excluded from the market-change portion and flagged on the
-card; positions first opened today do not need a prior snapshot. Spam tokens are
-excluded.
+prior snapshot use the first saved price observed by the dashboard that day as
+an estimated starting point. The baseline is stored and stays fixed across page
+reloads, and the card flags this approximation; positions without any valid saved
+price remain excluded until a baseline is available. Positions first opened
+today do not need a prior snapshot. Spam tokens are excluded.
 
 The change in unrealized P/L is added to booked P/L rather than simply adding
 price changes on all holdings, avoiding double-counting when crypto is sold.
@@ -622,7 +624,8 @@ second, waiting for each request to finish before starting another. Actual
 updates depend on the exchange's response time, availability and rate limits.
 The stored price or last successful quote is used if a quote fails, with a
 notice on the card; these display-only quotes do not change stored prices or
-send alerts. Assets without a selected exchange use Bybit for these quotes.
+send alerts. The holding's preferred exchange is tried first, with fallback to
+other providers. When any quotes fail, retries back off to reduce rate limiting.
 
 ## Holdings folders
 

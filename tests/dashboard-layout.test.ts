@@ -155,6 +155,7 @@ test("the four stat cards can be renamed and blank names fall back to defaults",
     },
   );
 
+  assert.equal(normaliseDashboardStatLabels({ realized: "Realized P/L + income" }).realized, "Real time change");
   assert.equal(normaliseDashboardStatLabels({ realized: "Today’s P/L + crypto change" }).realized, "Real time change");
   assert.equal(normaliseDashboardStatLabels({ realized: "Today's realized P/L + income" }).realized, "Real time change");
   assert.equal(normaliseDashboardStatLabels({ realized: "My custom label" }).realized, "My custom label");
