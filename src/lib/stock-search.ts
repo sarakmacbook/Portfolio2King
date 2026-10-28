@@ -27,7 +27,7 @@ const SEARCH_HOSTS = [
 
 const REQUEST_TIMEOUT_MS = 6000;
 const USER_AGENT =
-  "Mozilla/5.0 (compatible; Ledgerly/1.0; +https://github.com/sarakmacbook/Portfolio2King)";
+  "Mozilla/5.0 (compatible; Portfolio/1.0; +https://github.com/sarakmacbook/Portfolio2King)";
 
 /**
  * Curated directory of widely held global stocks and ETFs so users can browse

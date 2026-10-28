@@ -223,11 +223,11 @@ export async function POST(request: Request): Promise<Response> {
         ok: true,
         challenge,
         challengeToken,
-        rpName: "Ledgerly",
+        rpName: "Portfolio",
         user: {
           id: Buffer.from("ledgerly-portfolio-owner").toString("base64url"),
           name: "owner@ledgerly",
-          displayName: "Ledgerly Portfolio Owner",
+          displayName: "Portfolio Owner",
         },
       },
       [],

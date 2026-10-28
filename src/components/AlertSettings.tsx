@@ -335,7 +335,7 @@ function PortfolioTelegramEditor({
           maxLength={MAX_PORTFOLIO_NOTE_LENGTH}
           value={note}
           onChange={(event) => setNote(event.target.value)}
-          placeholder="e.g. — sent from Ledgerly"
+          placeholder="e.g. — sent from Portfolio"
           className="input"
         />
         <p className="mt-1 text-xs text-slate-400">

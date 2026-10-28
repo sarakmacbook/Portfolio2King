@@ -16,10 +16,10 @@ import { parsePriceSource, type PriceProvider } from "@/lib/market-prices";
 import { replay } from "@/lib/portfolio";
 
 /**
- * Versioned, portable backup of the whole (custom) Ledgerly database.
+ * Versioned, portable backup of the whole (custom) Portfolio database.
  *
  * The format is plain JSON so it can be stored, diffed, inspected, and
- * re-imported on any Ledgerly deployment — it does not depend on the
+ * re-imported on any Portfolio deployment — it does not depend on the
  * PostgreSQL server version, unlike a raw `pg_dump`.
  *
  *   { app: "ledgerly", kind: "portfolio-database-backup", version: 1,
@@ -203,7 +203,7 @@ function rows(value: unknown, table: keyof typeof MAX_BACKUP_ROWS): Record<strin
 export function parseBackup(input: unknown): PortfolioBackup {
   if (!isRecord(input)) fail("Backup file must contain a JSON object.");
   if (input.app !== BACKUP_APP || input.kind !== BACKUP_KIND) {
-    fail("This file is not a Ledgerly portfolio backup. Choose a file created by Export database.");
+    fail("This file is not a Portfolio backup. Choose a file created by Export database.");
   }
   if (input.version !== BACKUP_VERSION) {
     fail(`Unsupported backup version ${JSON.stringify(input.version)}. This app supports version ${BACKUP_VERSION}.`);
@@ -241,7 +241,7 @@ export function parseBackup(input: unknown): PortfolioBackup {
     if (assetIds.has(asset.id)) fail(`Backup contains asset id ${asset.id} more than once.`);
     assetIds.add(asset.id);
     if (asset.type === "cash" && asset.currentPrice !== 1) {
-      // Cash is always priced 1:1 in Ledgerly; normalise instead of trusting the file.
+      // Cash is always priced 1:1 in Portfolio; normalise instead of trusting the file.
       asset.currentPrice = 1;
     }
   }
@@ -361,7 +361,7 @@ export function parseBackup(input: unknown): PortfolioBackup {
 }
 
 export function backupFileName(date = new Date()): string {
-  return `ledgerly-backup-${date.toISOString().slice(0, 10)}.json`;
+  return `portfolio-backup-${date.toISOString().slice(0, 10)}.json`;
 }
 
 export function backupCounts(backup: PortfolioBackup) {

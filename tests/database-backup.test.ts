@@ -43,7 +43,7 @@ test("createBackup emits a versioned document with daily price snapshots that pa
     exchangeBalances: 0,
   });
   assert.equal(backup.tables.exchangeBalances, undefined, "no exchange rows means no extra table");
-  assert.match(backupFileName(now), /^ledgerly-backup-2026-01-02\.json$/);
+  assert.match(backupFileName(now), /^portfolio-backup-2026-01-02\.json$/);
 
   const parsed = parseBackup(JSON.parse(JSON.stringify(backup)));
   assert.equal(parsed.tables.assets[1].quantity, 10);
@@ -103,7 +103,7 @@ test("parseBackup recomputes derived balances and normalises cash price", () => 
 test("parseBackup rejects foreign, future, corrupt, and inconsistent files", () => {
   const cases: Array<[string, unknown, RegExp]> = [
     ["not an object", "nope", /JSON object/],
-    ["foreign file", { ...validBackup(), app: "other" }, /not a Ledgerly/],
+    ["foreign file", { ...validBackup(), app: "other" }, /not a Portfolio/],
     ["future version", { ...validBackup(), version: 99 }, /version 99/],
     ["missing tables", { ...validBackup(), tables: undefined }, /tables/],
   ];

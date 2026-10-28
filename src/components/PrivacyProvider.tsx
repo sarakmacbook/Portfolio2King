@@ -140,7 +140,7 @@ async function runBrowserPasskeyRegistration(options: {
     publicKey: {
       challenge: base64urlToUint8Array(options.challenge),
       rp: {
-        name: options.rpName || "Ledgerly",
+        name: options.rpName || "Portfolio",
       },
       user: {
         id: base64urlToUint8Array(options.user.id),

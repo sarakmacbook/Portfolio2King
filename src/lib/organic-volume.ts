@@ -230,7 +230,7 @@ export async function fetchMarketSignals(
     try {
       const response = await fetchImpl(`${DEXSCREENER_TOKENS_URL}/${batch.join(",")}`, {
         signal: controller.signal,
-        headers: { Accept: "application/json", "User-Agent": "Ledgerly/1.0" },
+        headers: { Accept: "application/json", "User-Agent": "Portfolio/1.0" },
         cache: "no-store",
       });
       if (!response.ok) continue;

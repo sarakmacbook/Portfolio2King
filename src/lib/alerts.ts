@@ -178,7 +178,7 @@ export async function getVapidConfig(): Promise<VapidConfig> {
 
 function vapidSubject(): string {
   const configured = process.env.VAPID_SUBJECT?.trim();
-  return configured && /^(mailto:|https:\/\/)/.test(configured) ? configured : "mailto:ledgerly@localhost";
+  return configured && /^(mailto:|https:\/\/)/.test(configured) ? configured : "mailto:portfolio@localhost";
 }
 
 /** Sends a notification to every stored subscription and prunes dead endpoints. */
@@ -407,7 +407,7 @@ export async function sendTestAlert(channel: "push" | "telegram" | "all"): Promi
   return dispatchAlert({
     dedupeKey: `test:${now.toISOString()}`,
     kind: "test",
-    title: "Ledgerly test alert",
+    title: "Portfolio test alert",
     body: "If you can read this, alerts are working. You will get a message when a holding moves beyond your threshold.",
     url: "/alerts",
     channels,

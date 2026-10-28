@@ -1,4 +1,4 @@
-/* Ledgerly service worker — displays Web Push price alerts. */
+/* Portfolio service worker — displays Web Push price alerts. */
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -16,9 +16,9 @@ self.addEventListener("push", (event) => {
     payload = {};
   }
 
-  const title = typeof payload.title === "string" && payload.title ? payload.title : "Ledgerly alert";
+  const title = typeof payload.title === "string" && payload.title ? payload.title : "Portfolio alert";
   const options = {
-    body: typeof payload.body === "string" ? payload.body : "Open Ledgerly for details.",
+    body: typeof payload.body === "string" ? payload.body : "Open Portfolio for details.",
     icon: "/icon.png",
     badge: "/icon.png",
     // Re-use the tag so a repeated alert for the same asset replaces the old one.

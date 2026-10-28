@@ -3,8 +3,8 @@ import type { MetadataRoute } from "next";
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: "/",
-    name: "Ledgerly — Portfolio Manager",
-    short_name: "Ledgerly",
+    name: "Portfolio",
+    short_name: "Portfolio",
     description: "Track cash, stocks and crypto holdings.",
     start_url: "/",
     scope: "/",

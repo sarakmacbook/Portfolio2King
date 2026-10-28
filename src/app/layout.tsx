@@ -11,13 +11,13 @@ import { bootScript } from "@/lib/theme";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Ledgerly — Portfolio Manager",
+  title: "Portfolio",
   description: "Track cash, stocks and crypto holdings with manual input.",
-  applicationName: "Ledgerly",
+  applicationName: "Portfolio",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
-    title: "Ledgerly",
+    title: "Portfolio",
     statusBarStyle: "black-translucent",
   },
   formatDetection: { telephone: false, email: false, address: false },
@@ -58,13 +58,13 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               <Link
                 href="/"
                 className="flex shrink-0 items-center gap-2 text-white"
-                aria-label="Ledgerly dashboard"
+                aria-label="Portfolio dashboard"
               >
                 <span className="grid h-11 w-11 place-items-center rounded-xl bg-white/15 text-lg ring-1 ring-white/25 sm:h-9 sm:w-9">
                   ◆
                 </span>
                 <span className="hidden text-lg font-semibold tracking-tight min-[390px]:inline">
-                  Ledgerly
+                  Portfolio
                 </span>
               </Link>
               <div className="flex min-w-0 items-center gap-2">

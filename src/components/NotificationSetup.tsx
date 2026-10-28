@@ -173,7 +173,7 @@ export default function NotificationSetup({
 
       {iosHint && state !== "unsupported" && (
         <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-200">
-          On iPhone and iPad, add Ledgerly to your Home Screen first (Share → <strong>Add to Home Screen</strong>) and
+          On iPhone and iPad, add Portfolio to your Home Screen first (Share → <strong>Add to Home Screen</strong>) and
           open it from there — iOS only delivers Web Push to installed web clips.
         </p>
       )}

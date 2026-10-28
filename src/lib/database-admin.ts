@@ -3,7 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 /**
  * Shared guard for sensitive database operations (export / import).
  *
- * Ledgerly has no user accounts yet (see README), so — like the rest of the
+ * Portfolio has no user accounts yet (see README), so — like the rest of the
  * app — these endpoints are open when no administrator key is configured.
  * As soon as `DATABASE_SETUP_TOKEN` (≥ 32 chars, the same key used by the
  * database setup wizard) is set on the server, it becomes required, so a
