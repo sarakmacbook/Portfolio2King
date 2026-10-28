@@ -9,6 +9,8 @@ import HoldingsTable, { type HoldingRow } from "@/components/HoldingsTable";
 import PortfolioValueHeader from "@/components/PortfolioValueHeader";
 import RefreshPricesButton from "@/components/RefreshPricesButton";
 import { getAlertSettings } from "@/lib/alerts";
+import { cryptoUnrealizedChange, openingCryptoUnrealized } from "@/lib/daily-crypto";
+import { groupTxsByAsset } from "@/lib/daily-realized";
 import { dayKeyInTimeZone } from "@/lib/daily-realized";
 import {
   loadDashboardOrder,
@@ -27,6 +29,7 @@ import {
   computeTotals,
   getAllAssets,
   getAllPriceSnapshots,
+  getCryptoTransactions,
   getRecentActivity,
   getRealizedOnDay,
   getSnapshots,
@@ -53,6 +56,7 @@ export default async function Dashboard() {
     holdingsFolders,
     walletLogos,
     alertSettings,
+    cryptoTransactions,
   ] = await Promise.all([
     getSnapshots(),
     getAllPriceSnapshots(),
@@ -65,6 +69,7 @@ export default async function Dashboard() {
     loadHoldingsFolders(),
     loadAssetWalletLogos(),
     getAlertSettings(),
+    getCryptoTransactions(),
   ]);
   const holdingAssignments = await loadHoldingFolderAssignments(holdingsFolders);
   /**
@@ -97,6 +102,18 @@ export default async function Dashboard() {
     existing.push({ date: row.date, price: row.price });
     byAsset.set(row.assetId, existing);
   }
+
+  const cryptoTxByAsset = groupTxsByAsset(cryptoTransactions);
+  const dailyCrypto = valued.filter((asset) => asset.type === "crypto").map((asset) => ({
+    id: asset.id,
+    symbol: asset.symbol,
+    provider: asset.priceSource,
+    quantity: asset.quantity,
+    avgCost: asset.avgCost,
+    price: asset.currentPrice,
+    openingUnrealized: openingCryptoUnrealized(cryptoTxByAsset.get(asset.id) ?? [], byAsset.get(asset.id) ?? [], realizedDay),
+  }));
+  const dailyCombined = realizedToday.total + cryptoUnrealizedChange(dailyCrypto);
 
   const cashAccounts = list.filter((a) => a.type === "cash").map((a) => ({ id: a.id, name: a.name, quantity: a.quantity }));
   /**
@@ -205,6 +222,7 @@ export default async function Dashboard() {
         initialAssetOrder={holdingOrder}
         initialFolders={holdingsFolders}
         initialAssignments={holdingAssignments}
+        dailyPerformance={{ holdings: dailyCrypto, realized: realizedToday.total, allTimeRealized: totals.realized, day: realizedDay, timeZone: alertSettings.portfolio.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone }}
         statsCards={{
           cash: {
             value: money(totals.cashValue),
@@ -221,13 +239,9 @@ export default async function Dashboard() {
             hintClass: pnlColor(totals.unrealized),
           },
           realized: {
-            // Today's sells and income only — the card goes back to $0.00 at 12am.
-            value: money(realizedToday.total, { sign: true }),
-            valueClass: pnlColor(realizedToday.total),
-            hint:
-              realizedToday.count > 0
-                ? `Since 12am · all-time ${money(totals.realized, { sign: true })}`
-                : `Resets at 12am · all-time ${money(totals.realized, { sign: true })}`,
+            value: money(dailyCombined, { sign: true }),
+            valueClass: pnlColor(dailyCombined),
+            hint: `Booked today + crypto movement · all-time realized ${money(totals.realized, { sign: true })}`,
           },
         }}
         blocks={{
