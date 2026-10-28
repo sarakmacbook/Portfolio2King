@@ -14,7 +14,7 @@ export type DailyPerformanceProps = {
   timeZone: string;
 };
 
-/** Live quotes are display-only; they never write prices or trigger alerts. */
+/** Live prices are display-only; they never write prices or trigger alerts. */
 export default function DailyPerformance({ holdings, realized, allTimeRealized, day, timeZone }: DailyPerformanceProps) {
   const router = useRouter();
   const [prices, setPrices] = useState<Record<number, number>>({});
@@ -87,10 +87,10 @@ export default function DailyPerformance({ holdings, realized, allTimeRealized, 
   const estimatedBaseline = holdings.some((holding) => holding.estimatedBaseline);
   const unquotable = holdings.some((holding) => holding.quantity !== 0 && !holding.symbol.trim() && holding.openingUnrealized !== null);
   const unpriced = holdings.some((holding) => holding.quantity !== 0 && holding.openingUnrealized !== null && !(prices[holding.id] > 0) && !(holding.price > 0));
-  const quoteStatus = status === "partial" || unquotable ? "Some quotes unavailable; using last price" : status === "live" ? "Live quotes" : "Using saved prices";
+  const quoteStatus = status === "partial" || unquotable ? "Some prices unavailable · Last price used" : status === "live" ? "Live prices" : "Using saved prices";
   return <>
     <p className={`mt-2 truncate text-lg font-semibold tabular-nums sm:text-xl ${pnlColor(total)}`}>{money(total, { sign: true })}</p>
-    <p className="mt-0.5 text-xs text-slate-500">Booked today + crypto change · all-time realized {money(allTimeRealized, { sign: true })}</p>
-    <p className="mt-0.5 text-xs text-slate-500">{quoteStatus} · {estimatedBaseline ? "Some changes measured from first saved price today" : "Compared with prior snapshot"}{missingBaseline ? " · Some crypto excluded: no prior snapshot" : ""}{unpriced ? " · Unpriced crypto excluded" : ""}</p>
+    <p className="mt-0.5 text-xs text-slate-500">Today’s P/L + crypto · All-time realized {money(allTimeRealized, { sign: true })}</p>
+    <p className="mt-0.5 text-xs text-slate-500">{quoteStatus} · {estimatedBaseline ? "Some start at today’s first saved price" : "vs. last snapshot"}{missingBaseline ? " · Some crypto skipped: no starting price" : ""}{unpriced ? " · Unpriced crypto skipped" : ""}</p>
   </>;
 }
