@@ -601,7 +601,7 @@ Details:
   cards stack in the saved order.
 - Saving the layout does not touch any holdings, balances or snapshots.
 
-### Today's P/L + crypto change
+### Real time change
 
 The dashboard card combines today's booked realized P/L and income with the
 change in crypto's unrealized P/L. It uses the last price snapshot **before**

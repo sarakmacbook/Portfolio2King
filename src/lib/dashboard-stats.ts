@@ -19,7 +19,7 @@ export const DASHBOARD_STATS: Record<DashboardStatKey, DashboardStatMeta> = {
   invested: { label: "Invested (cost basis)", hint: "What the open positions cost" },
   unrealized: { label: "Unrealized P/L", hint: "Open profit and loss" },
   realized: {
-    label: "Today’s P/L + crypto change",
+    label: "Real time change",
     hint: "Today’s booked P/L and income plus crypto market movement",
   },
 };
@@ -75,8 +75,8 @@ export function normaliseDashboardStatLabels(
   for (const key of DASHBOARD_STAT_KEYS) {
     const candidate = raw[key];
     if (typeof candidate !== "string") continue;
-    // Migrate the old default, without changing other custom labels.
-    if (key === "realized" && candidate.trim() === "Today's realized P/L + income") continue;
+    // Migrate previous defaults, without changing other custom labels.
+    if (key === "realized" && ["Today's realized P/L + income", "Today’s P/L + crypto change"].includes(candidate.trim())) continue;
     const cleaned = candidate.trim().slice(0, MAX_DASHBOARD_STAT_LABEL_LENGTH);
     if (cleaned.length > 0) {
       labels[key] = cleaned;
