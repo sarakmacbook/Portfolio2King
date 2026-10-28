@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchMarketPrice, isPriceProvider, PRICE_PROVIDERS, type PriceProvider } from "@/lib/market-prices";
+import { fetchMarketPrice, fetchPreferredMarketPrice, parsePriceSource, isPriceProvider, PRICE_PROVIDERS, type PriceProvider } from "@/lib/market-prices";
 import { fetchStockQuote } from "@/lib/stock-prices";
 
 export const dynamic = "force-dynamic";
@@ -7,6 +7,8 @@ export const dynamic = "force-dynamic";
 type RequestBody = {
   provider?: string;
   quote?: string;
+  /** Optional fallback across exchanges, used by the dashboard live card. */
+  fallback?: boolean;
   /** `provider` per asset overrides the request default (the exchange it was added from). */
   assets?: Array<{ id?: number; symbol?: string; type?: string; provider?: string }>;
 };
@@ -42,11 +44,12 @@ export async function POST(request: Request) {
       // The exchange stored on an asset wins over the page-level selector.
       const source = isPriceProvider(preferred) ? preferred : provider;
       try {
-        const price =
-          type === "stock"
-            ? (await fetchStockQuote(symbol)).price
-            : await fetchMarketPrice(source, symbol, quote);
-        return { id, price, provider: source };
+        if (type === "stock") return { id, price: (await fetchStockQuote(symbol)).price, provider: source };
+        if (body.fallback) {
+          const result = await fetchPreferredMarketPrice(parsePriceSource(preferred), symbol, quote);
+          return { id, price: result.price, provider: result.provider };
+        }
+        return { id, price: await fetchMarketPrice(source, symbol, quote), provider: source };
       } catch (error) {
         return { id, error: error instanceof Error ? error.message : "Price unavailable" };
       }

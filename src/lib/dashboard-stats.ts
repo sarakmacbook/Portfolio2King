@@ -76,7 +76,7 @@ export function normaliseDashboardStatLabels(
     const candidate = raw[key];
     if (typeof candidate !== "string") continue;
     // Migrate previous defaults, without changing other custom labels.
-    if (key === "realized" && ["Today's realized P/L + income", "Today’s P/L + crypto change"].includes(candidate.trim())) continue;
+    if (key === "realized" && ["Realized P/L + income", "Today's realized P/L + income", "Today’s P/L + crypto change"].includes(candidate.trim())) continue;
     const cleaned = candidate.trim().slice(0, MAX_DASHBOARD_STAT_LABEL_LENGTH);
     if (cleaned.length > 0) {
       labels[key] = cleaned;
