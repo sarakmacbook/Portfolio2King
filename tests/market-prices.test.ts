@@ -4,6 +4,7 @@ import {
   CEX_PROVIDERS,
   PRICE_PROVIDERS,
   describePriceSource,
+  fetchMarketPrice,
   fetchPreferredMarketPrice,
   parsePriceSource,
   providerOrder,
@@ -14,7 +15,7 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-/** Minimal JSON response for the public tickers the providers call. */
+/** Minimal JSON response for the public order books the providers call. */
 function json(payload: unknown, ok = true, status = 200) {
   return { ok, status, json: async () => payload } as unknown as Response;
 }
@@ -58,14 +59,14 @@ test("the pinned exchange answers first and is reported back", async () => {
   const calls: string[] = [];
   stubFetch((url) => {
     calls.push(url);
-    if (url.includes("api.binance.com")) return json({ price: "61234.50" });
+    if (url.includes("api.binance.com")) return json({ bids: [["61234.00", "1"]], asks: [["61235.00", "1"]] });
     return json({ price: "1" });
   });
 
   const result = await fetchPreferredMarketPrice("binance", "btc", "USDT");
   assert.deepEqual(result, { price: 61_234.5, provider: "binance" });
   assert.equal(calls.length, 1, "the pinned exchange answers on its own");
-  assert.match(calls[0], /symbol=BTCUSDT/);
+  assert.match(calls[0], /api\/v3\/depth\?symbol=BTCUSDT&limit=5/);
 });
 
 test("a pinned exchange that does not list the pair falls back to the others", async () => {
@@ -73,7 +74,7 @@ test("a pinned exchange that does not list the pair falls back to the others", a
   stubFetch((url) => {
     calls.push(url);
     if (url.includes("api.binance.com")) return json({ msg: "Invalid symbol." }, false, 400);
-    if (url.includes("api.bybit.com")) return json({ result: { list: [{ lastPrice: "0.5123" }] } });
+    if (url.includes("api.bybit.com")) return json({ result: { b: [["0.5120", "10"]], a: [["0.5126", "12"]] } });
     return json({}, false, 404);
   });
 
@@ -84,10 +85,51 @@ test("a pinned exchange that does not list the pair falls back to the others", a
   assert.ok(calls.indexOf(calls.find((url) => url.includes("api.binance.com"))!) < calls.length);
 });
 
+test("each centralized exchange quote is the midpoint of its best spot bid and ask", async () => {
+  const cases = [
+    {
+      host: "api.bybit.com",
+      body: { result: { b: [["99", "2"]], a: [["101", "3"]] } },
+      expectedUrl: /category=spot&symbol=ETHUSDT&limit=1/,
+    },
+    {
+      host: "www.okx.com",
+      body: { data: [{ bids: [["99", "2"]], asks: [["101", "3"]] }] },
+      expectedUrl: /instId=ETH-USDT&sz=1/,
+    },
+    {
+      host: "api.exchange.coinbase.com",
+      body: { bids: [["99", "2", 1]], asks: [["101", "3", 1]] },
+      expectedUrl: /products\/ETH-USDT\/book\?level=1/,
+    },
+  ];
+  for (const sample of cases) {
+    let requested = "";
+    stubFetch((url) => {
+      if (url.includes(sample.host)) {
+        requested = url;
+        return json(sample.body);
+      }
+      return json({}, false, 404);
+    });
+    const provider = sample.host === "api.bybit.com" ? "bybit" : sample.host === "www.okx.com" ? "okx" : "coinbase";
+    assert.equal(await fetchMarketPrice(provider, "ETH", "USDT"), 100);
+    assert.match(requested, sample.expectedUrl);
+  }
+});
+
+test("a malformed or crossed order book is rejected rather than recording a bogus price", async () => {
+  stubFetch((url) => url.includes("api.binance.com")
+    ? json({ bids: [["102", "1"]], asks: [["101", "1"]] })
+    : json({}, false, 404));
+  await assert.rejects(() => fetchMarketPrice("binance", "BTC", "USDT"), /crossed order book/);
+});
+
 test("without a preference any provider can answer, as before", async () => {
   stubFetch((url) => {
     if (url.includes("api.kraken.com")) {
-      return json({ result: { XXBTZUSD: { c: ["43210.1"] } } });
+      assert.match(url, /Depth\?pair=XBTUSDT&count=1/);
+      return json({ result: { XXBTZUSDT: { bids: [["43210.00", "1", 0]], asks: [["43210.20", "1", 0]] } } });
     }
     return json({}, false, 503);
   });

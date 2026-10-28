@@ -14,8 +14,9 @@ export const dynamic = "force-dynamic";
  *
  * One live quote from the chosen public exchange. The bulk endpoint
  * (`/api/prices/live`) needs asset ids that a holding being created does not
- * have yet, so the Add asset dialog asks here instead. No API keys: these are
- * the exchanges' public spot tickers.
+ * have yet, so the Add asset dialog asks here instead. Centralized exchange
+ * prices are best-bid/ask midpoints from public spot order books; no API key is
+ * required or sent for public market data.
  */
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;

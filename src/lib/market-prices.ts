@@ -1,7 +1,7 @@
 export const PRICE_PROVIDERS = ["bybit", "okx", "binance", "coinbase", "kraken", "dexscreener"] as const;
 export type PriceProvider = (typeof PRICE_PROVIDERS)[number];
 
-/** Centralised exchanges with public spot tickers — what a crypto asset can be pinned to. */
+/** Centralised exchanges with public spot order books — what a crypto asset can be pinned to. */
 export const CEX_PROVIDERS = ["bybit", "okx", "binance", "coinbase", "kraken"] as const;
 
 export const PROVIDER_LABELS: Record<PriceProvider, string> = {
@@ -61,32 +61,55 @@ function validPrice(value: unknown) {
   return price;
 }
 
-/** Read a public spot ticker. Private exchange keys are intentionally never required. */
+/** Calculate a neutral spot mark from the top of an order book. */
+function midPrice(bid: unknown, ask: unknown) {
+  const bestBid = validPrice(bid);
+  const bestAsk = validPrice(ask);
+  if (bestAsk < bestBid) throw new Error("Exchange returned a crossed order book");
+  return (bestBid + bestAsk) / 2;
+}
+
+function krakenPair(symbol: string, quote: "USD" | "USDT") {
+  const normalized = quote === "USD" ? "USD" : "USDT";
+  // Kraken uses XBT for BTC in its pair identifiers.
+  return `${symbol === "BTC" ? "XBT" : symbol}${normalized}`;
+}
+
+/**
+ * Read the midpoint of the best bid and ask in a public spot order book.
+ * Order books are public market data; an API key is not required or sent.
+ * A midpoint avoids valuing a holding using only the last trade, which may be
+ * stale or far from the current market. DexScreener remains a DEX fallback.
+ */
 export async function fetchMarketPrice(provider: PriceProvider, rawSymbol: string, quote: "USD" | "USDT") {
   const symbol = baseSymbol(rawSymbol);
+  const marketQuote = quote === "USD" ? "USDT" : quote;
 
   switch (provider) {
     case "bybit": {
-      const data = await getJson(`https://api.bybit.com/v5/market/tickers?category=spot&symbol=${symbol}${quote === "USD" ? "USDT" : quote}`);
-      return validPrice(data?.result?.list?.[0]?.lastPrice);
+      const data = await getJson(`https://api.bybit.com/v5/market/orderbook?category=spot&symbol=${symbol}${marketQuote}&limit=1`);
+      const book = data?.result;
+      return midPrice(book?.b?.[0]?.[0], book?.a?.[0]?.[0]);
     }
     case "okx": {
-      const data = await getJson(`https://www.okx.com/api/v5/market/ticker?instId=${symbol}-${quote === "USD" ? "USDT" : quote}`);
-      return validPrice(data?.data?.[0]?.last);
+      const data = await getJson(`https://www.okx.com/api/v5/market/books?instId=${symbol}-${marketQuote}&sz=1`);
+      const book = data?.data?.[0];
+      return midPrice(book?.bids?.[0]?.[0], book?.asks?.[0]?.[0]);
     }
     case "binance": {
-      const data = await getJson(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}${quote === "USD" ? "USDT" : quote}`);
-      return validPrice(data?.price);
+      const data = await getJson(`https://api.binance.com/api/v3/depth?symbol=${symbol}${marketQuote}&limit=5`);
+      return midPrice(data?.bids?.[0]?.[0], data?.asks?.[0]?.[0]);
     }
     case "coinbase": {
-      const data = await getJson(`https://api.exchange.coinbase.com/products/${symbol}-${quote === "USDT" ? "USDT" : "USD"}/ticker`);
-      return validPrice(data?.price);
+      const pairQuote = quote === "USDT" ? "USDT" : "USD";
+      const data = await getJson(`https://api.exchange.coinbase.com/products/${symbol}-${pairQuote}/book?level=1`);
+      return midPrice(data?.bids?.[0]?.[0], data?.asks?.[0]?.[0]);
     }
     case "kraken": {
-      const pair = `${symbol}${quote}`;
-      const data = await getJson(`https://api.kraken.com/0/public/Ticker?pair=${pair}`);
-      const ticker = data?.result && Object.values(data.result)[0] as any;
-      return validPrice(ticker?.c?.[0]);
+      const pair = krakenPair(symbol, quote);
+      const data = await getJson(`https://api.kraken.com/0/public/Depth?pair=${pair}&count=1`);
+      const book = data?.result && Object.values(data.result)[0] as any;
+      return midPrice(book?.bids?.[0]?.[0], book?.asks?.[0]?.[0]);
     }
     case "dexscreener": {
       const data = await getJson(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(`${symbol} ${quote}`)}`);

@@ -1677,9 +1677,10 @@ Keys and privacy:
 
 **Add asset → Crypto → Price from** pins the holding to one exchange (Bybit,
 OKX, Binance, Coinbase Exchange, or Kraken). **Fetch live price** calls the
-exchange's public spot ticker and fills *Current price*; the choice is saved as
-`assets.price_source` and reused by every later refresh, so the holding is not
-silently priced from a different market.
+exchange's public spot order book and fills *Current price* with the midpoint
+between its best bid and ask; the choice is saved as `assets.price_source` and
+reused by every later refresh, so the holding is not silently priced from a
+different market.
 
 - **Automatic** (the default, stored as an empty string) keeps the old
   behaviour: the fastest of the six public providers wins. Holdings created
@@ -1689,13 +1690,15 @@ silently priced from a different market.
   are raced in parallel, so a holding never goes stale just because the chosen
   exchange is missing it. The page shows which exchange is pinned
   (`Binance · updated Oct 23` on the asset page, and under each row on `/prices`).
-- **Quote** is `USDT` or `USD`. Coinbase and Kraken always use USD pairs;
-  Binance, OKX and Bybit map `USD` to their USDT market.
+- **Quote** is `USDT` or `USD`. Binance, OKX and Bybit map `USD` to their
+  USDT market; Coinbase and Kraken request the selected quote pair.
 - **Change it later** with **Edit** on the asset page; `/prices` still has a
   page-level source selector, which is now the fallback for holdings without a
   pinned exchange.
-- **Public APIs only** — the same endpoints as `/prices`, no keys or secrets.
-  The dialogs call two routes:
+- **Public order books** — centralized-exchange prices use the best bid/ask
+  midpoint. Order-book endpoints are public, so exchange API keys are neither
+  required nor sent; the saved read-only keys remain for balance imports. DEX
+  fallback uses DexScreener's quoted price. The dialogs call two routes:
 
   | Endpoint | Used by | Body / query |
   | --- | --- | --- |

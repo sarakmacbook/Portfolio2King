@@ -34,7 +34,7 @@ import {
   saveHoldingsFolders,
   setHoldingFolder,
 } from "@/lib/dashboard-order-db";
-import { folderForImport } from "@/lib/holdings-folders";
+import { MAX_FOLDERS, folderForImport, makeFolder, type HoldingFolder } from "@/lib/holdings-folders";
 import { shortWalletAddress } from "@/lib/wallet-chains";
 import { isDust, normaliseDustThreshold } from "@/lib/wallet-dust";
 import { isSpamToken } from "@/lib/wallet-spam";
@@ -127,6 +127,10 @@ export async function createAsset(_prev: ActionState, fd: FormData): Promise<Act
     const date = validDate(str(fd, "date"));
     const notes = str(fd, "notes");
     const cashAccountId = Number(str(fd, "cashAccountId")) || 0;
+    const folderId = str(fd, "folderId");
+    if (folderId && !(await loadHoldingsFolders()).some((folder) => folder.id === folderId)) {
+      throw new Error("That folder no longer exists. Refresh and try again.");
+    }
 
     if (!isCash && quantity > 0 && avgCost <= 0 && currentPrice <= 0) {
       throw new Error("Enter a buy price or current price");
@@ -164,6 +168,7 @@ export async function createAsset(_prev: ActionState, fd: FormData): Promise<Act
         await recordAssetPriceSnapshot(newId, date, avgCost || currentPrice, false);
       }
     }
+    if (folderId) await setHoldingFolder(newId, folderId);
     await recordSnapshot();
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Failed to create asset" };
@@ -424,6 +429,28 @@ export async function saveHoldingFolderAssignment(input: {
     return { ok: true, assignments };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Could not move that holding." };
+  }
+}
+
+/** Creates and immediately persists a folder from the Holdings folder strip. */
+export async function createHoldingFolder(name: string): Promise<{
+  ok: boolean;
+  folder?: HoldingFolder;
+  folders?: HoldingFolder[];
+  error?: string;
+}> {
+  try {
+    await ensureSchema();
+    const current = await loadHoldingsFolders();
+    if (!String(name ?? "").trim()) throw new Error("Give the folder a name first.");
+    if (current.length >= MAX_FOLDERS) throw new Error(`You can have at most ${MAX_FOLDERS} folders.`);
+    const folder = makeFolder({ name: String(name) }, current);
+    if (!folder) throw new Error("Could not create that folder.");
+    const folders = await saveHoldingsFolders([...current, folder]);
+    refresh();
+    return { ok: true, folder, folders };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not create the folder." };
   }
 }
 
