@@ -17,7 +17,8 @@ type RequestBody = {
  * POST /api/prices/live
  *
  * Fills in the "New price" column on /prices. Crypto symbols use the selected
- * public exchange; stock symbols use Yahoo Finance. The two are independent, so
+ * public spot order book (best bid/ask midpoint); stock symbols use Yahoo
+ * Finance. The two are independent, so
  * a bad stock symbol never stops the crypto prices from loading.
  */
 export async function POST(request: Request) {

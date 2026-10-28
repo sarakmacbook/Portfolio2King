@@ -9,7 +9,7 @@ test("dashboard quotes fall back when the preferred exchange is unavailable", as
     const url = String(input);
     calls.push(url);
     if (url.includes("api.exchange.coinbase.com")) {
-      return new Response(JSON.stringify({ price: "123" }), { status: 200 });
+      return new Response(JSON.stringify({ bids: [["122", "1"]], asks: [["124", "1"]] }), { status: 200 });
     }
     return new Response("unavailable", { status: 503 });
   };

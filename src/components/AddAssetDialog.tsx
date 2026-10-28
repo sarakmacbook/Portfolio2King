@@ -139,6 +139,7 @@ function AddAssetForm({
   const [cryptoCategory, setCryptoCategory] = useState<CryptoCategory>("volatile");
   const [walletLogo, setWalletLogo] = useState<Web3WalletId | "">("");
   const [priceSource, setPriceSource] = useState<PriceProvider | "">("");
+  const [folderId, setFolderId] = useState("");
   const [quoteCurrency, setQuoteCurrency] = useState<"USD" | "USDT">("USDT");
   const [quoteState, setQuoteState] = useState<{ status: "idle" | "loading" | "ok" | "error"; message: string }>({
     status: "idle",
@@ -2065,7 +2066,7 @@ function AddAssetForm({
             </div>
             <p className="mt-2 text-xs text-slate-400">
               Saved with the holding, so background refreshes keep pricing it from the same exchange. Public
-              tickers only — no API keys. Auto tries every exchange.
+              spot order-book midpoint — no API key needed. Auto tries every exchange.
             </p>
             {quoteState.status === "error" && (
               <p className="mt-1 text-xs font-medium text-rose-600">{quoteState.message}</p>
@@ -2158,6 +2159,27 @@ function AddAssetForm({
           )}
         </div>
       </div>
+
+      {folders.length > 0 && (
+        <div>
+          <label className="label" htmlFor="new-holding-folder">Folder</label>
+          <select
+            id="new-holding-folder"
+            name="folderId"
+            className="input"
+            value={folderId}
+            onChange={(event) => setFolderId(event.target.value)}
+          >
+            <option value="">No folder</option>
+            {folders.map((folder) => (
+              <option key={folder.id} value={folder.id}>
+                {folder.name}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-slate-400">Choose a folder to file this holding there when it is added.</p>
+        </div>
+      )}
 
       {isCash ? (
         <div className="grid gap-4 sm:grid-cols-2">

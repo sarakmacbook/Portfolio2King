@@ -43,7 +43,7 @@ import {
   type HoldingFolder,
 } from "@/lib/holdings-folders";
 import { DEFAULT_DUST_THRESHOLD_USD, normaliseDustThreshold, splitDust } from "@/lib/wallet-dust";
-import { isSpamToken, spamReasonOf, splitSpam } from "@/lib/wallet-spam";
+import { spamReasonOf, splitSpam } from "@/lib/wallet-spam";
 import { PROVIDER_LABELS, type PriceProvider } from "@/lib/market-prices";
 import { removeSpamHoldings, saveHoldingFolderAssignment } from "@/app/actions";
 import CryptoLogo from "./CryptoLogo";
@@ -171,7 +171,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
    * with a made-up price sits near the top of the table and is the one thing a
    * dust cut-off cannot catch — but always reported with a one-click undo.
    */
-  const [hideSpam, setHideSpam] = useState(true);
+  const [showSpam, setShowSpam] = useState(false);
   /** Folder id of the group a holding is hovering over. */
   const [groupDrop, setGroupDrop] = useState<string | null>(null);
   const [filingError, setFilingError] = useState("");
@@ -483,7 +483,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
    */
   const dustCut = hideDust && !arranging ? normaliseDustThreshold(dustThreshold) : 0;
   /** Spam first, then dust on what is left — a fake price passes a dollar cut-off. */
-  const spamSplit = useMemo(() => splitSpam(shown, hideSpam && !arranging), [shown, hideSpam, arranging]);
+  const spamSplit = useMemo(() => splitSpam(shown, !showSpam && !arranging), [shown, showSpam, arranging]);
   const dustSplit = useMemo(() => splitDust(spamSplit.kept, dustCut), [spamSplit, dustCut]);
 
   /** The rows the folder filter keeps (category tabs and search apply too). */
@@ -987,20 +987,6 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
             </label>
           )}
           {!arranging && (
-            <label
-              className="flex shrink-0 items-center gap-1.5 text-xs text-slate-500"
-              title="Hide holdings that look like airdropped spam: a website or promo wording in the name, fake tickers"
-            >
-              <input
-                type="checkbox"
-                className="h-3.5 w-3.5 accent-indigo-600"
-                checked={hideSpam}
-                onChange={(event) => setHideSpam(event.target.checked)}
-              />
-              <span className="shrink-0">Hide spam</span>
-            </label>
-          )}
-          {!arranging && (
             <label className="flex items-center gap-2 text-xs text-slate-500 md:hidden">
               <span className="shrink-0">Sort</span>
               <select
@@ -1037,7 +1023,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
           <button
             type="button"
             className="font-medium text-indigo-600 hover:underline"
-            onClick={() => setHideSpam(false)}
+            onClick={() => setShowSpam(true)}
           >
             Show them
           </button>
@@ -1081,21 +1067,19 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
         </p>
       )}
 
-      {(hasFolders || arranging) && (
-        <HoldingsFolders
-          folders={folders}
-          assignments={assignments}
-          counts={folderStats.counts}
-          totals={folderStats.totals}
-          totalRows={rows.length}
-          selected={folderFilter}
-          onSelect={setFolderFilter}
-          arranging={arranging}
-          onFoldersChange={setFolders}
-          onAssignmentsChange={setAssignments}
-          onFileHolding={fileHolding}
-        />
-      )}
+      <HoldingsFolders
+        folders={folders}
+        assignments={assignments}
+        counts={folderStats.counts}
+        totals={folderStats.totals}
+        totalRows={rows.length}
+        selected={folderFilter}
+        onSelect={setFolderFilter}
+        arranging={arranging}
+        onFoldersChange={setFolders}
+        onAssignmentsChange={setAssignments}
+        onFileHolding={fileHolding}
+      />
 
       <div className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[760px] text-sm">

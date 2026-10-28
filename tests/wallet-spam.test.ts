@@ -157,9 +157,9 @@ test("the server re-applies the spam rule so a stale page cannot import junk", (
 test("the holdings table filters spam, and spam is never counted in the totals", () => {
   const table = read("components/HoldingsTable.tsx");
   assert.ok(table.includes("splitSpam("), "the table uses the shared rule");
-  assert.ok(table.includes("Hide spam"), "the switch exists");
-  assert.ok(table.includes("Show them"), "hidden holdings can be revealed");
-  assert.ok(table.includes("hideSpam && !arranging"), "arrange mode still shows them");
+  assert.ok(!table.includes("Hide spam"), "the Hide Spam switch is removed from Holdings");
+  assert.ok(table.includes("Show them"), "hidden holdings can still be revealed");
+  assert.ok(table.includes("!showSpam && !arranging"), "spam stays hidden by default outside arrange mode");
   assert.ok(table.includes("spam: boolean") || table.includes("spam?:"), "rows carry the flag");
 
   const page = read("app/page.tsx");
