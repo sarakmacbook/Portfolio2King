@@ -180,20 +180,20 @@ test("navigation links map to the right sections", async () => {
   );
   assert.deepEqual(
     SETTINGS_NAV_LINKS.map((link) => link.label),
-    ["Exchanges", "Refresh prices", "Alerts", "Database"],
+    ["General", "Exchanges", "Refresh prices", "Alerts", "Database"],
   );
   assert.deepEqual(
     SETTINGS_NAV_LINKS.map((link) => link.href),
-    ["/exchanges", "/prices", "/alerts", "/database"],
+    ["/settings", "/exchanges", "/prices", "/alerts", "/database"],
   );
-  assert.equal(NAV_LINKS.length, 6);
+  assert.equal(NAV_LINKS.length, 7);
   assert.deepEqual(
     NAV_LINKS.map((link) => link.label),
-    ["Dashboard", "Activity", "Exchanges", "Refresh prices", "Alerts", "Database"],
+    ["Dashboard", "Activity", "General", "Exchanges", "Refresh prices", "Alerts", "Database"],
   );
   assert.deepEqual(
     NAV_LINKS.map((link) => link.href),
-    ["/", "/activity", "/exchanges", "/prices", "/alerts", "/database"],
+    ["/", "/activity", "/settings", "/exchanges", "/prices", "/alerts", "/database"],
   );
 
   assert.equal(isActivePath("/", "/"), true);

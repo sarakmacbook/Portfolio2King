@@ -144,6 +144,14 @@ export type AlertSettings = {
    */
   backgroundRefreshMinutes: number;
   /**
+   * Repaint the open page as soon as a background refresh lands new prices.
+   * Off means the fetch still runs — the feed stays current, the numbers on
+   * screen only change when you navigate or reload. Ignored while
+   * `backgroundRefreshMinutes` is 0, because nothing is fetched at all.
+   * Stored as `refresh.autoRefresh` ("true"/"false").
+   */
+  autoRefresh: boolean;
+  /**
    * The scheduled whole-portfolio summary (money + %). Independent of
    * `enabled` above. See PortfolioAlertSettings for each of its fields.
    */
@@ -158,6 +166,12 @@ export const MAX_THRESHOLD_PCT = 50;
 export const MIN_REFRESH_MINUTES = 5;
 /** Longest background refresh interval, in minutes (12 hours). */
 export const MAX_REFRESH_MINUTES = 720;
+/**
+ * Intervals offered by Settings → Price updates, in minutes. Every value sits
+ * inside MIN_REFRESH_MINUTES–MAX_REFRESH_MINUTES so the picker can never
+ * produce a value the parser rejects.
+ */
+export const REFRESH_INTERVAL_OPTIONS = [5, 10, 15, 30, 60, 120, 360, 720] as const;
 
 /**
  * Used for a database row that has never been written, and by tests. The update
@@ -204,6 +218,9 @@ export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
   window: "day",
   channels: ["push", "telegram"],
   backgroundRefreshMinutes: 10,
+  // Prices normally appear as soon as they are fetched; the silent mode is the
+  // deliberate choice, so it starts switched on.
+  autoRefresh: true,
   portfolio: DEFAULT_PORTFOLIO_ALERT_SETTINGS,
 };
 
@@ -224,6 +241,8 @@ export const SETTING_KEYS = {
   channels: "alerts.channels",
   /** In-page refresh interval in minutes — "0" (off) or 5–720. */
   backgroundRefreshMinutes: "refresh.intervalMinutes",
+  /** Repaint the open page when a background refresh lands — "true" / "false". */
+  autoRefresh: "refresh.autoRefresh",
   /** Scheduled portfolio update switch — "true" / "false". */
   portfolioEnabled: "alerts.portfolio.enabled",
   /** Local send time — "HH:MM"; an explicitly blank row means "no schedule". */
@@ -716,6 +735,7 @@ export function parseAlertSettings(values: Record<string, string | null | undefi
         ? DEFAULT_ALERT_SETTINGS.channels
         : channels,
     backgroundRefreshMinutes: minutes ?? DEFAULT_ALERT_SETTINGS.backgroundRefreshMinutes,
+    autoRefresh: parseBooleanSetting(values[SETTING_KEYS.autoRefresh], DEFAULT_ALERT_SETTINGS.autoRefresh),
     portfolio: parsePortfolioAlertSettings(values),
   };
 }
@@ -727,6 +747,7 @@ export function settingsToRows(settings: AlertSettings): Array<{ key: string; va
     { key: SETTING_KEYS.window, value: settings.window },
     { key: SETTING_KEYS.channels, value: settings.channels.join(",") },
     { key: SETTING_KEYS.backgroundRefreshMinutes, value: String(settings.backgroundRefreshMinutes) },
+    { key: SETTING_KEYS.autoRefresh, value: settings.autoRefresh ? "true" : "false" },
     { key: SETTING_KEYS.portfolioEnabled, value: settings.portfolio.enabled ? "true" : "false" },
     { key: SETTING_KEYS.portfolioTime, value: settings.portfolio.time },
     { key: SETTING_KEYS.portfolioTimezone, value: settings.portfolio.timezone },

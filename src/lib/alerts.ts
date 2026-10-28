@@ -81,6 +81,25 @@ export async function saveAlertSettings(settings: AlertSettings): Promise<void> 
     });
 }
 
+/**
+ * Writes only the two background-price settings.
+ *
+ * The price-updates page and the alert form are separate screens; going through
+ * `saveAlertSettings` here would rewrite every alert row from whichever half of
+ * the form happened to be submitted. This keeps the blast radius to the two
+ * keys the page actually owns.
+ */
+export async function saveRefreshSettings(settings: {
+  backgroundRefreshMinutes: number;
+  autoRefresh: boolean;
+}): Promise<void> {
+  await ensureSchema();
+  await Promise.all([
+    writeSetting(SETTING_KEYS.backgroundRefreshMinutes, String(settings.backgroundRefreshMinutes)),
+    writeSetting(SETTING_KEYS.autoRefresh, settings.autoRefresh ? "true" : "false"),
+  ]);
+}
+
 async function readSetting(key: string): Promise<string | null> {
   const [row] = await db
     .select({ value: appSettings.value })

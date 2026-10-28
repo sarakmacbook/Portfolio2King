@@ -39,6 +39,9 @@ import {
   parsePushSubscription,
   parseRefreshMinutes,
   parseThresholdPct,
+  MAX_REFRESH_MINUTES,
+  MIN_REFRESH_MINUTES,
+  REFRESH_INTERVAL_OPTIONS,
   portfolioAlertKey,
   portfolioMovePassesThreshold,
   portfolioScheduleFor,
@@ -81,6 +84,7 @@ test("parseAlertSettings falls back to defaults and honours stored values", () =
     window: "month",
     channels: ["telegram"],
     backgroundRefreshMinutes: 30,
+    autoRefresh: true,
     portfolio: DEFAULT_PORTFOLIO_ALERT_SETTINGS,
   });
 
@@ -147,6 +151,7 @@ test("settings rows round-trip through the parser", () => {
     window: "month" as const,
     channels: ["push"] as const,
     backgroundRefreshMinutes: 60,
+    autoRefresh: false,
     portfolio: {
       enabled: true,
       time: "18:30",
@@ -171,6 +176,7 @@ test("settings rows round-trip through the parser", () => {
     window: "month",
     channels: ["push"],
     backgroundRefreshMinutes: 60,
+    autoRefresh: false,
     portfolio: {
       enabled: true,
       time: "18:30",
@@ -857,4 +863,51 @@ test("auto notes are on by default and change on every send and every period", (
     { date: "2026-10-22", time: "18:00", window: "day" },
   );
   assert.equal(plain, `${update.title}\n${update.body}`);
+});
+
+test("background updates and auto refresh are separate, stored settings", () => {
+  // A feed that repaints the page is the useful default; silent updates are
+  // the deliberate choice, so they must be switched on explicitly.
+  assert.equal(DEFAULT_ALERT_SETTINGS.autoRefresh, true);
+  assert.equal(parseAlertSettings({}).autoRefresh, true);
+  assert.equal(
+    parseAlertSettings({ [SETTING_KEYS.autoRefresh]: "false" }).autoRefresh,
+    false,
+  );
+  // Anything that is not "true"/"false" falls back to the default.
+  assert.equal(parseAlertSettings({ [SETTING_KEYS.autoRefresh]: "maybe" }).autoRefresh, true);
+
+  // The two settings are independent: the feed can be off while the page is
+  // still set to repaint, and vice versa.
+  const silentFeed = parseAlertSettings({
+    [SETTING_KEYS.backgroundRefreshMinutes]: "30",
+    [SETTING_KEYS.autoRefresh]: "false",
+  });
+  assert.equal(silentFeed.backgroundRefreshMinutes, 30);
+  assert.equal(silentFeed.autoRefresh, false);
+
+  const noFeed = parseAlertSettings({
+    [SETTING_KEYS.backgroundRefreshMinutes]: "0",
+    [SETTING_KEYS.autoRefresh]: "true",
+  });
+  assert.equal(noFeed.backgroundRefreshMinutes, 0);
+  assert.equal(noFeed.autoRefresh, true);
+
+  // Both keys round-trip through storage.
+  const rows = settingsToRows({
+    ...DEFAULT_ALERT_SETTINGS,
+    backgroundRefreshMinutes: 0,
+    autoRefresh: false,
+  });
+  const map = Object.fromEntries(rows.map((row) => [row.key, row.value]));
+  assert.equal(map[SETTING_KEYS.backgroundRefreshMinutes], "0");
+  assert.equal(map[SETTING_KEYS.autoRefresh], "false");
+  assert.equal(parseAlertSettings(map).autoRefresh, false);
+
+  // Every interval the Settings picker offers must survive the parser, or the
+  // form could save a value it refuses to load back.
+  for (const option of REFRESH_INTERVAL_OPTIONS) {
+    assert.equal(parseRefreshMinutes(String(option)), option, `${option} is a valid interval`);
+    assert.ok(option >= MIN_REFRESH_MINUTES && option <= MAX_REFRESH_MINUTES);
+  }
 });
