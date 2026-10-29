@@ -119,6 +119,7 @@ export default async function Dashboard() {
       quantity: asset.quantity,
       avgCost: asset.avgCost,
       price: asset.currentPrice,
+      cryptoCategory: asset.cryptoCategory,
       openingUnrealized: fallback !== undefined
         ? openingCryptoUnrealized(cryptoTxByAsset.get(asset.id) ?? [], [], realizedDay, fallback)
         : original,

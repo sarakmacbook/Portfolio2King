@@ -9,7 +9,7 @@ const before: DatedTx = { kind: "buy", quantity: 2, price: 100, date: "2026-06-0
 const snap = [{ date: "2026-06-01", price: 120 }, { date: day, price: 150 }];
 const holding = (overrides: Partial<DailyCryptoHolding> = {}): DailyCryptoHolding => ({
   id: 1, symbol: "BTC", provider: "", quantity: 2, avgCost: 100, price: 130,
-  openingUnrealized: 40, ...overrides,
+  cryptoCategory: "volatile", openingUnrealized: 40, ...overrides,
 });
 
 test("opening uses latest valid prior snapshot, not today's overwritten snapshot", () => {

@@ -15,6 +15,8 @@ export type PriceRow = {
   name: string;
   symbol: string;
   wallet?: string;
+  /** Crypto category; stablecoins keep their saved price instead of live fetches. */
+  cryptoCategory: "stablecoin" | "volatile";
   /** Exchange the asset was added from ("" = any provider). */
   priceSource: PriceProvider | "";
   quantity: number;
@@ -36,10 +38,13 @@ export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
   const [liveMessage, setLiveMessage] = useState("");
 
   async function loadLivePrices() {
-    const crypto = rows.filter((row) => row.type === "crypto" && row.symbol.trim());
+    // Real-time changes apply to volatile crypto only: stablecoins are pegged
+    // to the dollar, so they keep their saved price instead of a live fetch.
+    const volatileCrypto = rows.filter((row) => row.type === "crypto" && row.symbol.trim() && row.cryptoCategory !== "stablecoin");
+    const stablecoins = rows.filter((row) => row.type === "crypto" && row.cryptoCategory === "stablecoin");
     const stocks = rows.filter((row) => row.type === "stock" && row.symbol.trim());
-    if (!crypto.length && !stocks.length) {
-      setLiveMessage("Add a symbol to at least one stock or crypto asset first.");
+    if (!volatileCrypto.length && !stocks.length) {
+      setLiveMessage(stablecoins.length ? "Stablecoins keep their saved price — no live fetch needed." : "Add a symbol to at least one stock or crypto asset first.");
       return;
     }
     setFetching(true);
@@ -55,7 +60,7 @@ export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
           // selector above is the fallback for holdings without one. Stocks
           // always use Yahoo Finance.
           assets: [
-            ...crypto.map(({ id, symbol, priceSource }) => ({
+            ...volatileCrypto.map(({ id, symbol, priceSource }) => ({
               id,
               symbol,
               type: "crypto" as const,
@@ -75,17 +80,23 @@ export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
       for (const result of data.results || []) {
         if (result.id && result.price) prices[result.id] = String(result.price);
       }
+      // Stablecoins keep their stored price: show it as the suggested new price
+      // (which equals the current one), so the "New price" column reflects
+      // exactly what will be saved for them.
+      for (const row of stablecoins) {
+        if (row.currentPrice > 0) prices[row.id] = String(row.currentPrice);
+      }
       setValues((current) => ({ ...current, ...prices }));
-      const total = crypto.length + stocks.length;
+      const total = volatileCrypto.length + stocks.length;
       const missing = total - (data.found || 0);
       const parts = [
-        crypto.length ? `${crypto.length} crypto` : "",
+        volatileCrypto.length ? `${volatileCrypto.length} crypto` : "",
         stocks.length ? `${stocks.length} stock${stocks.length === 1 ? "" : "s"}` : "",
       ].filter(Boolean);
       setLiveMessage(
         `${data.found || 0} live price${data.found === 1 ? "" : "s"} loaded (${parts.join(" + ")})${
-          missing ? ` · ${missing} unavailable` : ""
-        }. Review, then save.`,
+          stablecoins.length ? ` · ${stablecoins.length} stablecoin${stablecoins.length === 1 ? "" : "s"} kept their saved price` : ""
+        }${missing ? ` · ${missing} unavailable` : ""}. Review, then save.`,
       );
     } catch (error) {
       setLiveMessage(error instanceof Error ? error.message : "Could not load live prices");
@@ -124,7 +135,7 @@ export default function BulkPriceForm({ rows }: { rows: PriceRow[] }) {
         <div className="mt-2 flex flex-col justify-between gap-1 text-xs text-slate-500 sm:flex-row">
           <span>
             Holdings added with an exchange keep using it; the source above covers the rest. Stocks use Yahoo
-            Finance. Public APIs only — no API keys.
+            Finance. Public APIs only — no API keys. Stablecoins keep their saved price (no live fetch).
           </span>
           {liveMessage && <span className="font-medium text-indigo-600">{liveMessage}</span>}
         </div>

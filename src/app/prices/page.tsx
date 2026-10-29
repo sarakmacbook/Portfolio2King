@@ -55,6 +55,7 @@ export default async function PricesPage() {
     name: a.name,
     symbol: a.symbol,
     wallet: walletLogos[a.id],
+    cryptoCategory: a.cryptoCategory,
     priceSource: a.priceSource,
     quantity: a.quantity,
     currentPrice: a.currentPrice,

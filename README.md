@@ -627,6 +627,11 @@ notice on the card; these display-only quotes do not change stored prices or
 send alerts. The holding's preferred exchange is tried first, with fallback to
 other providers. When any quotes fail, retries back off to reduce rate limiting.
 
+Real-time changes apply to volatile crypto only. Stablecoins are pegged to the
+dollar, so the live card never re-quotes them — they keep the price stored in
+the portfolio, and their contribution to today's change only moves when the
+daily refresh records a new price for them.
+
 ## Holdings folders
 
 Folders turn a long table into a few groups without changing any numbers:
@@ -803,7 +808,8 @@ separate, because fetching a price and painting a price are different jobs:
   state: nothing is fetched and the numbers only move when you refresh them
   yourself. The timer pauses while the tab is hidden and catches up on the first
   tick after you come back, so a backgrounded browser is not polling a price
-  provider all night.
+  provider all night. Real-time updates apply to volatile crypto only:
+  stablecoins keep their saved price instead of being re-quoted.
 - **Auto refresh** — whether a fetch that lands new prices immediately redraws
   the page. Turning it off gives **silent updates**: the stored data stays
   current (so alerts, history and the next scheduled recap are unaffected) while
