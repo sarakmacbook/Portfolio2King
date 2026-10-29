@@ -1107,6 +1107,8 @@ the page triggers a throttled refresh on the interval above.
 ## Run locally
 
 ```bash
+git clone https://github.com/sarakmacbook/Portfolio2King.git portfolio
+cd portfolio
 npm ci
 cp .env.example .env.local   # edit DATABASE_URL to point at your Postgres
 npm run dev                  # http://localhost:3000
@@ -1139,8 +1141,20 @@ Nothing about it requires Vercel.
 
 ### 1. Get the code
 
+Clone the repository (keeps history and lets you follow releases):
+
 ```bash
-git clone <your-fork-url> /srv/portfolio
+git clone https://github.com/sarakmacbook/Portfolio2King.git /srv/portfolio
+cd /srv/portfolio
+npm ci
+```
+
+Or download the latest `main` snapshot without git:
+
+```bash
+wget https://github.com/sarakmacbook/Portfolio2King/archive/refs/heads/main.tar.gz -O /tmp/portfolio.tar.gz
+tar xzf /tmp/portfolio.tar.gz -C /srv
+mv /srv/Portfolio2King-main /srv/portfolio
 cd /srv/portfolio
 npm ci
 ```
