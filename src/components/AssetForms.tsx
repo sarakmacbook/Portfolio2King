@@ -7,7 +7,8 @@ import { CEX_PROVIDERS, PROVIDER_LABELS, type PriceProvider } from "@/lib/market
 import { KIND_META, kindsFor, money, qty } from "@/lib/format";
 import { playMoneyChime } from "@/lib/sounds";
 import { WEB3_WALLETS, type Web3WalletId } from "@/lib/web3-wallets";
-import type { CashAccount } from "./AddAssetDialog";
+import { MAX_FOLDERS, MAX_FOLDER_NAME_LENGTH } from "@/lib/holdings-folders";
+import type { AssetFolderChoice, CashAccount } from "./AddAssetDialog";
 import { ErrorNote, Modal, SubmitButton } from "./ui";
 
 function todayStr() {
@@ -207,6 +208,8 @@ export function PriceForm({ assetId, currentPrice }: { assetId: number; currentP
 
 export function EditAssetButton({
   asset,
+  folders,
+  folderId,
 }: {
   asset: {
     id: number;
@@ -218,6 +221,10 @@ export function EditAssetButton({
     priceSource: PriceProvider | "";
     walletLogo?: Web3WalletId | "";
   };
+  /** Existing folders for the filing dropdown. */
+  folders?: AssetFolderChoice[];
+  /** Folder the asset currently belongs to ("" = no folder). */
+  folderId?: string;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -226,7 +233,9 @@ export function EditAssetButton({
         Edit
       </button>
       <Modal open={open} onClose={() => setOpen(false)} title="Edit details">
-        {open && <EditAssetForm asset={asset} onDone={() => setOpen(false)} />}
+        {open && (
+          <EditAssetForm asset={asset} folders={folders} folderId={folderId} onDone={() => setOpen(false)} />
+        )}
       </Modal>
     </>
   );
@@ -234,6 +243,8 @@ export function EditAssetButton({
 
 function EditAssetForm({
   asset,
+  folders,
+  folderId,
   onDone,
 }: {
   asset: {
@@ -246,9 +257,15 @@ function EditAssetForm({
     priceSource: PriceProvider | "";
     walletLogo?: Web3WalletId | "";
   };
+  /** Existing folders for the filing dropdown (empty = only "No folder"). */
+  folders?: AssetFolderChoice[];
+  /** Folder the asset currently belongs to ("" = no folder). */
+  folderId?: string;
   onDone: () => void;
 }) {
   const [state, action] = useActionState<ActionState, FormData>(updateAsset, {});
+  const [selectedFolder, setSelectedFolder] = useState(folderId ?? "");
+  const [newFolderName, setNewFolderName] = useState("");
   useEffect(() => {
     if (state.ok) onDone();
   }, [state.ts, state.ok, onDone]);
@@ -300,6 +317,44 @@ function EditAssetForm({
           </div>
         </>
       )}
+      <div>
+        <label className="label" htmlFor="edit-holding-folder">Folder</label>
+        <select
+          id="edit-holding-folder"
+          name="folderId"
+          className="input"
+          value={selectedFolder}
+          onChange={(event) => setSelectedFolder(event.target.value)}
+        >
+          <option value="">No folder</option>
+          {folders?.map((folder) => (
+            <option key={folder.id} value={folder.id}>
+              {folder.label ?? folder.name}
+            </option>
+          ))}
+          {folders !== undefined && folders.length < MAX_FOLDERS && (
+            <option value="__new__">Create a new folder…</option>
+          )}
+        </select>
+        {selectedFolder === "__new__" ? (
+          <div className="mt-2">
+            <label className="label" htmlFor="edit-new-folder-name">New folder name</label>
+            <input
+              id="edit-new-folder-name"
+              name="folderName"
+              className="input"
+              value={newFolderName}
+              maxLength={MAX_FOLDER_NAME_LENGTH}
+              onChange={(event) => setNewFolderName(event.target.value)}
+              placeholder="e.g. Long term, Binance"
+              required
+            />
+            <p className="mt-1 text-xs text-slate-400">This holding will be added to the new folder.</p>
+          </div>
+        ) : (
+          <p className="mt-1 text-xs text-slate-400">Choose an existing folder, create one, or leave it unfiled.</p>
+        )}
+      </div>
       <div>
         <label className="label">Notes</label>
         <textarea name="notes" rows={3} className="input" defaultValue={asset.notes} />
