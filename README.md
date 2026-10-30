@@ -647,9 +647,12 @@ Folders turn a long table into a few groups without changing any numbers:
    exchange logo (Binance, OKX, Bybit, Coinbase, Kraken, DexScreener) or any
    emoji you type.
 3. File existing holdings by dragging a row onto a folder chip, or use the
-   **Folder** dropdown on every row. A holding can be in one folder; holdings
-   with no folder are simply plain rows above the folder groups.
-4. Pick *No folder* in a holding's dropdown to pull it out of its folder again.
+   **Folder** dropdown on every row — the same dropdown is in the asset's
+   **Edit** form, where a new folder can be created inline. A holding can be in
+   one folder; holdings with no folder are simply plain rows above the folder
+   groups.
+4. Pick *No folder* in a holding's dropdown, or in the asset's **Edit** form, to
+   pull it out of its folder again.
    Folder and filing edits made in Arrange mode are applied when you click
    **Save layout**. **Reset to default** removes the folders; holdings are never
    deleted, they just go back to being plain rows. Use **Remove all groups** in

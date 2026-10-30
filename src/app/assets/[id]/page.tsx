@@ -138,6 +138,8 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               priceSource: asset.priceSource,
               walletLogo,
             }}
+            folders={folderChoices}
+            folderId={assignments[asset.id] ?? ""}
           />
           <form action={deleteAsset}>
             <input type="hidden" name="id" value={asset.id} />

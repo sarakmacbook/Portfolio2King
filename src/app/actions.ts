@@ -275,6 +275,25 @@ export async function updateAsset(_prev: ActionState, fd: FormData): Promise<Act
     if (asset.type === "crypto" && fd.has("walletLogo")) {
       await saveAssetWalletLogo(id, parseWeb3WalletId(str(fd, "walletLogo")));
     }
+    // Folder selection from the edit form's dropdown. Absent field = leave the
+    // asset's filing alone (other callers do not send it). An empty value files
+    // the asset back to no folder; an unknown id is rejected by setHoldingFolder.
+    if (fd.has("folderId")) {
+      let folderId = str(fd, "folderId");
+      if (folderId === "__new__") {
+        const folderName = str(fd, "folderName");
+        if (!folderName) throw new Error("Enter a name for the new folder.");
+        const folders = await loadHoldingsFolders();
+        if (folders.length >= MAX_FOLDERS) {
+          throw new Error(`You can have at most ${MAX_FOLDERS} folders.`);
+        }
+        const folder = makeFolder({ name: folderName }, folders);
+        if (!folder) throw new Error("Could not create that folder.");
+        await saveHoldingsFolders([...folders, folder]);
+        folderId = folder.id;
+      }
+      await setHoldingFolder(id, folderId || null);
+    }
     await db
       .update(assets)
       .set({ name: name || symbol, symbol, cryptoCategory, priceSource, notes: str(fd, "notes") })
