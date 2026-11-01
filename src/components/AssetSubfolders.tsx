@@ -105,7 +105,8 @@ export default function AssetSubfolders({
                     cashAccounts={cashAccounts}
                     folders={choices}
                     defaultFolderId={folder.id}
-                    allowCreateFolder={false}
+                    allowCreateFolder
+                    newFolderParentAssetId={parentAssetId}
                     label="＋ Add asset here"
                     className="btn-ghost text-xs"
                   />
