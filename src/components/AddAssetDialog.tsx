@@ -95,6 +95,7 @@ export default function AddAssetDialog({
   defaultType = "stock",
   defaultFolderId,
   allowCreateFolder = true,
+  newFolderParentAssetId,
   label = "+ Add asset",
   className = "btn-primary",
 }: {
@@ -104,8 +105,10 @@ export default function AddAssetDialog({
   defaultType?: AssetType;
   /** Folder preselected when adding directly into one. */
   defaultFolderId?: string;
-  /** Disable creating a top-level folder when adding directly into a child folder. */
+  /** Allow "Create a new folder…" while adding a holding. */
   allowCreateFolder?: boolean;
+  /** When set, a folder made via "Create a new folder…" is nested inside this holding. */
+  newFolderParentAssetId?: number;
   label?: string;
   className?: string;
 }) {
@@ -123,6 +126,7 @@ export default function AddAssetDialog({
             defaultType={defaultType}
             defaultFolderId={defaultFolderId}
             allowCreateFolder={allowCreateFolder}
+            newFolderParentAssetId={newFolderParentAssetId}
             onDone={() => setOpen(false)}
           />
         )}
@@ -137,6 +141,7 @@ function AddAssetForm({
   defaultType,
   defaultFolderId,
   allowCreateFolder,
+  newFolderParentAssetId,
   onDone,
 }: {
   cashAccounts: CashAccount[];
@@ -144,6 +149,7 @@ function AddAssetForm({
   defaultType: AssetType;
   defaultFolderId?: string;
   allowCreateFolder: boolean;
+  newFolderParentAssetId?: number;
   onDone?: () => void;
 }) {
   const router = useRouter();
@@ -983,6 +989,9 @@ function AddAssetForm({
       <input type="hidden" name="cryptoCategory" value={cryptoCategory} />
       <input type="hidden" name="priceSource" value={type === "crypto" ? priceSource : ""} />
       <input type="hidden" name="walletLogo" value={type === "crypto" ? walletLogo : ""} />
+      {newFolderParentAssetId ? (
+        <input type="hidden" name="newFolderParentAssetId" value={newFolderParentAssetId} />
+      ) : null}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {ASSET_TYPES.map((t) => (
           <button
@@ -2206,7 +2215,10 @@ function AddAssetForm({
               placeholder="e.g. Long term, Binance"
               required
             />
-            <p className="mt-1 text-xs text-slate-400">This holding will be added to the new folder.</p>
+            <p className="mt-1 text-xs text-slate-400">
+              This holding will be added to the new folder
+              {newFolderParentAssetId ? ", which will be created inside this holding's page" : ""}.
+            </p>
           </div>
         ) : (
           <p className="mt-1 text-xs text-slate-400">Choose an existing folder or create one while adding this holding.</p>

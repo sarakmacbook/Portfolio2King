@@ -16,8 +16,25 @@ test("holding pages can own nested folders and add assets of any category into t
   assert.ok(section.includes('defaultFolderId={folder.id}'), "the add dialog targets this child folder");
   assert.ok(section.includes("AddAssetDialog"), "holdings can be added directly from the folder");
   assert.ok(section.includes("holdings of any category"), "the folder accepts all asset categories");
+  assert.ok(!section.includes("allowCreateFolder={false}"), "the add dialog can create folders, same as on the dashboard");
+  assert.ok(
+    section.includes("newFolderParentAssetId={parentAssetId}"),
+    "a folder made in the add dialog is nested inside the current holding",
+  );
+
+  const dialog = read("src/components/AddAssetDialog.tsx");
+  assert.ok(dialog.includes('name="newFolderParentAssetId"'), "the add dialog tells the server which holding owns the new folder");
 
   const actions = read("src/app/actions.ts");
   assert.ok(actions.includes("export async function createAssetSubfolder"), "the server validates and stores nested folders");
   assert.ok(actions.includes("makeFolder({ name, parentAssetId }, current)"), "the folder stores its parent holding id");
+  assert.ok(actions.includes('str(fd, "newFolderParentAssetId")'), "createAsset reads the parent holding from the add-asset form");
+  assert.ok(
+    actions.includes("{ name: folderName, ...(parentAssetId ? { parentAssetId } : {}) }"),
+    "a new folder from the add-asset dialog is nested inside that holding",
+  );
+  assert.ok(
+    actions.includes("revalidatePath(`/assets/${folderToCreate.parentAssetId}`)"),
+    "the holding's page is refreshed so the new subfolder shows up",
+  );
 });

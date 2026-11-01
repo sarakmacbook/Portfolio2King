@@ -137,7 +137,25 @@ export async function createAsset(_prev: ActionState, fd: FormData): Promise<Act
       if (foldersBeforeCreate.length >= MAX_FOLDERS) {
         throw new Error(`You can have at most ${MAX_FOLDERS} folders.`);
       }
-      folderToCreate = makeFolder({ name: folderName }, foldersBeforeCreate);
+      // When adding from a holding's page, the new folder is nested inside that
+      // holding — the same as folders created from the holding's folder section.
+      let parentAssetId: number | undefined;
+      const parentRaw = str(fd, "newFolderParentAssetId");
+      if (parentRaw) {
+        const parentId = Number(parentRaw);
+        if (!Number.isInteger(parentId) || parentId <= 0) throw new Error("Choose a valid parent holding.");
+        const [parent] = await db
+          .select({ id: assets.id })
+          .from(assets)
+          .where(eq(assets.id, parentId))
+          .limit(1);
+        if (!parent) throw new Error("That holding no longer exists.");
+        parentAssetId = parentId;
+      }
+      folderToCreate = makeFolder(
+        { name: folderName, ...(parentAssetId ? { parentAssetId } : {}) },
+        foldersBeforeCreate,
+      );
       if (!folderToCreate) throw new Error("Could not create that folder.");
       folderId = folderToCreate.id;
     } else if (folderId && !(await loadHoldingsFolders()).some((folder) => folder.id === folderId)) {
@@ -182,6 +200,7 @@ export async function createAsset(_prev: ActionState, fd: FormData): Promise<Act
     }
     if (folderToCreate) {
       await saveHoldingsFolders([...foldersBeforeCreate, folderToCreate]);
+      if (folderToCreate.parentAssetId) revalidatePath(`/assets/${folderToCreate.parentAssetId}`);
     }
     if (folderId) await setHoldingFolder(newId, folderId);
     await recordSnapshot();
