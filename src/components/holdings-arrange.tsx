@@ -23,6 +23,14 @@ export type HoldingsArrangeState = {
    */
   sectionsOrder: string[];
   onSectionsOrderChange: (next: string[]) => void;
+  /**
+   * Key of the section being dragged right now (a folder id or the ungrouped
+   * key). Shared so the arrange pills and the table's own section rows light
+   * up as drop targets for one another — dragging a group row in the table and
+   * dragging its pill are the same gesture.
+   */
+  sectionDrag: string | null;
+  onSectionDragChange: (key: string | null) => void;
   /** Clears folders and filing from persisted and in-memory dashboard state. */
   onClearGroups: () => void;
   /** Which folder each holding is filed in (`assetId → folderId`). */

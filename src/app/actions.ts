@@ -32,9 +32,16 @@ import {
   loadHoldingsFolders,
   saveHoldingFolderAssignments,
   saveHoldingsFolders,
+  saveHoldingsSections,
   setHoldingFolder,
 } from "@/lib/dashboard-order-db";
-import { MAX_FOLDERS, folderForImport, makeFolder, type HoldingFolder } from "@/lib/holdings-folders";
+import {
+  MAX_FOLDERS,
+  UNGROUPED_SECTION_KEY,
+  folderForImport,
+  makeFolder,
+  type HoldingFolder,
+} from "@/lib/holdings-folders";
 import { shortWalletAddress } from "@/lib/wallet-chains";
 import { isDust, normaliseDustThreshold } from "@/lib/wallet-dust";
 import { isSpamToken } from "@/lib/wallet-spam";
@@ -573,6 +580,35 @@ export async function saveHoldingFolderAssignment(input: {
     return { ok: true, assignments };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Could not move that holding." };
+  }
+}
+
+/**
+ * Stores the top-to-bottom order of the Holdings sections right away — the path
+ * used when a group row is dragged in the everyday table, outside "Arrange
+ * layout", where a move should stick the moment it is dropped (the same
+ * optimistic behaviour as filing a holding). Arrange mode keeps its deferred
+ * behaviour and writes the order together with everything else on **Save
+ * layout**. Keys that name no current top-level folder (or the ungrouped
+ * block) are dropped, exactly as in the full layout save.
+ */
+export async function saveHoldingsSectionsOrder(input: {
+  sections: string[];
+}): Promise<{ ok: boolean; error?: string; sections?: string[] }> {
+  try {
+    await ensureSchema();
+    const folders = await loadHoldingsFolders();
+    const known = new Set<string>([
+      UNGROUPED_SECTION_KEY,
+      ...folders.filter((folder) => !folder.parentAssetId).map((folder) => folder.id),
+    ]);
+    const saved = await saveHoldingsSections(
+      (Array.isArray(input?.sections) ? input.sections : []).filter((key) => known.has(key)),
+    );
+    refresh();
+    return { ok: true, sections: saved };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not save the group order." };
   }
 }
 

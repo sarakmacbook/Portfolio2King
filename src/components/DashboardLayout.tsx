@@ -112,6 +112,7 @@ export default function DashboardLayout({
   const [folders, setFolders] = useState<HoldingFolder[]>(initialFolders);
   const [assignments, setAssignments] = useState<FolderAssignments>(initialAssignments);
   const [sections, setSections] = useState<string[]>(initialSections);
+  const [sectionDrag, setSectionDrag] = useState<string | null>(null);
   const [arranging, setArranging] = useState(false);
   const [dragging, setDragging] = useState<DashboardBlockKey | null>(null);
   const [drop, setDrop] = useState<{ key: DashboardBlockKey; after: boolean } | null>(null);
@@ -153,6 +154,8 @@ export default function DashboardLayout({
       onFoldersChange: changeFolders,
       sectionsOrder: sections,
       onSectionsOrderChange: changeSections,
+      sectionDrag,
+      onSectionDragChange: setSectionDrag,
       onClearGroups: () => {
         setFolders([]);
         setAssignments({});
@@ -164,7 +167,7 @@ export default function DashboardLayout({
       assignments,
       onAssignmentsChange: setAssignments,
     }),
-    [arranging, categoryOrder, assetOrder, folders, sections, assignments],
+    [arranging, categoryOrder, assetOrder, folders, sections, sectionDrag, assignments],
   );
 
   function clearDrag() {
@@ -182,6 +185,7 @@ export default function DashboardLayout({
     savedAssignments.current = assignments;
     savedSections.current = sections;
     setNotice(null);
+    setSectionDrag(null);
     setArranging(true);
   }
 
@@ -194,6 +198,7 @@ export default function DashboardLayout({
     setFolders(savedFolders.current);
     setAssignments(savedAssignments.current);
     setSections(savedSections.current);
+    setSectionDrag(null);
     clearDrag();
     setArranging(false);
   }
@@ -248,6 +253,7 @@ export default function DashboardLayout({
       savedFolders.current = folders;
       savedAssignments.current = assignments;
       savedSections.current = sections;
+      setSectionDrag(null);
       setArranging(false);
       setNotice({ kind: "ok", text: result.message ?? "Dashboard layout saved." });
     });
