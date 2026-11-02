@@ -22,8 +22,9 @@ type ChildHolding = {
 /**
  * "Folders inside [holding]" on an asset page, in the same chip-strip style as
  * the Holdings folder bar: one chip per subfolder (icon, name, holding count)
- * plus a dashed **＋ New folder** chip that opens an inline name field. Chips
- * filter the folder cards below; **All** shows every subfolder at once.
+ * that filters the folder cards below, with **All** showing every subfolder at
+ * once. A solid **＋ New folder** button in the section header opens an inline
+ * name field, so creating a subfolder is always one visible click away.
  */
 export default function AssetSubfolders({
   parentAssetId,
@@ -76,26 +77,41 @@ export default function AssetSubfolders({
 
   return (
     <section className="card space-y-4 p-5">
-      <div>
-        <h2 className="font-semibold">Folders inside {parentAssetName}</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          Create a subfolder here, then add holdings of any category directly into it. Pick a chip
-          to see just that folder.
-        </p>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-1.5">
-        {folders.length > 0 && (
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-semibold">Folders inside {parentAssetName}</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Create a subfolder here, then add holdings of any category directly into it. Pick a
+            chip to see just that folder.
+          </p>
+        </div>
+        {!showCreate && (
           <button
             type="button"
-            onClick={() => setSelected("all")}
-            className={chipClass(active === "all")}
-            aria-pressed={active === "all"}
+            className="btn-primary text-xs"
+            onClick={() => {
+              setError("");
+              setShowCreate(true);
+            }}
+            disabled={creating}
+            title="Create a subfolder inside this holding"
           >
-            All
-            <span className={active === "all" ? "opacity-70" : "text-slate-400"}>{totalHoldings}</span>
+            ＋ New folder
           </button>
         )}
+      </div>
+
+      {folders.length > 0 && (
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => setSelected("all")}
+          className={chipClass(active === "all")}
+          aria-pressed={active === "all"}
+        >
+          All
+          <span className={active === "all" ? "opacity-70" : "text-slate-400"}>{totalHoldings}</span>
+        </button>
         {folders.map((folder) => {
           const count = holdingsIn(folder.id).length;
           const total = holdingsIn(folder.id).reduce((sum, holding) => sum + holding.value, 0);
@@ -121,21 +137,8 @@ export default function AssetSubfolders({
             </button>
           );
         })}
-        {!showCreate && (
-          <button
-            type="button"
-            className="rounded-xl border border-dashed border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-indigo-300 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={() => {
-              setError("");
-              setShowCreate(true);
-            }}
-            disabled={creating}
-            title="Create a subfolder inside this holding"
-          >
-            ＋ New folder
-          </button>
-        )}
       </div>
+      )}
 
       {showCreate && (
         <div className="rounded-xl border border-indigo-200 bg-slate-50/60 p-3">

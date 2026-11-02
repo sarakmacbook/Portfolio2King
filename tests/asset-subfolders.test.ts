@@ -18,7 +18,7 @@ test("holding pages can own nested folders and add assets of any category into t
   assert.ok(section.includes("holdings of any category"), "the folder accepts all asset categories");
   assert.ok(!section.includes("allowCreateFolder={false}"), "the add dialog can create folders, same as on the dashboard");
   // New style: a chip strip like the Holdings folder bar owns creation and filtering.
-  assert.ok(section.includes("＋ New folder"), "a dashed chip opens the inline create field");
+  assert.ok(/＋ New folder\s*<\/button>/.test(section), "a solid always-visible create button sits in the section header");
   assert.ok(section.includes("Create folder"), "the inline field creates the subfolder");
   assert.ok(section.includes("ExchangeIcon"), "chips and cards wear the folder icon");
   assert.ok(section.includes('useState<string>("all")'), "chips filter the folder cards below");

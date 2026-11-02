@@ -662,8 +662,8 @@ Folders turn a long table into a few groups without changing any numbers:
 
 On any holding's detail page, **Folders inside [holding name]** lets you create
 subfolders owned by that holding. Subfolders appear as chips — icon, name and
-holding count — in a strip above the folder cards, next to a dashed
-**＋ New folder** chip that opens an inline name field (Enter creates, Escape
+holding count — in a strip above the folder cards; a solid **＋ New folder**
+button in the section header opens an inline name field (Enter creates, Escape
 closes). Picking a chip shows just that folder's card; **All** shows every one.
 Each subfolder card has an **Add asset here** button
 that can add Cash, Stocks, Crypto or Other directly into it. The parent remains a
