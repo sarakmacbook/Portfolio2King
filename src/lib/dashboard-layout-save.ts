@@ -27,7 +27,6 @@ import {
   saveHoldingsFolders,
   saveHoldingsOrder,
   saveHoldingsSections,
-  UNGROUPED_SECTION_KEY,
 } from "@/lib/dashboard-order-db";
 import { isDashboardBlockKey } from "@/lib/dashboard-layout";
 import {
@@ -38,6 +37,7 @@ import {
 import {
   normaliseAssignments,
   normaliseFolders,
+  UNGROUPED_SECTION_KEY,
   type HoldingFolder,
 } from "@/lib/holdings-folders";
 import { isHoldingFilter } from "@/lib/holdings-filter";

@@ -259,7 +259,16 @@ test("folders are saved, loaded and reset with the rest of the dashboard layout"
   // (only the comments explaining why).
   assert.ok(!/>\s*Unfiled\s*</.test(table), "no Unfiled heading in the table");
   assert.ok(!table.includes('"unfiled"'), "no unfiled group key in the table");
-  assert.ok(table.includes("folderControl("), "each holding shows its folder");
+  assert.ok(table.includes("folderControl("), "each holding shows its folder while arranging");
+  assert.ok(table.includes("{arranging && <th"), "the Folder column only renders inside arrange layout");
+  // Client components must never pull the server-only db module into the
+  // browser bundle (it drags `pg` in and fails the production build).
+  for (const file of ["HoldingsTable.tsx", "HoldingsFolders.tsx", "DashboardLayout.tsx"]) {
+    assert.ok(
+      !read(`src/components/${file}`).includes("@/lib/dashboard-order-db"),
+      `${file} stays free of server-only db imports`,
+    );
+  }
 
   const strip = read("src/components/HoldingsFolders.tsx");
   // The strip shows a solid create button with a quick inline form; arrange
