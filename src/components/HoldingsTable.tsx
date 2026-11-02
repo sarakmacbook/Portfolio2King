@@ -46,7 +46,7 @@ import {
 import { DEFAULT_DUST_THRESHOLD_USD, normaliseDustThreshold, splitDust } from "@/lib/wallet-dust";
 import { spamReasonOf, splitSpam } from "@/lib/wallet-spam";
 import { PROVIDER_LABELS, type PriceProvider } from "@/lib/market-prices";
-import { removeSpamHoldings, saveHoldingFolderAssignment } from "@/app/actions";
+import { removeSpamHoldings, saveHoldingFolderAssignment, saveHoldingsSectionsOrder } from "@/app/actions";
 import CryptoLogo from "./CryptoLogo";
 import ExchangeIcon, { EXCHANGE_BRAND_COLORS } from "./ExchangeIcon";
 import GripIcon from "./GripIcon";
@@ -116,6 +116,9 @@ type HoldingSection =
   | { kind: "group"; key: string; group: FolderGroup<HoldingRow> };
 
 /** Mobile has no table header, so sorting is offered as a select instead. */
+/** dataTransfer prefix marking a section drag (group row or arrange pill). */
+const SECTION_DRAG_PREFIX = "section:";
+
 const SORT_OPTIONS: Array<{ value: string; label: string }> = [
   /** The order the rows were dragged into (default when one is saved). */
   { value: "custom:1", label: "Custom · my arrangement" },
@@ -158,6 +161,16 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
   const [localSections, setLocalSections] = useState<string[]>([]);
   const sectionsOrder = arrange?.sectionsOrder ?? localSections;
   const setSectionsOrder = arrange?.onSectionsOrderChange ?? setLocalSections;
+  /**
+   * The section (group row or ungrouped block) being dragged, shared with the
+   * arrange pills so a row dragged in the table can drop on a pill and vice
+   * versa. Outside the dashboard it is plain local state.
+   */
+  const [localSectionDrag, setLocalSectionDrag] = useState<string | null>(null);
+  const sectionDrag = arrange?.sectionDrag ?? localSectionDrag;
+  const setSectionDrag = arrange?.onSectionDragChange ?? setLocalSectionDrag;
+  /** Which drop line the dragged section is hovering over. */
+  const [sectionDropAt, setSectionDropAt] = useState<number | null>(null);
   const clearAllGroupsState = arrange?.onClearGroups ?? (() => {
     setLocalFolders([]);
     setLocalAssignments({});
@@ -348,6 +361,91 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
         fileHolding(rowDragging, folderId);
       },
     };
+  }
+
+  /**
+   * Moves a whole section (a group's row block, or the ungrouped block) so it
+   * sits at `index` in the table's top-to-bottom order — the drop lines between
+   * the blocks mark the positions, so a group can land anywhere, above the
+   * ungrouped holdings included. Inside arrange mode the move stays pending
+   * until **Save layout**; in the everyday view it is stored straight away, the
+   * same optimistic way as filing a holding (reverted if the server refuses).
+   */
+  function moveSectionTo(key: string, index: number) {
+    const from = sectionKeys.indexOf(key);
+    if (from < 0) return;
+    const next = [...sectionKeys];
+    next.splice(from, 1);
+    const at = Math.max(0, Math.min(next.length, index > from ? index - 1 : index));
+    next.splice(at, 0, key);
+    if (at === from) return;
+    const previous = sectionKeys;
+    setSectionsOrder(next);
+    if (!arranging) {
+      void saveHoldingsSectionsOrder({ sections: next }).then((result) => {
+        if (!result.ok) setSectionsOrder(previous);
+      });
+    }
+  }
+
+  /** Makes a group's header row (table row or mobile card) a drag source. */
+  function sectionDragProps(key: string) {
+    return {
+      draggable: true,
+      onDragStart: (event: DragEvent<HTMLElement>) => {
+        setSectionDrag(key);
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", SECTION_DRAG_PREFIX + key);
+      },
+      onDragEnd: () => {
+        setSectionDrag(null);
+        setSectionDropAt(null);
+      },
+    };
+  }
+
+  /** Drop-line target: dropping the dragged section here inserts it at `index`. */
+  function sectionLineProps(index: number) {
+    return {
+      onDragOver: (event: DragEvent<HTMLElement>) => {
+        if (sectionDrag === null) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        setSectionDropAt((current) => (current === index ? current : index));
+      },
+      onDrop: (event: DragEvent<HTMLElement>) => {
+        if (sectionDrag === null) return;
+        event.preventDefault();
+        moveSectionTo(sectionDrag, index);
+        setSectionDrag(null);
+        setSectionDropAt(null);
+      },
+    };
+  }
+
+  /**
+   * The thin indigo line rendered between row blocks while a section is being
+   * dragged — the visible "drop it here" target, above the ungrouped holdings
+   * included. Lines that would mean "stay where you are" are hidden.
+   */
+  function sectionDropLine(index: number, mobile: boolean) {
+    const from = sectionDrag === null ? -1 : sectionKeys.indexOf(sectionDrag);
+    if (index === from || index === from + 1) return null;
+    const active = sectionDropAt === index;
+    const bar = (
+      <div className={`h-1.5 transition ${active ? "bg-indigo-500" : "bg-indigo-50/60"}`} />
+    );
+    return mobile ? (
+      <li {...sectionLineProps(index)} aria-hidden="true" className="p-0">
+        {bar}
+      </li>
+    ) : (
+      <tr {...sectionLineProps(index)} aria-hidden="true">
+        <td colSpan={columnCount} className="p-0">
+          {bar}
+        </td>
+      </tr>
+    );
   }
 
   /**
@@ -1140,6 +1238,8 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
         onFoldersChange={(next) => setFolders([...next, ...nestedFolders])}
         onSectionsChange={setSectionsOrder}
         sections={sectionKeys}
+        sectionDrag={sectionDrag}
+        onSectionDragChange={setSectionDrag}
         ungroupedCount={ungrouped.length}
         onAssignmentsChange={setAssignments}
         onGroupsCleared={() => {
@@ -1173,16 +1273,19 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
             {/* Row blocks render in the arranged section order: the ungrouped
                 rows are one block among the folder groups, so a group can sit
                 above or below them — wherever the user arranged it. */}
-            {orderedSections.map((section) =>
+            {orderedSections.map((section, position) =>
               section.kind === "ungrouped" ? (
                 <Fragment key={section.key}>
+                  {sectionDrag !== null && sectionDropLine(position, false)}
                   {ungrouped.map((r) => renderDesktopRow(r))}
                 </Fragment>
               ) : (
                 <Fragment key={section.key}>
+                  {sectionDrag !== null && sectionDropLine(position, false)}
                   <tr
                     {...groupDropProps(section.key)}
-                    className={`border-l-2 transition ${
+                    {...sectionDragProps(section.key)}
+                    className={`group border-l-2 transition ${
                       groupDrop === section.key
                         ? "border-indigo-500 bg-indigo-50/70"
                         : "border-transparent bg-slate-50/60"
@@ -1190,6 +1293,11 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                   >
                     <th colSpan={columnCount} className="px-4 py-2 font-normal" scope="colgroup">
                       <span className="flex items-center gap-2">
+                        <GripIcon
+                          className={`h-3 w-2 shrink-0 cursor-grab text-slate-400 ${
+                            arranging ? "opacity-70" : "opacity-0 group-hover:opacity-70"
+                          }`}
+                        />
                         {groupHeader(section.group)}
                         {rowDragging !== null && groupDrop === section.key && (
                           <span className="rounded-md bg-indigo-500 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
@@ -1204,6 +1312,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                 </Fragment>
               ),
             )}
+            {sectionDrag !== null && sectionDropLine(orderedSections.length, false)}
             {folderRows.length === 0 && (
               <tr>
                 <td colSpan={columnCount} className="px-4 py-12 text-center text-sm text-slate-400">
@@ -1217,28 +1326,39 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
 
       {/* Phones: one card per holding instead of a 760px-wide table. */}
       <ul className="divide-y divide-slate-100 md:hidden">
-        {orderedSections.map((section) =>
+        {orderedSections.map((section, position) =>
           section.kind === "ungrouped" ? (
             <Fragment key={section.key}>
+              {sectionDrag !== null && sectionDropLine(position, true)}
               {ungrouped.map((r) => renderMobileCard(r))}
             </Fragment>
           ) : (
             <Fragment key={section.key}>
+              {sectionDrag !== null && sectionDropLine(position, true)}
               <li
                 {...groupDropProps(section.key)}
-                className={`border-l-2 px-4 py-2 transition ${
+                {...sectionDragProps(section.key)}
+                className={`group border-l-2 px-4 py-2 transition ${
                   groupDrop === section.key
                     ? "border-indigo-500 bg-indigo-50/70"
                     : "border-transparent bg-slate-50/60"
                 }`}
               >
-                {groupHeader(section.group)}
+                <span className="flex items-center gap-2">
+                  <GripIcon
+                    className={`h-3 w-2 shrink-0 cursor-grab text-slate-400 ${
+                      arranging ? "opacity-70" : "opacity-0 group-hover:opacity-70"
+                    }`}
+                  />
+                  {groupHeader(section.group)}
+                </span>
               </li>
               {!collapsedGroups.has(section.key) &&
                 section.group.rows.map((r) => renderMobileCard(r))}
             </Fragment>
           ),
         )}
+        {sectionDrag !== null && sectionDropLine(orderedSections.length, true)}
         {folderRows.length === 0 && (
           <li className="px-4 py-12 text-center text-sm text-slate-400">No holdings match.</li>
         )}

@@ -53,6 +53,8 @@ export default function HoldingsFolders({
   onFoldersChange,
   sections,
   onSectionsChange,
+  sectionDrag,
+  onSectionDragChange,
   ungroupedCount,
   onAssignmentsChange,
   onGroupsCleared,
@@ -74,6 +76,12 @@ export default function HoldingsFolders({
   /** Section order for arrange mode: folder ids plus the ungrouped key. */
   sections: string[];
   onSectionsChange: (next: string[]) => void;
+  /**
+   * The section being dragged right now — shared with the table so a group row
+   * dragged there lights the pills up as drop targets too (and vice versa).
+   */
+  sectionDrag: string | null;
+  onSectionDragChange: (key: string | null) => void;
   /** Holdings in no folder — the count on the ungrouped pill. */
   ungroupedCount: number;
   onAssignmentsChange: (next: FolderAssignments) => void;
@@ -89,7 +97,6 @@ export default function HoldingsFolders({
   const [draftColor, setDraftColor] = useState<string>(FOLDER_COLORS[0]);
   const [draftIcon, setDraftIcon] = useState<FolderIconKind>("auto");
   const [draftGlyph, setDraftGlyph] = useState("");
-  const [dragging, setDragging] = useState<string | null>(null);
   const [drop, setDrop] = useState<{ id: string; after: boolean } | null>(null);
   const [dropFolder, setDropFolder] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -194,27 +201,27 @@ export default function HoldingsFolders({
   }
 
   function handleSectionDrop() {
-    if (!dragging || !drop || dragging === drop.id) {
-      setDragging(null);
+    if (!sectionDrag || !drop || sectionDrag === drop.id) {
+      onSectionDragChange(null);
       setDrop(null);
       return;
     }
-    const from = sections.indexOf(dragging);
+    const from = sections.indexOf(sectionDrag);
     const target = sections.indexOf(drop.id);
     if (from < 0 || target < 0) {
-      setDragging(null);
+      onSectionDragChange(null);
       setDrop(null);
       return;
     }
     const next = [...sections];
     next.splice(from, 1);
     const at = next.indexOf(drop.id) + (drop.after ? 1 : 0);
-    next.splice(at, 0, dragging);
+    next.splice(at, 0, sectionDrag);
     onSectionsChange(next);
     setAnnouncement(
-      `${sectionLabel(dragging)} moved to position ${at + 1} of ${next.length}.`,
+      `${sectionLabel(sectionDrag)} moved to position ${at + 1} of ${next.length}.`,
     );
-    setDragging(null);
+    onSectionDragChange(null);
     setDrop(null);
   }
 
@@ -268,7 +275,7 @@ export default function HoldingsFolders({
     const folder =
       key === UNGROUPED_SECTION_KEY ? undefined : folders.find((item) => item.id === key);
     if (key !== UNGROUPED_SECTION_KEY && !folder) return null;
-    const isDragging = dragging === key;
+    const isDragging = sectionDrag === key;
     const isDropTarget = drop?.id === key && !isDragging;
     const label = folder ? folder.name : "Ungrouped rows";
     const count = folder ? (counts[folder.id] ?? 0) : ungroupedCount;
@@ -276,8 +283,8 @@ export default function HoldingsFolders({
       <div
         key={key}
         onDragOver={(event) => {
-          if (dragging) {
-            if (dragging === key) return;
+          if (sectionDrag) {
+            if (sectionDrag === key) return;
             event.preventDefault();
             event.dataTransfer.dropEffect = "move";
             const rect = event.currentTarget.getBoundingClientRect();
@@ -291,7 +298,7 @@ export default function HoldingsFolders({
         }}
         onDragLeave={() => setDropFolder((current) => (current === key ? null : current))}
         onDrop={(event) => {
-          if (dragging) {
+          if (sectionDrag) {
             event.preventDefault();
             handleSectionDrop();
             return;
@@ -309,12 +316,12 @@ export default function HoldingsFolders({
         <span
           draggable
           onDragStart={(event) => {
-            setDragging(key);
+            onSectionDragChange(key);
             event.dataTransfer.effectAllowed = "move";
             event.dataTransfer.setData("text/plain", `section:${key}`);
           }}
           onDragEnd={() => {
-            setDragging(null);
+            onSectionDragChange(null);
             setDrop(null);
           }}
           className="flex cursor-grab items-center gap-1.5 text-xs font-medium text-indigo-900 active:cursor-grabbing"

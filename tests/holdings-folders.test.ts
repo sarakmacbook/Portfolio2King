@@ -323,3 +323,31 @@ test("folderForImport reuses a folder by name and creates one otherwise", () => 
   assert.equal(folderForImport(full, "Wallet").folder, null);
   assert.equal(folderForImport(full, "Wallet").folders.length, 20);
 });
+
+test("group rows drag anywhere in the everyday table, not only via arrange pills", () => {
+  const rootDir = resolve(__dirname, "..");
+  const read = (file: string) => readFileSync(join(rootDir, file), "utf8");
+  const table = read("src/components/HoldingsTable.tsx");
+  assert.ok(table.includes("function moveSectionTo("), "a dropped section moves to the chosen position");
+  assert.ok(
+    table.includes("saveHoldingsSectionsOrder({ sections: next })"),
+    "the everyday view stores the new order straight away",
+  );
+  assert.ok(
+    table.includes("sectionDropLine(position, false)") && table.includes("sectionDropLine(position, true)"),
+    "drop lines render between the desktop and mobile row blocks",
+  );
+  assert.ok(
+    table.includes("sectionDropLine(orderedSections.length, false)"),
+    "a line below the last block lets a group move to the very bottom",
+  );
+  assert.ok(table.includes("{...sectionDragProps(section.key)}"), "the group header row itself is the drag source");
+  assert.ok(table.includes("SECTION_DRAG_PREFIX + key"), "the drag payload is tagged as a section drag");
+  const strip = read("src/components/HoldingsFolders.tsx");
+  assert.ok(strip.includes("sectionDrag") && strip.includes("onSectionDragChange"), "the arrange pills share the table's section drag");
+  assert.ok(!strip.includes("const [dragging, setDragging]"), "the pills no longer keep a private drag state");
+  const arrange = read("src/components/holdings-arrange.tsx");
+  assert.ok(arrange.includes("sectionDrag: string | null;"), "the drag is shared through the arrange context");
+  const actions = read("src/app/actions.ts");
+  assert.ok(actions.includes("export async function saveHoldingsSectionsOrder"), "a server action stores the section order on its own");
+});
