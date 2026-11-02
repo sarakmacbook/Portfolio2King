@@ -38,6 +38,7 @@ import {
 import {
   MAX_FOLDERS,
   UNGROUPED_SECTION_KEY,
+  isAssetSectionKey,
   folderForImport,
   makeFolder,
   type HoldingFolder,
@@ -589,8 +590,8 @@ export async function saveHoldingFolderAssignment(input: {
  * layout", where a move should stick the moment it is dropped (the same
  * optimistic behaviour as filing a holding). Arrange mode keeps its deferred
  * behaviour and writes the order together with everything else on **Save
- * layout**. Keys that name no current top-level folder (or the ungrouped
- * block) are dropped, exactly as in the full layout save.
+ * layout**. Unknown folder keys are dropped; validated `$asset:<id>` keys are
+ * retained so a group can stay directly below one particular plain holding.
  */
 export async function saveHoldingsSectionsOrder(input: {
   sections: string[];
@@ -603,7 +604,9 @@ export async function saveHoldingsSectionsOrder(input: {
       ...folders.filter((folder) => !folder.parentAssetId).map((folder) => folder.id),
     ]);
     const saved = await saveHoldingsSections(
-      (Array.isArray(input?.sections) ? input.sections : []).filter((key) => known.has(key)),
+      (Array.isArray(input?.sections) ? input.sections : []).filter(
+        (key) => known.has(key) || isAssetSectionKey(key),
+      ),
     );
     refresh();
     return { ok: true, sections: saved };

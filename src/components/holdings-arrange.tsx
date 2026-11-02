@@ -17,9 +17,9 @@ export type HoldingsArrangeState = {
   folders: HoldingFolder[];
   onFoldersChange: (next: HoldingFolder[]) => void;
   /**
-   * Top-to-bottom order of the Holdings sections: the ungrouped-rows block
-   * (`UNGROUPED_SECTION_KEY`) and one block per top-level folder id, so a
-   * group can sit anywhere in the table — even above the ungrouped rows.
+   * Detailed top-to-bottom Holdings order: one `$asset:<id>` key per plain
+   * holding plus top-level folder ids, so a group can sit between two assets.
+   * Legacy `UNGROUPED_SECTION_KEY` blocks are expanded by the table.
    */
   sectionsOrder: string[];
   onSectionsOrderChange: (next: string[]) => void;
