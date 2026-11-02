@@ -17,6 +17,8 @@ import {
   clearHoldingsCategoryOrder,
   clearHoldingsFolders,
   clearHoldingsOrder,
+  clearHoldingsSections,
+  parseHoldingsSections,
   saveDashboardOrder,
   saveDashboardStatLabels,
   saveDashboardStatOrder,
@@ -24,6 +26,8 @@ import {
   saveHoldingsCategoryOrder,
   saveHoldingsFolders,
   saveHoldingsOrder,
+  saveHoldingsSections,
+  UNGROUPED_SECTION_KEY,
 } from "@/lib/dashboard-order-db";
 import { isDashboardBlockKey } from "@/lib/dashboard-layout";
 import {
@@ -165,6 +169,7 @@ export type DashboardLayoutPayload = {
   holdingOrder?: string;
   holdingFolders?: string;
   holdingFolderAssignments?: string;
+  holdingSections?: string;
 };
 
 export type DashboardLayoutSaveResult = {
@@ -214,6 +219,13 @@ export async function persistDashboardLayout(
     await saveHoldingFolderAssignments(assignments ?? {}, folders);
   }
 
+  // The section order references folder ids, so it is written last and only
+  // with keys that survived folder normalisation (plus the ungrouped block).
+  if (payload.holdingSections !== undefined) {
+    const known = new Set<string>([UNGROUPED_SECTION_KEY, ...folders.map((folder) => folder.id)]);
+    await saveHoldingsSections(parseHoldingsSections(payload.holdingSections).filter((key) => known.has(key)));
+  }
+
   return { folders };
 }
 
@@ -225,4 +237,5 @@ export async function clearDashboardLayout(): Promise<void> {
   await clearHoldingsCategoryOrder();
   await clearHoldingsOrder();
   await clearHoldingsFolders();
+  await clearHoldingsSections();
 }

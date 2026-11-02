@@ -2,13 +2,12 @@
 
 import { useState, useTransition, type DragEvent } from "react";
 import { clearAllHoldingGroups, createHoldingGroup } from "@/app/actions";
+import { UNGROUPED_SECTION_KEY } from "@/lib/dashboard-order-db";
 import {
   FOLDER_COLORS,
   MAX_FOLDERS,
   MAX_FOLDER_NAME_LENGTH,
   matchesFolderFilter,
-  moveFolderBy,
-  moveFolderTo,
   removeFolder,
   updateFolder,
   type FolderAssignments,
@@ -30,14 +29,17 @@ import GripIcon from "./GripIcon";
  * icon, and deleted — and a holding dragged from the table can be dropped
  * straight onto a folder to file it.
  *
- * Groups are created from the **＋ Add group** button in the strip (a quick
- * name field that persists at once) — shown in the normal view and again
- * inside arrange mode — or from the **Add holding** / **Edit** forms ("Create
- * a new folder…"). The strip otherwise filters, files and customises the
- * groups that already exist. Filing goes through `onFileHolding`, so the
- * table decides whether a drop is pending (arrange mode, saved by
- * **Save layout**) or persisted straight away (normal view). Folder edits
- * made in arrange mode are deferred to that save; quick creation is not.
+ * Groups are created from the **＋ Add group** button inside arrange mode (a
+ * quick name field that persists at once) or from the **Add holding** /
+ * **Edit** forms ("Create a new folder…"); the normal-view strip only
+ * filters. In arrange mode the strip also arranges where each block of rows
+ * sits in the table: one pill per section — the folder groups and the
+ * ungrouped rows — in top-to-bottom order, so a group can be moved above or
+ * below the plain rows. Dropping a holding on the ungrouped pill pulls it out
+ * of its folder. Filing goes through `onFileHolding`, so the table decides
+ * whether a drop is pending (arrange mode, saved by **Save layout**) or
+ * persisted straight away (normal view). Folder edits made in arrange mode
+ * are deferred to that save; quick creation and section order are too.
  */
 export default function HoldingsFolders({
   folders,
@@ -49,6 +51,9 @@ export default function HoldingsFolders({
   onSelect,
   arranging,
   onFoldersChange,
+  sections,
+  onSectionsChange,
+  ungroupedCount,
   onAssignmentsChange,
   onGroupsCleared,
   onFileHolding,
@@ -66,10 +71,15 @@ export default function HoldingsFolders({
   onSelect: (next: FolderFilter) => void;
   arranging: boolean;
   onFoldersChange: (next: HoldingFolder[]) => void;
+  /** Section order for arrange mode: folder ids plus the ungrouped key. */
+  sections: string[];
+  onSectionsChange: (next: string[]) => void;
+  /** Holdings in no folder — the count on the ungrouped pill. */
+  ungroupedCount: number;
   onAssignmentsChange: (next: FolderAssignments) => void;
   onGroupsCleared: () => void;
-  /** Files one holding (drag-and-drop); persisted at once outside arrange mode. */
-  onFileHolding: (assetId: number, folderId: string) => void;
+  /** Files one holding (drag-and-drop); `null` pulls it out of its folder. */
+  onFileHolding: (assetId: number, folderId: string | null) => void;
   /** Total number of holdings, shown on the **All** chip. */
   totalRows: number;
 }) {
@@ -166,38 +176,56 @@ export default function HoldingsFolders({
     setEditing(null);
   }
 
-  function move(id: string, delta: number) {
-    const from = folders.findIndex((folder) => folder.id === id);
-    const to = Math.max(0, Math.min(folders.length - 1, from + delta));
-    if (from < 0 || to === from) return;
-    onFoldersChange(moveFolderBy(folders, id, delta));
-    setAnnouncement(`${folders[from].name} moved to position ${to + 1} of ${folders.length}.`);
+  function sectionLabel(key: string) {
+    if (key === UNGROUPED_SECTION_KEY) return "Ungrouped rows";
+    return folders.find((folder) => folder.id === key)?.name ?? "Folder";
   }
 
-  function handleFolderDrop() {
+  /** Nudges a section (a folder pill or the ungrouped block) left/right. */
+  function moveSectionBy(key: string, delta: number) {
+    const from = sections.indexOf(key);
+    const to = Math.max(0, Math.min(sections.length - 1, from + delta));
+    if (from < 0 || to === from) return;
+    const next = [...sections];
+    next.splice(from, 1);
+    next.splice(to, 0, key);
+    onSectionsChange(next);
+    setAnnouncement(`${sectionLabel(key)} moved to position ${to + 1} of ${next.length}.`);
+  }
+
+  function handleSectionDrop() {
     if (!dragging || !drop || dragging === drop.id) {
       setDragging(null);
       setDrop(null);
       return;
     }
-    const next = moveFolderTo(folders, dragging, drop.id, drop.after);
-    onFoldersChange(next);
+    const from = sections.indexOf(dragging);
+    const target = sections.indexOf(drop.id);
+    if (from < 0 || target < 0) {
+      setDragging(null);
+      setDrop(null);
+      return;
+    }
+    const next = [...sections];
+    next.splice(from, 1);
+    const at = next.indexOf(drop.id) + (drop.after ? 1 : 0);
+    next.splice(at, 0, dragging);
+    onSectionsChange(next);
     setAnnouncement(
-      `${folders.find((folder) => folder.id === dragging)?.name ?? "Folder"} moved to position ${
-        next.findIndex((folder) => folder.id === dragging) + 1
-      } of ${next.length}.`,
+      `${sectionLabel(dragging)} moved to position ${at + 1} of ${next.length}.`,
     );
     setDragging(null);
     setDrop(null);
   }
 
   /** A holding dragged out of the table (text/plain = asset id) was dropped here. */
-  function handleHoldingDrop(event: DragEvent<HTMLElement>, folderId: string) {
+  function handleHoldingDrop(event: DragEvent<HTMLElement>, sectionKey: string) {
     const raw = event.dataTransfer.getData("text/plain");
     const assetId = Number(raw);
     if (!Number.isInteger(assetId) || assetId <= 0) return;
     event.preventDefault();
-    onFileHolding(assetId, folderId);
+    // Dropping on the ungrouped block pulls the holding out of its folder.
+    onFileHolding(assetId, sectionKey === UNGROUPED_SECTION_KEY ? null : sectionKey);
     setDropFolder(null);
   }
 
@@ -227,6 +255,129 @@ export default function HoldingsFolders({
       >
         ＋ Add group
       </button>
+    );
+  }
+
+  /**
+   * One pill per section while arranging: folder pills (drag, nudge, edit,
+   * delete) plus the ungrouped-rows block, which moves like any other section
+   * and doubles as a drop target that pulls a holding out of its folder. The
+   * pill order is the table's top-to-bottom section order.
+   */
+  function sectionPill(key: string, position: number) {
+    const folder =
+      key === UNGROUPED_SECTION_KEY ? undefined : folders.find((item) => item.id === key);
+    if (key !== UNGROUPED_SECTION_KEY && !folder) return null;
+    const isDragging = dragging === key;
+    const isDropTarget = drop?.id === key && !isDragging;
+    const label = folder ? folder.name : "Ungrouped rows";
+    const count = folder ? (counts[folder.id] ?? 0) : ungroupedCount;
+    return (
+      <div
+        key={key}
+        onDragOver={(event) => {
+          if (dragging) {
+            if (dragging === key) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+            const rect = event.currentTarget.getBoundingClientRect();
+            const after = event.clientX - rect.left > rect.width / 2;
+            setDrop((current) =>
+              current?.id === key && current.after === after ? current : { id: key, after },
+            );
+            return;
+          }
+          allowHoldingDrop(event, key);
+        }}
+        onDragLeave={() => setDropFolder((current) => (current === key ? null : current))}
+        onDrop={(event) => {
+          if (dragging) {
+            event.preventDefault();
+            handleSectionDrop();
+            return;
+          }
+          handleHoldingDrop(event, key);
+        }}
+        className={`flex items-center gap-1 rounded-xl border border-dashed px-2 py-1 ${
+          folder ? "border-indigo-300 bg-indigo-50/80" : "border-slate-300 bg-slate-50"
+        } ${isDragging ? "opacity-50" : ""} ${
+          isDropTarget || dropFolder === key
+            ? "ring-2 ring-indigo-400 ring-offset-2 ring-offset-slate-50"
+            : ""
+        }`}
+      >
+        <span
+          draggable
+          onDragStart={(event) => {
+            setDragging(key);
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", `section:${key}`);
+          }}
+          onDragEnd={() => {
+            setDragging(null);
+            setDrop(null);
+          }}
+          className="flex cursor-grab items-center gap-1.5 text-xs font-medium text-indigo-900 active:cursor-grabbing"
+          title={`Drag to move ${label}`}
+        >
+          <GripIcon className="h-3 w-2" />
+          {folder ? (
+            <ExchangeIcon
+              provider={folder.icon === "exchange" ? (folder.glyph as PriceProvider) : undefined}
+              glyph={folder.icon === "emoji" ? folder.glyph : undefined}
+              label={folder.name.slice(0, 1)}
+              color={folder.color}
+              className="h-4 w-4 rounded"
+            />
+          ) : (
+            <span aria-hidden="true" className="text-[10px]">
+              ≡
+            </span>
+          )}
+          <span className="max-w-24 truncate">{label}</span>
+          <span className="text-[10px] tabular-nums text-indigo-700/70">{count}</span>
+        </span>
+        <span className="flex items-center">
+          <button
+            type="button"
+            className="grid h-5 w-4 place-items-center rounded text-[9px] text-indigo-700 hover:bg-white disabled:opacity-30"
+            onClick={() => moveSectionBy(key, -1)}
+            disabled={position === 0}
+            aria-label={`Move ${label} left`}
+          >
+            ◀
+          </button>
+          <button
+            type="button"
+            className="grid h-5 w-4 place-items-center rounded text-[9px] text-indigo-700 hover:bg-white disabled:opacity-30"
+            onClick={() => moveSectionBy(key, 1)}
+            disabled={position === sections.length - 1}
+            aria-label={`Move ${label} right`}
+          >
+            ▶
+          </button>
+          {folder && (
+            <>
+              <button
+                type="button"
+                className="grid h-5 w-5 place-items-center rounded text-[10px] text-indigo-700 hover:bg-white"
+                onClick={() => startEdit(folder)}
+                aria-label={`Edit ${folder.name}`}
+              >
+                ✎
+              </button>
+              <button
+                type="button"
+                className="grid h-5 w-5 place-items-center rounded text-[10px] text-rose-600 hover:bg-white"
+                onClick={() => deleteFolder(folder)}
+                aria-label={`Delete ${folder.name}`}
+              >
+                ✕
+              </button>
+            </>
+          )}
+        </span>
+      </div>
     );
   }
 
@@ -288,7 +439,6 @@ export default function HoldingsFolders({
                 </button>
               );
             })}
-            {createButton()}
           </>
         )}
 
@@ -308,115 +458,11 @@ export default function HoldingsFolders({
 
         {arranging && (
           <>
-            {folders.map((folder, position) => {
-              const isDragging = dragging === folder.id;
-              const isDropTarget = drop?.id === folder.id && !isDragging;
-              return (
-                <div
-                  key={folder.id}
-                  onDragOver={(event) => {
-                    if (dragging) {
-                      if (dragging === folder.id) return;
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "move";
-                      const rect = event.currentTarget.getBoundingClientRect();
-                      const after = event.clientX - rect.left > rect.width / 2;
-                      setDrop((current) =>
-                        current?.id === folder.id && current.after === after
-                          ? current
-                          : { id: folder.id, after },
-                      );
-                      return;
-                    }
-                    allowHoldingDrop(event, folder.id);
-                  }}
-                  onDragLeave={() => setDropFolder((current) => (current === folder.id ? null : current))}
-                  onDrop={(event) => {
-                    if (dragging) {
-                      event.preventDefault();
-                      handleFolderDrop();
-                      return;
-                    }
-                    handleHoldingDrop(event, folder.id);
-                  }}
-                  className={`flex items-center gap-1 rounded-xl border border-dashed border-indigo-300 bg-indigo-50/80 px-2 py-1 ${
-                    isDragging ? "opacity-50" : ""
-                  } ${
-                    isDropTarget || dropFolder === folder.id
-                      ? "ring-2 ring-indigo-400 ring-offset-2 ring-offset-slate-50"
-                      : ""
-                  }`}
-                >
-                  <span
-                    draggable
-                    onDragStart={(event) => {
-                      setDragging(folder.id);
-                      event.dataTransfer.effectAllowed = "move";
-                      event.dataTransfer.setData("text/plain", `folder:${folder.id}`);
-                    }}
-                    onDragEnd={() => {
-                      setDragging(null);
-                      setDrop(null);
-                    }}
-                    className="flex cursor-grab items-center gap-1.5 text-xs font-medium text-indigo-900 active:cursor-grabbing"
-                    title="Drag to move this folder"
-                  >
-                    <GripIcon className="h-3 w-2" />
-                    <ExchangeIcon
-                      provider={folder.icon === "exchange" ? (folder.glyph as PriceProvider) : undefined}
-                      glyph={folder.icon === "emoji" ? folder.glyph : undefined}
-                      label={folder.name.slice(0, 1)}
-                      color={folder.color}
-                      className="h-4 w-4 rounded"
-                    />
-                    <span className="max-w-24 truncate">{folder.name}</span>
-                    <span className="text-[10px] tabular-nums text-indigo-700/70">
-                      {counts[folder.id] ?? 0}
-                    </span>
-                  </span>
-                  <span className="flex items-center">
-                    <button
-                      type="button"
-                      className="grid h-5 w-4 place-items-center rounded text-[9px] text-indigo-700 hover:bg-white disabled:opacity-30"
-                      onClick={() => move(folder.id, -1)}
-                      disabled={position === 0}
-                      aria-label={`Move ${folder.name} left`}
-                    >
-                      ◀
-                    </button>
-                    <button
-                      type="button"
-                      className="grid h-5 w-4 place-items-center rounded text-[9px] text-indigo-700 hover:bg-white disabled:opacity-30"
-                      onClick={() => move(folder.id, 1)}
-                      disabled={position === folders.length - 1}
-                      aria-label={`Move ${folder.name} right`}
-                    >
-                      ▶
-                    </button>
-                    <button
-                      type="button"
-                      className="grid h-5 w-5 place-items-center rounded text-[10px] text-indigo-700 hover:bg-white"
-                      onClick={() => startEdit(folder)}
-                      aria-label={`Edit ${folder.name}`}
-                    >
-                      ✎
-                    </button>
-                    <button
-                      type="button"
-                      className="grid h-5 w-5 place-items-center rounded text-[10px] text-rose-600 hover:bg-white"
-                      onClick={() => deleteFolder(folder)}
-                      aria-label={`Delete ${folder.name}`}
-                    >
-                      ✕
-                    </button>
-                  </span>
-                </div>
-              );
-            })}
+            {sections.map((key, position) => sectionPill(key, position))}
             {createButton()}
-            {folders.length > 0 && (
+            {sections.length > 0 && (
               <span className="text-[11px] text-indigo-700/70">
-                Drag a holding onto a folder to file it
+                Drag a holding onto a folder to file it — drop it on Ungrouped rows to unfile
               </span>
             )}
           </>

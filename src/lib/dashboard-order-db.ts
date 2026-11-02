@@ -43,6 +43,12 @@ export const HOLDINGS_ORDER_SETTING = "holdings.order";
 /** app_settings key holding the Holdings folders (JSON array). */
 export const HOLDINGS_FOLDERS_SETTING = "holdings.folders";
 
+/**
+ * Section key for the plain (no folder) rows in the holdings section order.
+ * Folder ids are [a-z0-9-] slugs, so a "$" sentinel can never collide with one.
+ */
+export const UNGROUPED_SECTION_KEY = "$ungrouped";
+
 /** app_settings key holding which folder each holding is filed in (JSON map). */
 export const HOLDINGS_FOLDER_ASSIGNMENTS_SETTING = "holdings.folderAssignments";
 
@@ -199,6 +205,55 @@ export async function clearHoldingsFolders(): Promise<void> {
   await ensureSchema();
   await db.delete(appSettings).where(eq(appSettings.key, HOLDINGS_FOLDERS_SETTING));
   await db.delete(appSettings).where(eq(appSettings.key, HOLDINGS_FOLDER_ASSIGNMENTS_SETTING));
+}
+
+/**
+ * Top-to-bottom order of the Holdings sections: the ungrouped rows block and
+ * one block per top-level folder, in the order the user arranged them. An
+ * empty list means the default (ungrouped rows first, then folder order).
+ */
+export const HOLDINGS_SECTIONS_SETTING = "holdings.sectionsOrder";
+
+/** Reads a section-order payload (comma-joined keys), dropping blanks/repeats. */
+export function parseHoldingsSections(raw: unknown): string[] {
+  const entries =
+    typeof raw === "string"
+      ? raw.split(",")
+      : Array.isArray(raw)
+        ? raw
+        : [];
+  const seen = new Set<string>();
+  const keys: string[] = [];
+  for (const entry of entries) {
+    const key = String(entry).trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    keys.push(key);
+  }
+  return keys;
+}
+
+export async function loadHoldingsSections(): Promise<string[]> {
+  await ensureSchema();
+  return parseHoldingsSections(await readSetting(HOLDINGS_SECTIONS_SETTING));
+}
+
+/** Stores the section order; an empty list clears it (back to the default). */
+export async function saveHoldingsSections(order: readonly unknown[]): Promise<string[]> {
+  await ensureSchema();
+  const keys = parseHoldingsSections(order);
+  if (keys.length === 0) {
+    await clearHoldingsSections();
+    return [];
+  }
+  await writeSetting(HOLDINGS_SECTIONS_SETTING, keys.join(","));
+  return keys;
+}
+
+/** Removes the stored section order (Reset to default). */
+export async function clearHoldingsSections(): Promise<void> {
+  await ensureSchema();
+  await db.delete(appSettings).where(eq(appSettings.key, HOLDINGS_SECTIONS_SETTING));
 }
 
 /** Which folder each holding is filed in, ignoring deleted folders. */

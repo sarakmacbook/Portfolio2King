@@ -264,12 +264,20 @@ test("folders are saved, loaded and reset with the rest of the dashboard layout"
   const strip = read("src/components/HoldingsFolders.tsx");
   // The strip shows a solid create button with a quick inline form; arrange
   // mode still only edits the folders that already exist.
-  assert.ok(strip.includes("＋ Add group"), "the Holdings strip shows a create-group button");
+  assert.ok(strip.includes("＋ Add group"), "arrange mode shows a create-group button");
   assert.ok(
-    (strip.match(/\{createButton\(\)\}/g) ?? []).length === 2,
-    "the create button renders in the normal strip and inside arrange mode",
+    (strip.match(/\{createButton\(\)\}/g) ?? []).length === 1,
+    "the create button lives in arrange mode only — the normal strip just filters",
   );
-  assert.ok(strip.includes("const showQuickCreate = creating;"), "the quick form opens in either mode");
+  assert.ok(strip.includes("const showQuickCreate = creating;"), "the quick form opens while arranging");
+  assert.ok(strip.includes("Ungrouped rows"), "arrange mode shows an ungrouped-rows section pill");
+  assert.ok(strip.includes("onSectionsChange("), "moving pills reorders the table sections");
+  assert.ok(table.includes("orderedSections"), "the table renders its row blocks in the arranged order");
+  assert.ok(table.includes("UNGROUPED_SECTION_KEY"), "the ungrouped rows are a first-class section");
+  assert.ok(layout.includes("initialSections"), "the layout receives the saved section order");
+  assert.ok(layout.includes('fd.set("holdingSections"'), "the layout sends the section order when saving");
+  assert.ok(save.includes("saveHoldingsSections("), "the layout save stores the section order");
+  assert.ok(actions.includes('fd.has("holdingSections")'), "the save action reads the section order");
   assert.ok(strip.includes("createHoldingGroup(draftName)"), "the quick group form uses the server action");
   assert.ok(actions.includes("export async function createHoldingGroup"), "group creation is persisted server-side");
   assert.ok(!strip.includes("New folder"), "arrange mode still only edits existing folders");

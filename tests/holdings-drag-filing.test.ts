@@ -66,9 +66,12 @@ test("the table implements in-place drag-and-drop filing, with an immediate save
     "a refused move is rolled back to the previous filing",
   );
   // Empty folders are visible group rows, so they can be filled by dragging too.
-  assert.ok(table.includes("const displayGroups = useMemo("), "empty folders appear as group rows in the list");
-  assert.ok(table.includes("return showEmptyGroups ? [{ folder, rows: [], totalValue: 0 }] : [];"));
-  assert.ok(table.includes("displayGroups.map((group) => {"), "the table and mobile list render those groups");
+  assert.ok(table.includes("const orderedSections = useMemo<HoldingSection[]>("), "empty folders appear as group rows in the list");
+  assert.ok(table.includes("? { kind: \"group\", key, group: { folder, rows: [], totalValue: 0 } }"));
+  assert.ok(
+    (table.match(/orderedSections\.map\(/g) ?? []).length === 2,
+    "the table and mobile list render those groups",
+  );
   assert.ok(table.includes("Drop to file here"), "the drop target says what dropping does");
   // The dropdown is the keyboard/touch path and is available in normal view too.
   assert.match(table, /if \(arranging \|\| hasFolders\) \{/);
