@@ -16,6 +16,14 @@
  */
 import { PRICE_PROVIDERS, type PriceProvider } from "@/lib/market-prices";
 
+/**
+ * Section key for the ungrouped (plain rows) block in the holdings section
+ * order. Folder ids are [a-z0-9-] slugs, so a "$" sentinel can never collide
+ * with one. Lives here (not in dashboard-order-db) because client components
+ * need it and this module stays free of server-only imports.
+ */
+export const UNGROUPED_SECTION_KEY = "$ungrouped";
+
 export const MAX_FOLDERS = 20;
 export const MAX_FOLDER_NAME_LENGTH = 28;
 

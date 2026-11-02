@@ -43,12 +43,6 @@ export const HOLDINGS_ORDER_SETTING = "holdings.order";
 /** app_settings key holding the Holdings folders (JSON array). */
 export const HOLDINGS_FOLDERS_SETTING = "holdings.folders";
 
-/**
- * Section key for the plain (no folder) rows in the holdings section order.
- * Folder ids are [a-z0-9-] slugs, so a "$" sentinel can never collide with one.
- */
-export const UNGROUPED_SECTION_KEY = "$ungrouped";
-
 /** app_settings key holding which folder each holding is filed in (JSON map). */
 export const HOLDINGS_FOLDER_ASSIGNMENTS_SETTING = "holdings.folderAssignments";
 

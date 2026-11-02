@@ -15,9 +15,12 @@ import {
   normaliseDashboardStatLabels,
   type DashboardStatKey,
 } from "@/lib/dashboard-stats";
-import { UNGROUPED_SECTION_KEY } from "@/lib/dashboard-order-db";
 import { DEFAULT_HOLDING_FILTER_ORDER, type HoldingFilter } from "@/lib/holdings-filter";
-import type { FolderAssignments, HoldingFolder } from "@/lib/holdings-folders";
+import {
+  UNGROUPED_SECTION_KEY,
+  type FolderAssignments,
+  type HoldingFolder,
+} from "@/lib/holdings-folders";
 import GripIcon from "./GripIcon";
 import { HoldingsArrangeProvider } from "./holdings-arrange";
 import type { DailyPerformanceProps } from "./DailyPerformance";

@@ -2,13 +2,13 @@
 
 import { useState, useTransition, type DragEvent } from "react";
 import { clearAllHoldingGroups, createHoldingGroup } from "@/app/actions";
-import { UNGROUPED_SECTION_KEY } from "@/lib/dashboard-order-db";
 import {
   FOLDER_COLORS,
   MAX_FOLDERS,
   MAX_FOLDER_NAME_LENGTH,
   matchesFolderFilter,
   removeFolder,
+  UNGROUPED_SECTION_KEY,
   updateFolder,
   type FolderAssignments,
   type FolderFilter,

@@ -32,12 +32,12 @@ import {
   moveHoldingTo,
   normaliseHoldingOrder,
 } from "@/lib/holdings-order";
-import { UNGROUPED_SECTION_KEY } from "@/lib/dashboard-order-db";
 import {
   assignHolding,
   countInFolder,
   matchesFolderFilter,
   splitByFolder,
+  UNGROUPED_SECTION_KEY,
   type FolderGroup,
   type FolderAssignments,
   type FolderFilter,
@@ -488,8 +488,12 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
       : [UNGROUPED_SECTION_KEY, ...kept, ...missing];
   }, [sectionsOrder, rootFolders]);
   const hasFolders = folders.length > 0;
-  /** Order + Asset + Folder + Quantity + Avg cost + Price + Value + P/L + Weight. */
-  const columnCount = 7 + (arranging ? 1 : 0) + (hasFolders ? 1 : 0);
+  /**
+   * Asset + Quantity + Avg cost + Price + Value + P/L + Weight, plus the Order
+   * and Folder columns while arranging — the per-row folder dropdown is part
+   * of the layout editor, not of the everyday table.
+   */
+  const columnCount = 7 + (arranging ? 2 : 0);
   const folderIds = useMemo(() => folders.map((folder) => folder.id), [folders]);
 
   function folderLabel(folder: HoldingFolder) {
@@ -747,7 +751,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                       </span>
                     </Link>
                   </td>
-                  {hasFolders && (
+                  {arranging && (
                     <td className="px-4 py-3 align-middle">{folderControl(r)}</td>
                   )}
                   <td className="px-4 py-3 text-right tabular-nums text-slate-700">{isCash ? "—" : qty(r.quantity)}</td>
@@ -862,7 +866,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                   </span>
                 </span>
               </Link>
-              {hasFolders && (
+              {arranging && (
                 <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
                   <span className="w-12 shrink-0 text-slate-400">Folder</span>
                   {folderControl(r)}
@@ -1156,7 +1160,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                 </th>
               )}
               {th("name", "Asset", "text-left")}
-              {hasFolders && <th className="px-4 py-3 text-left font-medium">Folder</th>}
+              {arranging && <th className="px-4 py-3 text-left font-medium">Folder</th>}
               <th className="px-4 py-3 text-right font-medium">Quantity</th>
               <th className="px-4 py-3 text-right font-medium">Avg cost</th>
               <th className="px-4 py-3 text-right font-medium">Price</th>

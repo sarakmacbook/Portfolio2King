@@ -656,13 +656,15 @@ Folders turn a long table into a few groups without changing any numbers:
    its section in the table, so a group can sit above or below the plain
    rows; **Save layout** stores the arrangement. Dropping a holding onto the
    **Ungrouped rows** pill pulls it out of its folder.
-3. File existing holdings by dragging a row onto a folder chip, or use the
-   **Folder** dropdown on every row — the same dropdown is in the asset's
-   **Edit** form, where a new folder can be created inline. A holding can be in
-   one folder; holdings with no folder are simply plain rows above the folder
-   groups.
-4. Pick *No folder* in a holding's dropdown, or in the asset's **Edit** form, to
-   pull it out of its folder again.
+3. File existing holdings by dragging a row onto a folder chip in the normal
+   view, or use the **Folder** dropdown on every row inside **⇅ Arrange
+   layout** (the everyday table keeps no folder column) — the same dropdown is
+   in the asset's **Edit** form, where a new folder can be created inline. A
+   holding can be in one folder; holdings with no folder are simply plain rows
+   in the ungrouped section.
+4. Pick *No folder* in a holding's arrange-mode dropdown, drop it on the
+   **Ungrouped rows** pill, or use the asset's **Edit** form, to pull it out of
+   its folder again.
    Folder and filing edits made in Arrange mode are applied when you click
    **Save layout**. **Reset to default** removes the folders; holdings are never
    deleted, they just go back to being plain rows. Use **Remove all groups** in
@@ -683,13 +685,14 @@ lost.
 
 **Dragging works outside arrange mode too**, which is the quick way to tidy up:
 
-- Every holding gets a grip on hover (always visible on touch screens, and the
-  **Folder** dropdown next to it is the keyboard-friendly path). Drag it and the
-  folder groups highlight.
+- Every holding gets a grip on hover (always visible on touch screens). Drag it
+  and the folder groups highlight; the arrange-mode **Folder** dropdown is the
+  keyboard-friendly path.
 - Drop it on a **folder group** — its header or anywhere in its rows — and it is
   filed there; drop it on another holding to put it in *that* holding's folder.
-  To pull a holding back out, pick *No folder* in its dropdown. Empty folders
-  show their own dashed *"drop a holding here"* row while you drag.
+  To pull a holding back out, drop it on the **Ungrouped rows** pill in arrange
+  mode or pick *No folder* in its arrange-mode dropdown. Empty folders show
+  their own dashed *"drop a holding here"* row while you drag.
 - Those drops save immediately (one small request per move, with the row moving
   optimistically and snapping back if the save fails). Arrange mode is the only
   place where moves stay pending until **Save layout**, because that is the click
