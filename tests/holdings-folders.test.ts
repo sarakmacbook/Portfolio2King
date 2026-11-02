@@ -13,6 +13,7 @@ import {
   splitByFolder,
   makeFolder,
   matchesFolderFilter,
+  UNGROUPED_SECTION_KEY,
   moveFolderBy,
   moveFolderTo,
   nextFolderId,
@@ -22,6 +23,7 @@ import {
   updateFolder,
   type HoldingFolder,
 } from "../src/lib/holdings-folders";
+import { moveKeyTo } from "../src/lib/order-list";
 
 const folder = (id: string, name = id): HoldingFolder => ({
   id,
@@ -324,11 +326,47 @@ test("folderForImport reuses a folder by name and creates one otherwise", () => 
   assert.equal(folderForImport(full, "Wallet").folders.length, 20);
 });
 
+test("a group can land before or after any section without losing hidden groups", () => {
+  const order = [UNGROUPED_SECTION_KEY, "a", "b", "c"];
+
+  assert.deepEqual(
+    moveKeyTo(order, "c", UNGROUPED_SECTION_KEY, false),
+    ["c", UNGROUPED_SECTION_KEY, "a", "b"],
+    "a group can move above the ungrouped holdings",
+  );
+  assert.deepEqual(
+    moveKeyTo(order, "a", "c", true),
+    [UNGROUPED_SECTION_KEY, "b", "c", "a"],
+    "moving after a visible target keeps a filtered-out group in the order",
+  );
+  assert.deepEqual(
+    moveKeyTo(order, "b", "a", false),
+    [UNGROUPED_SECTION_KEY, "b", "a", "c"],
+    "before/after insertion works in either direction",
+  );
+  assert.deepEqual(order, [UNGROUPED_SECTION_KEY, "a", "b", "c"], "the old order is not mutated");
+});
+
 test("group rows drag anywhere in the everyday table, not only via arrange pills", () => {
   const rootDir = resolve(__dirname, "..");
   const read = (file: string) => readFileSync(join(rootDir, file), "utf8");
   const table = read("src/components/HoldingsTable.tsx");
   assert.ok(table.includes("function moveSectionTo("), "a dropped section moves to the chosen position");
+  assert.ok(
+    table.includes("handleSectionTargetOver(event, section)") &&
+      table.includes("handleSectionTargetDrop(event, section)"),
+    "whole group and holding rows accept a section drop, not only the thin lines",
+  );
+  assert.ok(
+    table.includes("function sectionMoveControls(") &&
+      table.includes("onClick={() => moveSectionBy(key, -1)}") &&
+      table.includes("onClick={() => moveSectionBy(key, 1)}"),
+    "touch and keyboard users get up/down group controls",
+  );
+  assert.ok(
+    table.includes("orderedSections.findIndex((section) => section.key === key)"),
+    "the nudge controls follow the visible sections when filters are active",
+  );
   assert.ok(
     table.includes("saveHoldingsSectionsOrder({ sections: next })"),
     "the everyday view stores the new order straight away",
