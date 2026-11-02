@@ -265,6 +265,11 @@ test("folders are saved, loaded and reset with the rest of the dashboard layout"
   // The strip shows a solid create button with a quick inline form; arrange
   // mode still only edits the folders that already exist.
   assert.ok(strip.includes("＋ Add group"), "the Holdings strip shows a create-group button");
+  assert.ok(
+    (strip.match(/\{createButton\(\)\}/g) ?? []).length === 2,
+    "the create button renders in the normal strip and inside arrange mode",
+  );
+  assert.ok(strip.includes("const showQuickCreate = creating;"), "the quick form opens in either mode");
   assert.ok(strip.includes("createHoldingGroup(draftName)"), "the quick group form uses the server action");
   assert.ok(actions.includes("export async function createHoldingGroup"), "group creation is persisted server-side");
   assert.ok(!strip.includes("New folder"), "arrange mode still only edits existing folders");
