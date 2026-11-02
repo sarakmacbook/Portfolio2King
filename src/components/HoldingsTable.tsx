@@ -43,6 +43,7 @@ import {
   type FolderFilter,
   type HoldingFolder,
 } from "@/lib/holdings-folders";
+import { moveKeyTo } from "@/lib/order-list";
 import { DEFAULT_DUST_THRESHOLD_USD, normaliseDustThreshold, splitDust } from "@/lib/wallet-dust";
 import { spamReasonOf, splitSpam } from "@/lib/wallet-spam";
 import { PROVIDER_LABELS, type PriceProvider } from "@/lib/market-prices";
@@ -114,6 +115,9 @@ function compareHoldingRows(
 type HoldingSection =
   | { kind: "ungrouped"; key: string }
   | { kind: "group"; key: string; group: FolderGroup<HoldingRow> };
+
+/** A visible row block that can accept a dragged group. */
+type HoldingSectionTarget = { key: string; position: number };
 
 /** Mobile has no table header, so sorting is offered as a select instead. */
 /** dataTransfer prefix marking a section drag (group row or arrange pill). */
@@ -202,6 +206,9 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
   const [groupDrop, setGroupDrop] = useState<string | null>(null);
   const [filingError, setFilingError] = useState("");
   const [filing, startFiling] = useTransition();
+  /** Everyday group moves save straight away; arrange-mode moves stay pending. */
+  const [sectionError, setSectionError] = useState("");
+  const [sectionSaving, startSectionSave] = useTransition();
   /** Result of the last "Remove them" click, so the clean-up is never silent. */
   const [spamCleanup, setSpamCleanup] = useState("");
   const [removingSpam, startRemovingSpam] = useTransition();
@@ -308,12 +315,16 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
 
   /**
    * Drag-and-drop wiring for one holding, shared by the desktop row and the
-   * phone card. Only the grip starts a drag; dropping above or below the middle
-   * of a row puts the dragged holding before or after it.
+   * phone card. A holding drop files/reorders that holding; a group drop uses
+   * the same row as a large before/after target for its whole section.
    */
-  function holdingDragProps(id: number) {
+  function holdingDragProps(id: number, section: HoldingSectionTarget) {
     return {
       onDragOver: (event: DragEvent<HTMLElement>) => {
+        if (sectionDrag !== null) {
+          handleSectionTargetOver(event, section);
+          return;
+        }
         if (rowDragging === null || rowDragging === id) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
@@ -325,6 +336,10 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
         setGroupDrop(null);
       },
       onDrop: (event: DragEvent<HTMLElement>) => {
+        if (sectionDrag !== null) {
+          handleSectionTargetDrop(event, section);
+          return;
+        }
         if (rowDragging === null) return;
         event.preventDefault();
         if (arranging) {
@@ -340,14 +355,18 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
   }
 
   /**
-   * A whole folder group is a drop target too: dropping a holding anywhere in
-   * its header or its rows files it into that folder. This is what makes
-   * dragging a holding *under* a folder work without aiming at the chips.
+   * A whole folder group is a drop target too: dropping a holding files it;
+   * dropping another group moves it before or after this group.
    */
-  function groupDropProps(folderId: string) {
+  function groupDropProps(folderId: string, position: number) {
     const key = folderId;
+    const section = { key, position };
     return {
       onDragOver: (event: DragEvent<HTMLElement>) => {
+        if (sectionDrag !== null) {
+          handleSectionTargetOver(event, section);
+          return;
+        }
         if (rowDragging === null) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
@@ -356,6 +375,10 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
       },
       onDragLeave: () => setGroupDrop((current) => (current === key ? null : current)),
       onDrop: (event: DragEvent<HTMLElement>) => {
+        if (sectionDrag !== null) {
+          handleSectionTargetDrop(event, section);
+          return;
+        }
         if (rowDragging === null) return;
         event.preventDefault();
         fileHolding(rowDragging, folderId);
@@ -363,48 +386,108 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
     };
   }
 
+  function sectionLabel(key: string): string {
+    if (key === UNGROUPED_SECTION_KEY) return "Ungrouped holdings";
+    return rootFolders.find((folder) => folder.id === key)?.name ?? "Group";
+  }
+
+  function clearSectionDrag() {
+    setSectionDrag(null);
+    setSectionDropAt(null);
+  }
+
   /**
-   * Moves a whole section (a group's row block, or the ungrouped block) so it
-   * sits at `index` in the table's top-to-bottom order — the drop lines between
-   * the blocks mark the positions, so a group can land anywhere, above the
-   * ungrouped holdings included. Inside arrange mode the move stays pending
-   * until **Save layout**; in the everyday view it is stored straight away, the
-   * same optimistic way as filing a holding (reverted if the server refuses).
+   * Commits one section order and, outside arrange mode, stores it immediately.
+   * The previous order is restored if the server refuses the move.
    */
-  function moveSectionTo(key: string, index: number) {
-    const from = sectionKeys.indexOf(key);
-    if (from < 0) return;
-    const next = [...sectionKeys];
-    next.splice(from, 1);
-    const at = Math.max(0, Math.min(next.length, index > from ? index - 1 : index));
-    next.splice(at, 0, key);
-    if (at === from) return;
+  function commitSectionOrder(next: string[], key: string) {
+    if (next.length === sectionKeys.length && next.every((item, index) => item === sectionKeys[index])) {
+      return;
+    }
     const previous = sectionKeys;
     setSectionsOrder(next);
-    if (!arranging) {
-      void saveHoldingsSectionsOrder({ sections: next }).then((result) => {
-        if (!result.ok) setSectionsOrder(previous);
-      });
-    }
+    setSectionError("");
+    setAnnouncement(
+      `${sectionLabel(key)} moved to position ${next.indexOf(key) + 1} of ${next.length}.`,
+    );
+    if (arranging) return;
+
+    startSectionSave(async () => {
+      const result = await saveHoldingsSectionsOrder({ sections: next });
+      if (result.ok) return;
+      setSectionsOrder(previous);
+      setSectionError(result.error ?? "Could not save the group order.");
+      setAnnouncement(`${sectionLabel(key)} is back in its previous position — the move did not save.`);
+    });
+  }
+
+  /** Places a dragged group immediately before or after any visible section. */
+  function moveSectionTo(key: string, overKey: string, after: boolean) {
+    commitSectionOrder(moveKeyTo(sectionKeys, key, overKey, after), key);
+  }
+
+  /** Touch/keyboard path: move a group past the adjacent visible section. */
+  function moveSectionBy(key: string, delta: number) {
+    const visiblePosition = orderedSections.findIndex((section) => section.key === key);
+    const adjacent = orderedSections[visiblePosition + delta];
+    if (visiblePosition < 0 || !adjacent) return;
+    // Using the visible neighbour means a click always has a visible effect,
+    // even while a search or folder filter hides some of the other groups.
+    commitSectionOrder(
+      delta < 0
+        ? moveKeyTo(sectionKeys, key, adjacent.key, false)
+        : moveKeyTo(sectionKeys, key, adjacent.key, true),
+      key,
+    );
   }
 
   /** Makes a group's header row (table row or mobile card) a drag source. */
   function sectionDragProps(key: string) {
     return {
-      draggable: true,
+      draggable: !sectionSaving,
       onDragStart: (event: DragEvent<HTMLElement>) => {
+        if (sectionSaving) {
+          event.preventDefault();
+          return;
+        }
+        setSectionError("");
+        clearRowDrag();
+        setGroupDrop(null);
         setSectionDrag(key);
         event.dataTransfer.effectAllowed = "move";
         event.dataTransfer.setData("text/plain", SECTION_DRAG_PREFIX + key);
       },
-      onDragEnd: () => {
-        setSectionDrag(null);
-        setSectionDropAt(null);
-      },
+      onDragEnd: clearSectionDrag,
     };
   }
 
-  /** Drop-line target: dropping the dragged section here inserts it at `index`. */
+  /** The pointer's half of a destination decides whether to insert after it. */
+  function sectionDropAfter(event: DragEvent<HTMLElement>): boolean {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return event.clientY - rect.top > rect.height / 2;
+  }
+
+  /**
+   * A whole destination section accepts the drop, not just its thin drop lines.
+   * This works on group headers, grouped holdings and plain ungrouped rows.
+   */
+  function handleSectionTargetOver(event: DragEvent<HTMLElement>, target: HoldingSectionTarget) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    const index = target.position + (sectionDropAfter(event) ? 1 : 0);
+    setSectionDropAt((current) => (current === index ? current : index));
+    setRowDrop(null);
+    setGroupDrop(null);
+  }
+
+  function handleSectionTargetDrop(event: DragEvent<HTMLElement>, target: HoldingSectionTarget) {
+    event.preventDefault();
+    if (sectionDrag === null) return;
+    moveSectionTo(sectionDrag, target.key, sectionDropAfter(event));
+    clearSectionDrag();
+  }
+
+  /** Drop-line target: the line before a section means "before"; the last means "after". */
   function sectionLineProps(index: number) {
     return {
       onDragOver: (event: DragEvent<HTMLElement>) => {
@@ -414,11 +497,14 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
         setSectionDropAt((current) => (current === index ? current : index));
       },
       onDrop: (event: DragEvent<HTMLElement>) => {
-        if (sectionDrag === null) return;
+        if (sectionDrag === null || orderedSections.length === 0) return;
         event.preventDefault();
-        moveSectionTo(sectionDrag, index);
-        setSectionDrag(null);
-        setSectionDropAt(null);
+        const target =
+          index < orderedSections.length
+            ? { key: orderedSections[index].key, after: false }
+            : { key: orderedSections[orderedSections.length - 1].key, after: true };
+        moveSectionTo(sectionDrag, target.key, target.after);
+        clearSectionDrag();
       },
     };
   }
@@ -429,11 +515,13 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
    * included. Lines that would mean "stay where you are" are hidden.
    */
   function sectionDropLine(index: number, mobile: boolean) {
-    const from = sectionDrag === null ? -1 : sectionKeys.indexOf(sectionDrag);
-    if (index === from || index === from + 1) return null;
+    const from = sectionDrag === null
+      ? -1
+      : orderedSections.findIndex((section) => section.key === sectionDrag);
+    if (from >= 0 && (index === from || index === from + 1)) return null;
     const active = sectionDropAt === index;
     const bar = (
-      <div className={`h-1.5 transition ${active ? "bg-indigo-500" : "bg-indigo-50/60"}`} />
+      <div className={`h-2 transition ${active ? "bg-indigo-500" : "bg-indigo-50/60"}`} />
     );
     return mobile ? (
       <li {...sectionLineProps(index)} aria-hidden="true" className="p-0">
@@ -769,7 +857,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
       <button
         type="button"
         onClick={() => toggleGroup(key)}
-        className="flex w-full items-center gap-2 text-left"
+        className="flex min-w-0 flex-1 items-center gap-2 text-left"
         aria-expanded={!isCollapsed}
       >
         <span className="w-3 text-[10px] text-slate-400">{isCollapsed ? "▶" : "▼"}</span>
@@ -780,28 +868,57 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
           color={group.folder.color}
           className="h-4 w-4 rounded"
         />
-        <span className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+        <span className="truncate text-xs font-semibold uppercase tracking-wide text-slate-600">
           {group.folder.name}
         </span>
-        <span className="text-[11px] font-normal normal-case text-slate-400">
+        <span className="shrink-0 text-[11px] font-normal normal-case text-slate-400">
           {group.rows.length} holding{group.rows.length === 1 ? "" : "s"}
         </span>
-        <span className="ml-auto text-xs font-medium tabular-nums text-slate-500">
+        <span className="ml-auto shrink-0 text-xs font-medium tabular-nums text-slate-500">
           {money(group.totalValue)}
         </span>
       </button>
     );
   }
 
+  /** Visible touch/keyboard controls; each click saves outside arrange mode. */
+  function sectionMoveControls(key: string, position: number) {
+    const label = sectionLabel(key);
+    return (
+      <span className="ml-1 flex shrink-0 items-center gap-0.5">
+        <button
+          type="button"
+          className="grid h-6 w-6 place-items-center rounded-md text-[10px] text-slate-400 transition hover:bg-white hover:text-indigo-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-25"
+          onClick={() => moveSectionBy(key, -1)}
+          disabled={sectionSaving || position === 0}
+          aria-label={`Move ${label} up`}
+          title={`Move ${label} up`}
+        >
+          ▲
+        </button>
+        <button
+          type="button"
+          className="grid h-6 w-6 place-items-center rounded-md text-[10px] text-slate-400 transition hover:bg-white hover:text-indigo-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-25"
+          onClick={() => moveSectionBy(key, 1)}
+          disabled={sectionSaving || position === orderedSections.length - 1}
+          aria-label={`Move ${label} down`}
+          title={`Move ${label} down`}
+        >
+          ▼
+        </button>
+      </span>
+    );
+  }
+
   /** One holding row in the desktop table. */
-  function renderDesktopRow(r: HoldingRow) {
+  function renderDesktopRow(r: HoldingRow, section: HoldingSectionTarget) {
               const isCash = r.type === "cash";
               const isDragging = rowDragging === r.id;
               const isDropTarget = rowDrop?.id === r.id && !isDragging;
               return (
                 <tr
                   key={r.id}
-                  {...holdingDragProps(r.id)}
+                  {...holdingDragProps(r.id, section)}
                   className={`group transition hover:bg-slate-50/80 ${isDragging ? "opacity-50" : ""} ${
                     isDropTarget ? "bg-indigo-50/70 ring-2 ring-inset ring-indigo-400" : ""
                   }`}
@@ -897,7 +1014,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
   }
 
   /** One holding card in the phone list. */
-  function renderMobileCard(r: HoldingRow) {
+  function renderMobileCard(r: HoldingRow, section: HoldingSectionTarget) {
           const isCash = r.type === "cash";
           const subtitle = r.type === "crypto"
             ? r.cryptoCategory === "stablecoin"
@@ -909,7 +1026,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
           return (
             <li
               key={r.id}
-              {...holdingDragProps(r.id)}
+              {...holdingDragProps(r.id, section)}
               className={`px-4 py-3 ${isDragging ? "opacity-50" : ""} ${
                 isDropTarget ? "bg-indigo-50/70 ring-2 ring-inset ring-indigo-400" : ""
               }`}
@@ -1173,6 +1290,12 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
         </p>
       )}
 
+      {sectionError && (
+        <p role="alert" className="mx-4 mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">
+          {sectionError}
+        </p>
+      )}
+
       {spamSplit.spamCount > 0 && (
         <p className="mx-4 mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
           {spamSplit.spamCount} holding{spamSplit.spamCount === 1 ? "" : "s"} look
@@ -1277,13 +1400,15 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
               section.kind === "ungrouped" ? (
                 <Fragment key={section.key}>
                   {sectionDrag !== null && sectionDropLine(position, false)}
-                  {ungrouped.map((r) => renderDesktopRow(r))}
+                  {ungrouped.map((r) =>
+                    renderDesktopRow(r, { key: UNGROUPED_SECTION_KEY, position }),
+                  )}
                 </Fragment>
               ) : (
                 <Fragment key={section.key}>
                   {sectionDrag !== null && sectionDropLine(position, false)}
                   <tr
-                    {...groupDropProps(section.key)}
+                    {...groupDropProps(section.key, position)}
                     {...sectionDragProps(section.key)}
                     className={`group border-l-2 transition ${
                       groupDrop === section.key
@@ -1295,10 +1420,13 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                       <span className="flex items-center gap-2">
                         <GripIcon
                           className={`h-3 w-2 shrink-0 cursor-grab text-slate-400 ${
-                            arranging ? "opacity-70" : "opacity-0 group-hover:opacity-70"
+                            arranging
+                              ? "opacity-70"
+                              : "opacity-100 md:opacity-0 md:group-hover:opacity-70"
                           }`}
                         />
                         {groupHeader(section.group)}
+                        {sectionMoveControls(section.key, position)}
                         {rowDragging !== null && groupDrop === section.key && (
                           <span className="rounded-md bg-indigo-500 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
                             Drop to file here
@@ -1308,7 +1436,9 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                     </th>
                   </tr>
                   {!collapsedGroups.has(section.key) &&
-                    section.group.rows.map((r) => renderDesktopRow(r))}
+                    section.group.rows.map((r) =>
+                      renderDesktopRow(r, { key: section.key, position }),
+                    )}
                 </Fragment>
               ),
             )}
@@ -1330,13 +1460,15 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
           section.kind === "ungrouped" ? (
             <Fragment key={section.key}>
               {sectionDrag !== null && sectionDropLine(position, true)}
-              {ungrouped.map((r) => renderMobileCard(r))}
+              {ungrouped.map((r) =>
+                renderMobileCard(r, { key: UNGROUPED_SECTION_KEY, position }),
+              )}
             </Fragment>
           ) : (
             <Fragment key={section.key}>
               {sectionDrag !== null && sectionDropLine(position, true)}
               <li
-                {...groupDropProps(section.key)}
+                {...groupDropProps(section.key, position)}
                 {...sectionDragProps(section.key)}
                 className={`group border-l-2 px-4 py-2 transition ${
                   groupDrop === section.key
@@ -1347,14 +1479,19 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                 <span className="flex items-center gap-2">
                   <GripIcon
                     className={`h-3 w-2 shrink-0 cursor-grab text-slate-400 ${
-                      arranging ? "opacity-70" : "opacity-0 group-hover:opacity-70"
+                      arranging
+                        ? "opacity-70"
+                        : "opacity-100 md:opacity-0 md:group-hover:opacity-70"
                     }`}
                   />
                   {groupHeader(section.group)}
+                  {sectionMoveControls(section.key, position)}
                 </span>
               </li>
               {!collapsedGroups.has(section.key) &&
-                section.group.rows.map((r) => renderMobileCard(r))}
+                section.group.rows.map((r) =>
+                  renderMobileCard(r, { key: section.key, position }),
+                )}
             </Fragment>
           ),
         )}

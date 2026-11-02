@@ -657,11 +657,14 @@ Folders turn a long table into a few groups without changing any numbers:
    rows; **Save layout** stores the arrangement. Dropping a holding onto the
    **Ungrouped rows** pill pulls it out of its folder.
    A group can also be moved without entering arrange mode: grab its section
-   row in the everyday table (hover the row to reveal the grip) and drag it —
-   thin indigo drop lines appear between every row block, above the ungrouped
-   holdings included, and dropping on a line puts the group there. Outside
-   arrange mode the new order is stored the moment you drop; the pills and the
-   table rows share one drag, so either can drop on the other.
+   row in the everyday table (hover the row to reveal the grip) and drag it.
+   Drop above or below **any group header or holding row** — including plain
+   ungrouped holdings — or use the indigo lines between sections. The destination
+   is chosen from the pointer's half of that row, so the move does not require
+   aiming at a narrow line. The ▲ / ▼ buttons on every group header provide the
+   same reordering on touch screens and with a keyboard. Outside arrange mode
+   the new order is stored the moment you drop or click; the pills and the table
+   rows share one drag, so either can drop on the other.
 3. File existing holdings by dragging a row onto a folder chip in the normal
    view, or use the **Folder** dropdown on every row inside **⇅ Arrange
    layout** (the everyday table keeps no folder column) — the same dropdown is
