@@ -644,12 +644,13 @@ Folders turn a long table into a few groups without changing any numbers:
    groups that already exist.
 2. To create an empty group directly in **Holdings**, click the solid
    **＋ Add group** button in the strip above the table and enter its name
-   (Enter creates, Escape cancels). Groups appear as collapsible section rows
-   in the holdings list, including while empty; the chips remain as quick
-   filters. To customize groups, click **⇅ Arrange layout** and press ✎ on a
-   folder chip. You can pick a colour and choose an icon: the first letter, an
-   exchange logo (Binance, OKX, Bybit, Coinbase, Kraken, DexScreener) or any
-   emoji you type.
+   (Enter creates, Escape cancels); the same button is there inside
+   **⇅ Arrange layout**, next to the folder pills. Groups appear as collapsible
+   section rows in the holdings list, including while empty; the chips remain
+   as quick filters. To customize groups, click **⇅ Arrange layout** and press
+   ✎ on a folder chip. You can pick a colour and choose an icon: the first
+   letter, an exchange logo (Binance, OKX, Bybit, Coinbase, Kraken,
+   DexScreener) or any emoji you type.
 3. File existing holdings by dragging a row onto a folder chip, or use the
    **Folder** dropdown on every row — the same dropdown is in the asset's
    **Edit** form, where a new folder can be created inline. A holding can be in

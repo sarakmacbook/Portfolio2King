@@ -31,12 +31,13 @@ import GripIcon from "./GripIcon";
  * straight onto a folder to file it.
  *
  * Groups are created from the **＋ Add group** button in the strip (a quick
- * name field that persists at once), or from the **Add holding** / **Edit**
- * forms ("Create a new folder…"). The strip otherwise filters, files and
- * customises the groups that already exist. Filing goes through
- * `onFileHolding`, so the table decides whether a drop is pending (arrange
- * mode, saved by **Save layout**) or persisted straight away (normal view).
- * Folder edits made in arrange mode are deferred to that save.
+ * name field that persists at once) — shown in the normal view and again
+ * inside arrange mode — or from the **Add holding** / **Edit** forms ("Create
+ * a new folder…"). The strip otherwise filters, files and customises the
+ * groups that already exist. Filing goes through `onFileHolding`, so the
+ * table decides whether a drop is pending (arrange mode, saved by
+ * **Save layout**) or persisted straight away (normal view). Folder edits
+ * made in arrange mode are deferred to that save; quick creation is not.
  */
 export default function HoldingsFolders({
   folders,
@@ -90,8 +91,8 @@ export default function HoldingsFolders({
 
   /** The editor exists only while arranging; changes are saved with the layout. */
   const showEditor = arranging && editing !== null;
-  /** The quick group form lives in the strip itself, outside arrange mode. */
-  const showQuickCreate = !arranging && creating;
+  /** The quick group form lives in the strip itself, in either mode. */
+  const showQuickCreate = creating;
 
   function startCreate() {
     setCreating(true);
@@ -209,6 +210,26 @@ export default function HoldingsFolders({
     setDropFolder(folderId);
   }
 
+  /**
+   * The solid create button — shown in the normal-view strip and again inside
+   * arrange mode, so a group can be started without leaving the layout editor.
+   * It persists at once in both modes (quick create is never pending).
+   */
+  function createButton() {
+    if (creating) return null;
+    return (
+      <button
+        type="button"
+        className="btn-primary text-xs"
+        onClick={startCreate}
+        disabled={savingGroup || allFolders.length >= MAX_FOLDERS}
+        title={`Create a group for holdings (up to ${MAX_FOLDERS})`}
+      >
+        ＋ Add group
+      </button>
+    );
+  }
+
   const chipClass = (active: boolean) =>
     `group flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-medium transition ${
       active
@@ -267,19 +288,8 @@ export default function HoldingsFolders({
                 </button>
               );
             })}
+            {createButton()}
           </>
-        )}
-
-        {!arranging && !creating && (
-          <button
-            type="button"
-            className="btn-primary text-xs"
-            onClick={startCreate}
-            disabled={savingGroup || allFolders.length >= MAX_FOLDERS}
-            title={`Create a group for holdings (up to ${MAX_FOLDERS})`}
-          >
-            ＋ Add group
-          </button>
         )}
 
         {!arranging && allFolders.length > 0 && (
@@ -403,6 +413,7 @@ export default function HoldingsFolders({
                 </div>
               );
             })}
+            {createButton()}
             {folders.length > 0 && (
               <span className="text-[11px] text-indigo-700/70">
                 Drag a holding onto a folder to file it
