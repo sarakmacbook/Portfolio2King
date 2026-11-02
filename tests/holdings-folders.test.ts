@@ -262,16 +262,12 @@ test("folders are saved, loaded and reset with the rest of the dashboard layout"
   assert.ok(table.includes("folderControl("), "each holding shows its folder");
 
   const strip = read("src/components/HoldingsFolders.tsx");
-  // The Holdings strip only filters, files and customises existing groups:
-  // creation lives in the add-holding and edit forms alone.
-  assert.ok(!strip.includes("Add group"), "the Holdings strip offers no group creation");
-  assert.ok(!strip.includes("Create group"), "no quick group form in the Holdings strip");
-  assert.ok(!strip.includes("New folder"), "arrange mode cannot create folders either");
-  assert.ok(!strip.includes("createHoldingGroup"), "the strip never calls a create action");
-  assert.ok(
-    !actions.includes("export async function createHoldingGroup"),
-    "the server-side quick-create action is gone with its UI",
-  );
+  // The strip shows a solid create button with a quick inline form; arrange
+  // mode still only edits the folders that already exist.
+  assert.ok(strip.includes("＋ Add group"), "the Holdings strip shows a create-group button");
+  assert.ok(strip.includes("createHoldingGroup(draftName)"), "the quick group form uses the server action");
+  assert.ok(actions.includes("export async function createHoldingGroup"), "group creation is persisted server-side");
+  assert.ok(!strip.includes("New folder"), "arrange mode still only edits existing folders");
   assert.ok(strip.includes("startEdit(folder)"), "existing folders can still be customised while arranging");
   assert.ok(strip.includes("Remove all groups"), "all groups can be cleared directly from Holdings");
   assert.ok(strip.includes("clearAllHoldingGroups()"), "clearing runs through a persistent server action");
