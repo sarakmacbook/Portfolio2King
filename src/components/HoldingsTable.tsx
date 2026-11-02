@@ -38,11 +38,18 @@ import {
   matchesFolderFilter,
   splitByFolder,
   UNGROUPED_SECTION_KEY,
+  assetIdFromSectionKey,
   type FolderGroup,
   type FolderAssignments,
   type FolderFilter,
   type HoldingFolder,
 } from "@/lib/holdings-folders";
+import {
+  collapseHoldingsSections,
+  expandHoldingsSections,
+  normaliseHoldingsSections,
+  reorderHoldingsAssetSections,
+} from "@/lib/holdings-sections";
 import { moveKeyTo } from "@/lib/order-list";
 import { DEFAULT_DUST_THRESHOLD_USD, normaliseDustThreshold, splitDust } from "@/lib/wallet-dust";
 import { spamReasonOf, splitSpam } from "@/lib/wallet-spam";
@@ -111,9 +118,9 @@ function compareHoldingRows(
   return ((av as number) - (bv as number)) * dir;
 }
 
-/** One block of rows in the table: the ungrouped rows or one folder group. */
+/** One row block in the table: one plain asset or one whole folder group. */
 type HoldingSection =
-  | { kind: "ungrouped"; key: string }
+  | { kind: "ungrouped"; key: string; row: HoldingRow }
   | { kind: "group"; key: string; group: FolderGroup<HoldingRow> };
 
 /** A visible row block that can accept a dragged group. */
@@ -183,7 +190,9 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
   const [query, setQuery] = useState("");
   // A saved arrangement is what the table shows until a column is sorted on.
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>(() =>
-    assetOrder.length > 0 ? { key: "custom", dir: 1 } : { key: "value", dir: -1 },
+    assetOrder.length > 0 || sectionsOrder.some((key) => assetIdFromSectionKey(key) !== null)
+      ? { key: "custom", dir: 1 }
+      : { key: "value", dir: -1 },
   );
   const [dragging, setDragging] = useState<HoldingFilter | null>(null);
   const [drop, setDrop] = useState<{ key: HoldingFilter; after: boolean } | null>(null);
@@ -294,7 +303,9 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
     const from = fullOrder.indexOf(id);
     const to = Math.max(0, Math.min(fullOrder.length - 1, from + delta));
     if (from < 0 || to === from) return;
-    setAssetOrder(moveHoldingBy(fullOrder, id, delta));
+    const next = moveHoldingBy(fullOrder, id, delta);
+    setAssetOrder(next);
+    setSectionsOrder(reorderHoldingsAssetSections(sectionKeys, next));
     setSort({ key: "custom", dir: 1 });
     setAnnouncement(`${rowLabel(id)} moved to position ${to + 1} of ${fullOrder.length}.`);
   }
@@ -306,6 +317,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
     }
     const next = moveHoldingTo(fullOrder, rowDragging, rowDrop.id, rowDrop.after);
     setAssetOrder(next);
+    setSectionsOrder(reorderHoldingsAssetSections(sectionKeys, next));
     setSort({ key: "custom", dir: 1 });
     setAnnouncement(
       `${rowLabel(rowDragging)} moved to position ${next.indexOf(rowDragging) + 1} of ${next.length}.`,
@@ -396,6 +408,24 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
     setSectionDropAt(null);
   }
 
+  /** Applies a detailed order and keeps the holding arrangement in step with it. */
+  function applySectionOrder(next: string[]) {
+    setSectionsOrder(next);
+    const ungroupedIds = next.flatMap((sectionKey) => {
+      const assetId = assetIdFromSectionKey(sectionKey);
+      return assetId === null ? [] : [assetId];
+    });
+    if (ungroupedIds.length === 0) return;
+    const detailed = new Set(ungroupedIds);
+    setAssetOrder([...ungroupedIds, ...fullOrder.filter((assetId) => !detailed.has(assetId))]);
+    setSort({ key: "custom", dir: 1 });
+  }
+
+  /** The arrange strip moves the whole ungrouped block; the table can split it. */
+  function changeGroupSectionOrder(blocks: string[]) {
+    applySectionOrder(expandHoldingsSections(blocks, sectionKeys));
+  }
+
   /**
    * Commits one section order and, outside arrange mode, stores it immediately.
    * The previous order is restored if the server refuses the move.
@@ -405,7 +435,9 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
       return;
     }
     const previous = sectionKeys;
-    setSectionsOrder(next);
+    const previousAssetOrder = assetOrder;
+    const previousSort = sort;
+    applySectionOrder(next);
     setSectionError("");
     setAnnouncement(
       `${sectionLabel(key)} moved to position ${next.indexOf(key) + 1} of ${next.length}.`,
@@ -416,6 +448,8 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
       const result = await saveHoldingsSectionsOrder({ sections: next });
       if (result.ok) return;
       setSectionsOrder(previous);
+      setAssetOrder(previousAssetOrder);
+      setSort(previousSort);
       setSectionError(result.error ?? "Could not save the group order.");
       setAnnouncement(`${sectionLabel(key)} is back in its previous position — the move did not save.`);
     });
@@ -647,39 +681,32 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
    */
   const wasArranging = useRef(false);
   useEffect(() => {
-    if (arranging && !wasArranging.current && assetOrder.length > 0) {
+    if (
+      arranging &&
+      !wasArranging.current &&
+      (assetOrder.length > 0 || sectionsOrder.some((key) => assetIdFromSectionKey(key) !== null))
+    ) {
       setSort({ key: "custom", dir: 1 });
     }
     wasArranging.current = arranging;
-  }, [arranging, assetOrder.length]);
+  }, [arranging, assetOrder.length, sectionsOrder]);
 
   // "Custom" with nothing arranged (e.g. after Reset to default) falls back to
   // the value column rather than an arbitrary order.
   useEffect(() => {
-    if (arranging || assetOrder.length > 0) return;
+    if (
+      arranging ||
+      assetOrder.length > 0 ||
+      sectionsOrder.some((key) => assetIdFromSectionKey(key) !== null)
+    ) {
+      return;
+    }
     setSort((current) => (current.key === "custom" ? { key: "value", dir: -1 } : current));
-  }, [arranging, assetOrder.length]);
+  }, [arranging, assetOrder.length, sectionsOrder]);
 
   const rootFolders = useMemo(() => folders.filter((folder) => !folder.parentAssetId), [folders]);
   const nestedFolders = useMemo(() => folders.filter((folder) => folder.parentAssetId), [folders]);
 
-  /**
-   * Top-to-bottom order of the row blocks: the ungrouped rows and one section
-   * per top-level folder. The saved order wins, so a group can sit anywhere —
-   * even above the ungrouped rows; keys it does not mention (a newly created
-   * folder) append at the end, and with nothing saved the classic layout
-   * applies (ungrouped rows first, then the folders in chip order).
-   */
-  const sectionKeys = useMemo(() => {
-    const ids = rootFolders.map((folder) => folder.id);
-    const kept = sectionsOrder.filter(
-      (key) => key === UNGROUPED_SECTION_KEY || ids.includes(key),
-    );
-    const missing = ids.filter((id) => !kept.includes(id));
-    return kept.includes(UNGROUPED_SECTION_KEY)
-      ? [...kept, ...missing]
-      : [UNGROUPED_SECTION_KEY, ...kept, ...missing];
-  }, [sectionsOrder, rootFolders]);
   const hasFolders = folders.length > 0;
   /**
    * Asset + Quantity + Avg cost + Price + Value + P/L + Weight, plus the Order
@@ -742,21 +769,54 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
     return splitByFolder(folderRows, rootFolders, assignments);
   }, [rootFolders, folderRows, assignments]);
 
+  /** Every currently ungrouped asset, including rows hidden by a view filter. */
+  const allUngroupedIds = useMemo(() => {
+    const rootIds = new Set(rootFolders.map((folder) => folder.id));
+    return applyHoldingOrder(rows, fullOrder)
+      .filter((row) => {
+        const folderId = assignments[row.id];
+        return !folderId || !rootIds.has(folderId);
+      })
+      .map((row) => row.id);
+  }, [rows, fullOrder, rootFolders, assignments]);
+
   /**
-   * Show every top-level group as a table section, even while it is empty, so a
-   * newly created folder is visible alongside assets before anything is filed.
-   * With a category or search filter, retain only groups that have matching rows.
+   * Detailed top-to-bottom order: one key per plain asset plus one per group.
+   * Old `$ungrouped` orders expand in place. Non-custom column sorts keep the
+   * coarse group blocks but sort the plain assets inside that block.
    */
+  const sectionKeys = useMemo(() => {
+    const source = sort.key === "custom"
+      ? sectionsOrder
+      : collapseHoldingsSections(sectionsOrder);
+    return normaliseHoldingsSections(
+      source,
+      rootFolders.map((folder) => folder.id),
+      allUngroupedIds,
+    );
+  }, [sectionsOrder, rootFolders, allUngroupedIds, sort.key]);
+
+  /** Coarse blocks for the arrange pills (one pill for all plain assets). */
+  const groupSectionKeys = useMemo(() => {
+    const blocks = collapseHoldingsSections(sectionKeys);
+    return blocks.includes(UNGROUPED_SECTION_KEY)
+      ? blocks
+      : [UNGROUPED_SECTION_KEY, ...blocks];
+  }, [sectionKeys]);
+
   /**
-   * The row blocks to render, in the arranged section order. The folder filter
-   * hides group sections that are not selected (the ungrouped block always
-   * stays), and with no search or category filter empty groups keep their
-   * section so a freshly created folder is visible before anything is filed.
+   * The visible row blocks. Each plain asset is its own drop target, so a group
+   * can land directly before or after it. Empty groups remain visible with no
+   * search/category filter; view filters simply omit rows that do not match.
    */
   const orderedSections = useMemo<HoldingSection[]>(() => {
     const showEmptyGroups = query.trim() === "" && filter === "all";
     return sectionKeys.flatMap<HoldingSection>((key) => {
-      if (key === UNGROUPED_SECTION_KEY) return { kind: "ungrouped", key };
+      const assetId = assetIdFromSectionKey(key);
+      if (assetId !== null) {
+        const row = ungrouped.find((item) => item.id === assetId);
+        return row ? { kind: "ungrouped", key, row } : [];
+      }
       const folder = rootFolders.find((item) => item.id === key);
       if (!folder) return [];
       if (folderFilter !== "all" && folderFilter !== `folder:${folder.id}`) return [];
@@ -766,7 +826,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
         ? { kind: "group", key, group: { folder, rows: [], totalValue: 0 } }
         : [];
     });
-  }, [sectionKeys, rootFolders, groups, folderFilter, query, filter]);
+  }, [sectionKeys, rootFolders, groups, ungrouped, folderFilter, query, filter]);
 
   function toggleGroup(key: string) {
     setCollapsedGroups((current) => {
@@ -1376,8 +1436,8 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
         onSelect={setFolderFilter}
         arranging={arranging}
         onFoldersChange={(next) => setFolders([...next, ...nestedFolders])}
-        onSectionsChange={setSectionsOrder}
-        sections={sectionKeys}
+        onSectionsChange={changeGroupSectionOrder}
+        sections={groupSectionKeys}
         sectionDrag={sectionDrag}
         onSectionDragChange={setSectionDrag}
         ungroupedCount={ungrouped.length}
@@ -1417,9 +1477,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
               section.kind === "ungrouped" ? (
                 <Fragment key={section.key}>
                   {sectionDrag !== null && sectionDropLine(position, false)}
-                  {ungrouped.map((r) =>
-                    renderDesktopRow(r, { key: UNGROUPED_SECTION_KEY, position }),
-                  )}
+                  {renderDesktopRow(section.row, { key: section.key, position })}
                 </Fragment>
               ) : (
                 <Fragment key={section.key}>
@@ -1477,9 +1535,7 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
           section.kind === "ungrouped" ? (
             <Fragment key={section.key}>
               {sectionDrag !== null && sectionDropLine(position, true)}
-              {ungrouped.map((r) =>
-                renderMobileCard(r, { key: UNGROUPED_SECTION_KEY, position }),
-              )}
+              {renderMobileCard(section.row, { key: section.key, position })}
             </Fragment>
           ) : (
             <Fragment key={section.key}>

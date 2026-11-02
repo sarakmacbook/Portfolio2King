@@ -202,9 +202,10 @@ export async function clearHoldingsFolders(): Promise<void> {
 }
 
 /**
- * Top-to-bottom order of the Holdings sections: the ungrouped rows block and
- * one block per top-level folder, in the order the user arranged them. An
- * empty list means the default (ungrouped rows first, then folder order).
+ * Detailed top-to-bottom Holdings order: top-level folder ids and one
+ * `$asset:<id>` key per ungrouped holding, allowing groups between plain rows.
+ * Legacy `$ungrouped` blocks are expanded by the client. An empty list means
+ * the default (ungrouped rows first, then folder order).
  */
 export const HOLDINGS_SECTIONS_SETTING = "holdings.sectionsOrder";
 

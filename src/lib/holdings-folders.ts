@@ -24,6 +24,29 @@ import { PRICE_PROVIDERS, type PriceProvider } from "@/lib/market-prices";
  */
 export const UNGROUPED_SECTION_KEY = "$ungrouped";
 
+/**
+ * Section key for one ungrouped asset. Keeping asset keys in the section order
+ * lets a group sit between two plain holdings (for example, directly below a
+ * bank balance) instead of only around the whole ungrouped block.
+ */
+export const ASSET_SECTION_PREFIX = "$asset:";
+
+export function assetSectionKey(assetId: number): string {
+  return `${ASSET_SECTION_PREFIX}${assetId}`;
+}
+
+export function assetIdFromSectionKey(key: string): number | null {
+  if (!key.startsWith(ASSET_SECTION_PREFIX)) return null;
+  const raw = key.slice(ASSET_SECTION_PREFIX.length);
+  if (!/^[1-9]\d*$/.test(raw)) return null;
+  const assetId = Number(raw);
+  return Number.isSafeInteger(assetId) ? assetId : null;
+}
+
+export function isAssetSectionKey(key: string): boolean {
+  return assetIdFromSectionKey(key) !== null;
+}
+
 export const MAX_FOLDERS = 20;
 export const MAX_FOLDER_NAME_LENGTH = 28;
 

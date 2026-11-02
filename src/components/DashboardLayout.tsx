@@ -18,6 +18,7 @@ import {
 import { DEFAULT_HOLDING_FILTER_ORDER, type HoldingFilter } from "@/lib/holdings-filter";
 import {
   UNGROUPED_SECTION_KEY,
+  isAssetSectionKey,
   type FolderAssignments,
   type HoldingFolder,
 } from "@/lib/holdings-folders";
@@ -34,7 +35,9 @@ import StatsGrid, { type StatCardData } from "./StatsGrid";
  */
 function orderFoldersBySections(folders: HoldingFolder[], sections: string[]): HoldingFolder[] {
   const position = new Map(
-    sections.filter((key) => key !== UNGROUPED_SECTION_KEY).map((id, index) => [id, index]),
+    sections
+      .filter((key) => key !== UNGROUPED_SECTION_KEY && !isAssetSectionKey(key))
+      .map((id, index) => [id, index]),
   );
   return [...folders].sort(
     (a, b) =>
@@ -44,15 +47,17 @@ function orderFoldersBySections(folders: HoldingFolder[], sections: string[]): H
 }
 
 /**
- * Keeps the section order in step with a folder list change: dead keys fall
- * away, new folders append at the end, and the ungrouped block keeps its
- * position (or starts on top when it was never arranged).
+ * Keeps the section order in step with a folder list change: dead folder keys
+ * fall away, detailed asset keys stay intact, new folders append at the end,
+ * and the legacy ungrouped block keeps its place when one exists.
  */
 function syncSectionsWithFolders(sections: string[], folders: HoldingFolder[]): string[] {
   const ids = folders.map((folder) => folder.id);
-  const kept = sections.filter((key) => key === UNGROUPED_SECTION_KEY || ids.includes(key));
+  const kept = sections.filter(
+    (key) => key === UNGROUPED_SECTION_KEY || ids.includes(key) || isAssetSectionKey(key),
+  );
   const missing = ids.filter((id) => !kept.includes(id));
-  return kept.includes(UNGROUPED_SECTION_KEY)
+  return kept.includes(UNGROUPED_SECTION_KEY) || kept.some(isAssetSectionKey)
     ? [...kept, ...missing]
     : [UNGROUPED_SECTION_KEY, ...kept, ...missing];
 }

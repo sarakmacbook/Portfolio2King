@@ -38,6 +38,7 @@ import {
   normaliseAssignments,
   normaliseFolders,
   UNGROUPED_SECTION_KEY,
+  isAssetSectionKey,
   type HoldingFolder,
 } from "@/lib/holdings-folders";
 import { isHoldingFilter } from "@/lib/holdings-filter";
@@ -220,10 +221,14 @@ export async function persistDashboardLayout(
   }
 
   // The section order references folder ids, so it is written last and only
-  // with keys that survived folder normalisation (plus the ungrouped block).
+  // with folders that survived normalisation (plus legacy blocks/asset keys).
   if (payload.holdingSections !== undefined) {
     const known = new Set<string>([UNGROUPED_SECTION_KEY, ...folders.map((folder) => folder.id)]);
-    await saveHoldingsSections(parseHoldingsSections(payload.holdingSections).filter((key) => known.has(key)));
+    await saveHoldingsSections(
+      parseHoldingsSections(payload.holdingSections).filter(
+        (key) => known.has(key) || isAssetSectionKey(key),
+      ),
+    );
   }
 
   return { folders };
