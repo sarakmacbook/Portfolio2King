@@ -1,12 +1,10 @@
 "use client";
 
 import { useState, useTransition, type DragEvent } from "react";
-import { clearAllHoldingGroups, createHoldingGroup } from "@/app/actions";
+import { clearAllHoldingGroups } from "@/app/actions";
 import {
   FOLDER_COLORS,
-  MAX_FOLDERS,
   MAX_FOLDER_NAME_LENGTH,
-  makeFolder,
   matchesFolderFilter,
   moveFolderBy,
   moveFolderTo,
@@ -26,15 +24,17 @@ import GripIcon from "./GripIcon";
  * The folder strip above the Holdings table.
  *
  * Outside arrange mode it is a filter bar: **All** and one chip per folder with
- * its count and value, plus a quick **Add group** action. Inside arrange mode the
- * chips become draggable (and nudgeable with ◀ / ▶), can be renamed, recoloured,
- * given an exchange or emoji icon, and deleted — and a holding dragged from the
- * table can be dropped straight onto a folder to file it.
+ * its count and value. Inside arrange mode the chips become draggable (and
+ * nudgeable with ◀ / ▶), can be renamed, recoloured, given an exchange or emoji
+ * icon, and deleted — and a holding dragged from the table can be dropped
+ * straight onto a folder to file it.
  *
- * Filing goes through `onFileHolding`, so the table decides whether a drop is
- * pending (arrange mode, saved by **Save layout**) or persisted straight away
- * (normal view). Folder edits and arrangement-mode creation are deferred to that
- * save; quick-created groups persist immediately.
+ * Groups are created from the **Add holding** form or a holding's **Edit** form
+ * ("Create a new folder…"); the Holdings strip itself only filters, files and
+ * customises the groups that already exist. Filing goes through `onFileHolding`,
+ * so the table decides whether a drop is pending (arrange mode, saved by
+ * **Save layout**) or persisted straight away (normal view). Folder edits made
+ * in arrange mode are deferred to that save.
  */
 export default function HoldingsFolders({
   folders,
@@ -66,12 +66,11 @@ export default function HoldingsFolders({
   onAssignmentsChange: (next: FolderAssignments) => void;
   onGroupsCleared: () => void;
   /** Files one holding (drag-and-drop); persisted at once outside arrange mode. */
-  onFileHolding: (assetId: number, folderId: string | null) => void;
+  onFileHolding: (assetId: number, folderId: string) => void;
   /** Total number of holdings, shown on the **All** chip. */
   totalRows: number;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
   const [draftName, setDraftName] = useState("");
   const [draftColor, setDraftColor] = useState<string>(FOLDER_COLORS[0]);
   const [draftIcon, setDraftIcon] = useState<FolderIconKind>("auto");
@@ -80,67 +79,19 @@ export default function HoldingsFolders({
   const [drop, setDrop] = useState<{ id: string; after: boolean } | null>(null);
   const [dropFolder, setDropFolder] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
-  const [groupError, setGroupError] = useState("");
   const [clearError, setClearError] = useState("");
   const [confirmClearAll, setConfirmClearAll] = useState(false);
-  const [savingGroup, startSavingGroup] = useTransition();
   const [clearingGroups, startClearingGroups] = useTransition();
 
   /** The editor exists only while arranging; changes are saved with the layout. */
-  const showEditor = arranging && (creating || editing !== null);
-  const showQuickCreate = !arranging && creating;
-
-  function startCreate() {
-    setCreating(true);
-    setEditing(null);
-    setDraftName("");
-    setGroupError("");
-    setDraftColor(FOLDER_COLORS[allFolders.length % FOLDER_COLORS.length]);
-    setDraftIcon("auto");
-    setDraftGlyph("");
-  }
+  const showEditor = arranging && editing !== null;
 
   function startEdit(folder: HoldingFolder) {
     setEditing(folder.id);
-    setCreating(false);
     setDraftName(folder.name);
     setDraftColor(folder.color);
     setDraftIcon(folder.icon);
     setDraftGlyph(folder.glyph);
-  }
-
-  function commitCreate() {
-    const folder = makeFolder(
-      { name: draftName, color: draftColor, icon: draftIcon, glyph: draftGlyph },
-      allFolders,
-    );
-    if (!folder) {
-      setAnnouncement(
-        draftName.trim()
-          ? `You can have at most ${MAX_FOLDERS} folders.`
-          : "Give the folder a name first.",
-      );
-      return;
-    }
-    onFoldersChange([...folders, folder]);
-    setAnnouncement(`${folder.name} folder created.`);
-    setCreating(false);
-  }
-
-  function commitQuickCreate() {
-    if (savingGroup || !draftName.trim()) return;
-    setGroupError("");
-    startSavingGroup(async () => {
-      const result = await createHoldingGroup(draftName);
-      if (!result.ok || !result.folder) {
-        setGroupError(result.error ?? "Could not create the group.");
-        return;
-      }
-      onFoldersChange([...folders, result.folder]);
-      setDraftName("");
-      setCreating(false);
-      setAnnouncement(`${result.folder.name} group created.`);
-    });
   }
 
   function clearGroups() {
@@ -289,18 +240,7 @@ export default function HoldingsFolders({
           </>
         )}
 
-        {!arranging && !creating && (
-          <button
-            type="button"
-            className="rounded-xl border border-dashed border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-indigo-300 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={startCreate}
-            disabled={savingGroup || allFolders.length >= MAX_FOLDERS}
-            title={`Create a group for holdings (up to ${MAX_FOLDERS})`}
-          >
-            ＋ Add group
-          </button>
-        )}
-        {!arranging && !creating && allFolders.length > 0 && (
+        {!arranging && allFolders.length > 0 && (
           <button
             type="button"
             className="rounded-xl border border-transparent px-2.5 py-1.5 text-xs font-medium text-rose-600 hover:border-rose-200 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -421,15 +361,6 @@ export default function HoldingsFolders({
                 </div>
               );
             })}
-            <button
-              type="button"
-              className="rounded-xl border border-dashed border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-indigo-300 hover:text-indigo-700"
-              onClick={startCreate}
-              disabled={allFolders.length >= MAX_FOLDERS}
-              title={`Group holdings into folders (up to ${MAX_FOLDERS})`}
-            >
-              ＋ New folder
-            </button>
             {folders.length > 0 && (
               <span className="text-[11px] text-indigo-700/70">
                 Drag a holding onto a folder to file it
@@ -469,53 +400,7 @@ export default function HoldingsFolders({
         </div>
       )}
 
-      {showQuickCreate && (
-        <div className="mt-3 rounded-xl border border-indigo-200 bg-white p-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <input
-              className="input min-w-0 flex-1"
-              placeholder="Group name (e.g. Long term, Retirement)"
-              value={draftName}
-              maxLength={MAX_FOLDER_NAME_LENGTH}
-              onChange={(event) => setDraftName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  commitQuickCreate();
-                }
-                if (event.key === "Escape") setCreating(false);
-              }}
-              aria-label="New holdings group name"
-              autoFocus
-            />
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="btn-primary text-xs"
-                onClick={commitQuickCreate}
-                disabled={savingGroup || !draftName.trim()}
-              >
-                {savingGroup ? "Creating…" : "Create group"}
-              </button>
-              <button
-                type="button"
-                className="btn-ghost text-xs"
-                onClick={() => {
-                  setCreating(false);
-                  setGroupError("");
-                }}
-                disabled={savingGroup}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-          {groupError && <p role="alert" className="mt-2 text-sm text-rose-700">{groupError}</p>}
-          <p className="mt-2 text-xs text-slate-500">The group will be added to Holdings now. You can file assets into it from the table.</p>
-        </div>
-      )}
-
-      {showEditor && (
+      {showEditor && editing !== null && (
         <div className="mt-3 rounded-xl border border-indigo-200 bg-white p-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <input
@@ -527,13 +412,9 @@ export default function HoldingsFolders({
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
                   event.preventDefault();
-                  if (editing) commitEdit(editing);
-                  else commitCreate();
+                  commitEdit(editing);
                 }
-                if (event.key === "Escape") {
-                  setEditing(null);
-                  setCreating(false);
-                }
+                if (event.key === "Escape") setEditing(null);
               }}
               aria-label="Folder name"
               autoFocus
@@ -542,17 +423,14 @@ export default function HoldingsFolders({
               <button
                 type="button"
                 className="btn-primary text-xs"
-                onClick={() => (editing ? commitEdit(editing) : commitCreate())}
+                onClick={() => commitEdit(editing)}
               >
-                {editing ? "Save folder" : "Create folder"}
+                Save folder
               </button>
               <button
                 type="button"
                 className="btn-ghost text-xs"
-                onClick={() => {
-                  setEditing(null);
-                  setCreating(false);
-                }}
+                onClick={() => setEditing(null)}
               >
                 Cancel
               </button>
