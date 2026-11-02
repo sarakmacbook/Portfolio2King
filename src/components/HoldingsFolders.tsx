@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useTransition, type DragEvent } from "react";
-import { clearAllHoldingGroups } from "@/app/actions";
+import { clearAllHoldingGroups, createHoldingGroup } from "@/app/actions";
 import {
   FOLDER_COLORS,
+  MAX_FOLDERS,
   MAX_FOLDER_NAME_LENGTH,
   matchesFolderFilter,
   moveFolderBy,
@@ -29,12 +30,13 @@ import GripIcon from "./GripIcon";
  * icon, and deleted — and a holding dragged from the table can be dropped
  * straight onto a folder to file it.
  *
- * Groups are created from the **Add holding** form or a holding's **Edit** form
- * ("Create a new folder…"); the Holdings strip itself only filters, files and
- * customises the groups that already exist. Filing goes through `onFileHolding`,
- * so the table decides whether a drop is pending (arrange mode, saved by
- * **Save layout**) or persisted straight away (normal view). Folder edits made
- * in arrange mode are deferred to that save.
+ * Groups are created from the **＋ Add group** button in the strip (a quick
+ * name field that persists at once), or from the **Add holding** / **Edit**
+ * forms ("Create a new folder…"). The strip otherwise filters, files and
+ * customises the groups that already exist. Filing goes through
+ * `onFileHolding`, so the table decides whether a drop is pending (arrange
+ * mode, saved by **Save layout**) or persisted straight away (normal view).
+ * Folder edits made in arrange mode are deferred to that save.
  */
 export default function HoldingsFolders({
   folders,
@@ -71,6 +73,7 @@ export default function HoldingsFolders({
   totalRows: number;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [draftName, setDraftName] = useState("");
   const [draftColor, setDraftColor] = useState<string>(FOLDER_COLORS[0]);
   const [draftIcon, setDraftIcon] = useState<FolderIconKind>("auto");
@@ -79,12 +82,39 @@ export default function HoldingsFolders({
   const [drop, setDrop] = useState<{ id: string; after: boolean } | null>(null);
   const [dropFolder, setDropFolder] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
+  const [groupError, setGroupError] = useState("");
   const [clearError, setClearError] = useState("");
   const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [savingGroup, startSavingGroup] = useTransition();
   const [clearingGroups, startClearingGroups] = useTransition();
 
   /** The editor exists only while arranging; changes are saved with the layout. */
   const showEditor = arranging && editing !== null;
+  /** The quick group form lives in the strip itself, outside arrange mode. */
+  const showQuickCreate = !arranging && creating;
+
+  function startCreate() {
+    setCreating(true);
+    setEditing(null);
+    setDraftName("");
+    setGroupError("");
+  }
+
+  function commitQuickCreate() {
+    if (savingGroup || !draftName.trim()) return;
+    setGroupError("");
+    startSavingGroup(async () => {
+      const result = await createHoldingGroup(draftName);
+      if (!result.ok || !result.folder) {
+        setGroupError(result.error ?? "Could not create the group.");
+        return;
+      }
+      onFoldersChange([...folders, result.folder]);
+      setDraftName("");
+      setCreating(false);
+      setAnnouncement(`${result.folder.name} group created.`);
+    });
+  }
 
   function startEdit(folder: HoldingFolder) {
     setEditing(folder.id);
@@ -238,6 +268,18 @@ export default function HoldingsFolders({
               );
             })}
           </>
+        )}
+
+        {!arranging && !creating && (
+          <button
+            type="button"
+            className="btn-primary text-xs"
+            onClick={startCreate}
+            disabled={savingGroup || allFolders.length >= MAX_FOLDERS}
+            title={`Create a group for holdings (up to ${MAX_FOLDERS})`}
+          >
+            ＋ Add group
+          </button>
         )}
 
         {!arranging && allFolders.length > 0 && (
@@ -397,6 +439,54 @@ export default function HoldingsFolders({
             </button>
           </div>
           {clearError && <p role="alert" className="mt-2 text-sm text-rose-800">{clearError}</p>}
+        </div>
+      )}
+
+      {showQuickCreate && (
+        <div className="mt-3 rounded-xl border border-indigo-200 bg-white p-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <input
+              className="input min-w-0 flex-1"
+              placeholder="Group name (e.g. Long term, Retirement)"
+              value={draftName}
+              maxLength={MAX_FOLDER_NAME_LENGTH}
+              onChange={(event) => setDraftName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  commitQuickCreate();
+                }
+                if (event.key === "Escape") setCreating(false);
+              }}
+              aria-label="New holdings group name"
+              autoFocus
+            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="btn-primary text-xs"
+                onClick={commitQuickCreate}
+                disabled={savingGroup || !draftName.trim()}
+              >
+                {savingGroup ? "Creating…" : "Create group"}
+              </button>
+              <button
+                type="button"
+                className="btn-ghost text-xs"
+                onClick={() => {
+                  setCreating(false);
+                  setGroupError("");
+                }}
+                disabled={savingGroup}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+          {groupError && <p role="alert" className="mt-2 text-sm text-rose-700">{groupError}</p>}
+          <p className="mt-2 text-xs text-slate-500">
+            The group will be added to Holdings now. You can file assets into it from the table.
+          </p>
         </div>
       )}
 
