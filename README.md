@@ -661,7 +661,11 @@ Folders turn a long table into a few groups without changing any numbers:
    resetting the rest of the dashboard layout.
 
 On any holding's detail page, **Folders inside [holding name]** lets you create
-subfolders owned by that holding. Each subfolder has an **Add asset here** button
+subfolders owned by that holding. Subfolders appear as chips — icon, name and
+holding count — in a strip above the folder cards, next to a dashed
+**＋ New folder** chip that opens an inline name field (Enter creates, Escape
+closes). Picking a chip shows just that folder's card; **All** shows every one.
+Each subfolder card has an **Add asset here** button
 that can add Cash, Stocks, Crypto or Other directly into it. The parent remains a
 normal holding and both parent and child positions count toward portfolio totals.
 Nested folders appear as `Parent / Folder` in folder selectors; deleting the
