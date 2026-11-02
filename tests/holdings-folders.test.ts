@@ -364,6 +364,12 @@ test("group rows drag anywhere in the everyday table, not only via arrange pills
     "touch and keyboard users get up/down group controls",
   );
   assert.ok(
+    table.includes("function moveSectionToTop(") &&
+      table.includes("onClick={() => moveSectionToTop(key)}") &&
+      table.includes("above all assets"),
+    "a one-click control moves a group above every asset and group",
+  );
+  assert.ok(
     table.includes("orderedSections.findIndex((section) => section.key === key)"),
     "the nudge controls follow the visible sections when filters are active",
   );

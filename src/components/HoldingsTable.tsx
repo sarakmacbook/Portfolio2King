@@ -441,6 +441,13 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
     );
   }
 
+  /** Sends a group straight above every asset and group, including hidden ones. */
+  function moveSectionToTop(key: string) {
+    const first = sectionKeys[0];
+    if (!first || first === key) return;
+    commitSectionOrder(moveKeyTo(sectionKeys, key, first, false), key);
+  }
+
   /** Makes a group's header row (table row or mobile card) a drag source. */
   function sectionDragProps(key: string) {
     return {
@@ -886,6 +893,16 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
     const label = sectionLabel(key);
     return (
       <span className="ml-1 flex shrink-0 items-center gap-0.5">
+        <button
+          type="button"
+          className="grid h-6 w-6 place-items-center rounded-md text-[13px] text-slate-400 transition hover:bg-white hover:text-indigo-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-25"
+          onClick={() => moveSectionToTop(key)}
+          disabled={sectionSaving || sectionKeys[0] === key}
+          aria-label={`Move ${label} above all assets`}
+          title="Move above all assets"
+        >
+          ⤒
+        </button>
         <button
           type="button"
           className="grid h-6 w-6 place-items-center rounded-md text-[10px] text-slate-400 transition hover:bg-white hover:text-indigo-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-25"
