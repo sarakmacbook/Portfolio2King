@@ -20,6 +20,7 @@ import {
   loadHoldingsCategoryOrder,
   loadHoldingsFolders,
   loadHoldingsOrder,
+  loadHoldingsSections,
 } from "@/lib/dashboard-order-db";
 import { loadAssetWalletLogos } from "@/lib/web3-wallets-db";
 import { KIND_META, TYPE_META, fmtDate, money, pct, pnlColor, qty } from "@/lib/format";
@@ -55,6 +56,7 @@ export default async function Dashboard() {
     categoryOrder,
     holdingOrder,
     holdingsFolders,
+    holdingsSections,
     walletLogos,
     alertSettings,
     cryptoTransactions,
@@ -68,6 +70,7 @@ export default async function Dashboard() {
     loadHoldingsCategoryOrder(),
     loadHoldingsOrder(),
     loadHoldingsFolders(),
+    loadHoldingsSections(),
     loadAssetWalletLogos(),
     getAlertSettings(),
     getCryptoTransactions(),
@@ -239,6 +242,7 @@ export default async function Dashboard() {
         initialAssetOrder={holdingOrder}
         initialFolders={holdingsFolders}
         initialAssignments={holdingAssignments}
+        initialSections={holdingsSections}
         dailyPerformance={{ holdings: dailyCrypto, realized: realizedToday.total, allTimeRealized: totals.realized, day: realizedDay, timeZone: alertSettings.portfolio.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone }}
         statsCards={{
           cash: {

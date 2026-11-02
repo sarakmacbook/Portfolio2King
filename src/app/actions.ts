@@ -533,6 +533,7 @@ export async function saveDashboardLayout(_prev: ActionState, fd: FormData): Pro
       holdingFolderAssignments: fd.has("holdingFolders")
         ? str(fd, "holdingFolderAssignments") || "{}"
         : undefined,
+      holdingSections: fd.has("holdingSections") ? str(fd, "holdingSections") : undefined,
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not save the dashboard layout" };

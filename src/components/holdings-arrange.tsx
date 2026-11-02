@@ -16,6 +16,13 @@ export type HoldingsArrangeState = {
   /** The Holdings folders, in display order. */
   folders: HoldingFolder[];
   onFoldersChange: (next: HoldingFolder[]) => void;
+  /**
+   * Top-to-bottom order of the Holdings sections: the ungrouped-rows block
+   * (`UNGROUPED_SECTION_KEY`) and one block per top-level folder id, so a
+   * group can sit anywhere in the table — even above the ungrouped rows.
+   */
+  sectionsOrder: string[];
+  onSectionsOrderChange: (next: string[]) => void;
   /** Clears folders and filing from persisted and in-memory dashboard state. */
   onClearGroups: () => void;
   /** Which folder each holding is filed in (`assetId → folderId`). */

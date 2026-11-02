@@ -642,15 +642,20 @@ Folders turn a long table into a few groups without changing any numbers:
    the asset's **Edit** form are the only places a group is created: the Holdings
    strip itself has no create button — it filters, files and customises the
    groups that already exist.
-2. To create an empty group directly in **Holdings**, click the solid
-   **＋ Add group** button in the strip above the table and enter its name
-   (Enter creates, Escape cancels); the same button is there inside
-   **⇅ Arrange layout**, next to the folder pills. Groups appear as collapsible
-   section rows in the holdings list, including while empty; the chips remain
-   as quick filters. To customize groups, click **⇅ Arrange layout** and press
-   ✎ on a folder chip. You can pick a colour and choose an icon: the first
-   letter, an exchange logo (Binance, OKX, Bybit, Coinbase, Kraken,
-   DexScreener) or any emoji you type.
+2. To create an empty group directly in **Holdings**, click **⇅ Arrange
+   layout** and use the solid **＋ Add group** button next to the section
+   pills; enter a name and Enter (or **Create group**) adds it at once. The
+   normal-view strip only filters — it has no create button. Groups appear as
+   collapsible section rows in the holdings list, including while empty; the
+   chips remain as quick filters. To customize groups, press ✎ on a folder
+   pill in arrange mode: pick a colour and choose an icon — the first letter,
+   an exchange logo (Binance, OKX, Bybit, Coinbase, Kraken, DexScreener) or
+   any emoji you type. Arrange mode also decides *where* each block of rows
+   sits: the strip shows one pill per section — every folder group plus
+   **Ungrouped rows** — and dragging a pill (or nudging it with ◀ / ▶) moves
+   its section in the table, so a group can sit above or below the plain
+   rows; **Save layout** stores the arrangement. Dropping a holding onto the
+   **Ungrouped rows** pill pulls it out of its folder.
 3. File existing holdings by dragging a row onto a folder chip, or use the
    **Folder** dropdown on every row — the same dropdown is in the asset's
    **Edit** form, where a new folder can be created inline. A holding can be in

@@ -32,6 +32,7 @@ import {
   moveHoldingTo,
   normaliseHoldingOrder,
 } from "@/lib/holdings-order";
+import { UNGROUPED_SECTION_KEY } from "@/lib/dashboard-order-db";
 import {
   assignHolding,
   countInFolder,
@@ -109,6 +110,11 @@ function compareHoldingRows(
   return ((av as number) - (bv as number)) * dir;
 }
 
+/** One block of rows in the table: the ungrouped rows or one folder group. */
+type HoldingSection =
+  | { kind: "ungrouped"; key: string }
+  | { kind: "group"; key: string; group: FolderGroup<HoldingRow> };
+
 /** Mobile has no table header, so sorting is offered as a select instead. */
 const SORT_OPTIONS: Array<{ value: string; label: string }> = [
   /** The order the rows were dragged into (default when one is saved). */
@@ -149,6 +155,9 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
   const setFolders = arrange?.onFoldersChange ?? setLocalFolders;
   const assignments = arrange?.assignments ?? localAssignments;
   const setAssignments = arrange?.onAssignmentsChange ?? setLocalAssignments;
+  const [localSections, setLocalSections] = useState<string[]>([]);
+  const sectionsOrder = arrange?.sectionsOrder ?? localSections;
+  const setSectionsOrder = arrange?.onSectionsOrderChange ?? setLocalSections;
   const clearAllGroupsState = arrange?.onClearGroups ?? (() => {
     setLocalFolders([]);
     setLocalAssignments({});
@@ -460,6 +469,24 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
 
   const rootFolders = useMemo(() => folders.filter((folder) => !folder.parentAssetId), [folders]);
   const nestedFolders = useMemo(() => folders.filter((folder) => folder.parentAssetId), [folders]);
+
+  /**
+   * Top-to-bottom order of the row blocks: the ungrouped rows and one section
+   * per top-level folder. The saved order wins, so a group can sit anywhere —
+   * even above the ungrouped rows; keys it does not mention (a newly created
+   * folder) append at the end, and with nothing saved the classic layout
+   * applies (ungrouped rows first, then the folders in chip order).
+   */
+  const sectionKeys = useMemo(() => {
+    const ids = rootFolders.map((folder) => folder.id);
+    const kept = sectionsOrder.filter(
+      (key) => key === UNGROUPED_SECTION_KEY || ids.includes(key),
+    );
+    const missing = ids.filter((id) => !kept.includes(id));
+    return kept.includes(UNGROUPED_SECTION_KEY)
+      ? [...kept, ...missing]
+      : [UNGROUPED_SECTION_KEY, ...kept, ...missing];
+  }, [sectionsOrder, rootFolders]);
   const hasFolders = folders.length > 0;
   /** Order + Asset + Folder + Quantity + Avg cost + Price + Value + P/L + Weight. */
   const columnCount = 7 + (arranging ? 1 : 0) + (hasFolders ? 1 : 0);
@@ -523,17 +550,26 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
    * newly created folder is visible alongside assets before anything is filed.
    * With a category or search filter, retain only groups that have matching rows.
    */
-  const displayGroups = useMemo(() => {
+  /**
+   * The row blocks to render, in the arranged section order. The folder filter
+   * hides group sections that are not selected (the ungrouped block always
+   * stays), and with no search or category filter empty groups keep their
+   * section so a freshly created folder is visible before anything is filed.
+   */
+  const orderedSections = useMemo<HoldingSection[]>(() => {
     const showEmptyGroups = query.trim() === "" && filter === "all";
-    const visibleFolders = rootFolders.filter(
-      (folder) => folderFilter === "all" || folderFilter === `folder:${folder.id}`,
-    );
-    return visibleFolders.flatMap((folder) => {
+    return sectionKeys.flatMap<HoldingSection>((key) => {
+      if (key === UNGROUPED_SECTION_KEY) return { kind: "ungrouped", key };
+      const folder = rootFolders.find((item) => item.id === key);
+      if (!folder) return [];
+      if (folderFilter !== "all" && folderFilter !== `folder:${folder.id}`) return [];
       const group = groups.find((item) => item.folder.id === folder.id);
-      if (group) return [group];
-      return showEmptyGroups ? [{ folder, rows: [], totalValue: 0 }] : [];
+      if (group) return { kind: "group", key, group };
+      return showEmptyGroups
+        ? { kind: "group", key, group: { folder, rows: [], totalValue: 0 } }
+        : [];
     });
-  }, [rootFolders, groups, folderFilter, query, filter]);
+  }, [sectionKeys, rootFolders, groups, folderFilter, query, filter]);
 
   function toggleGroup(key: string) {
     setCollapsedGroups((current) => {
@@ -1098,6 +1134,9 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
         onSelect={setFolderFilter}
         arranging={arranging}
         onFoldersChange={(next) => setFolders([...next, ...nestedFolders])}
+        onSectionsChange={setSectionsOrder}
+        sections={sectionKeys}
+        ungroupedCount={ungrouped.length}
         onAssignmentsChange={setAssignments}
         onGroupsCleared={() => {
           clearAllGroupsState();
@@ -1127,26 +1166,28 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {/* Holdings in no folder are plain rows, exactly as they were before
-                folders existed — there is no "Unfiled" heading. */}
-            {ungrouped.map((r) => renderDesktopRow(r))}
-            {displayGroups.map((group) => {
-              const groupKey = group.folder.id;
-              const isCollapsed = collapsedGroups.has(groupKey);
-              return (
-                <Fragment key={groupKey}>
+            {/* Row blocks render in the arranged section order: the ungrouped
+                rows are one block among the folder groups, so a group can sit
+                above or below them — wherever the user arranged it. */}
+            {orderedSections.map((section) =>
+              section.kind === "ungrouped" ? (
+                <Fragment key={section.key}>
+                  {ungrouped.map((r) => renderDesktopRow(r))}
+                </Fragment>
+              ) : (
+                <Fragment key={section.key}>
                   <tr
-                    {...groupDropProps(groupKey)}
+                    {...groupDropProps(section.key)}
                     className={`border-l-2 transition ${
-                      groupDrop === groupKey
+                      groupDrop === section.key
                         ? "border-indigo-500 bg-indigo-50/70"
                         : "border-transparent bg-slate-50/60"
                     }`}
                   >
                     <th colSpan={columnCount} className="px-4 py-2 font-normal" scope="colgroup">
                       <span className="flex items-center gap-2">
-                        {groupHeader(group)}
-                        {rowDragging !== null && groupDrop === groupKey && (
+                        {groupHeader(section.group)}
+                        {rowDragging !== null && groupDrop === section.key && (
                           <span className="rounded-md bg-indigo-500 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
                             Drop to file here
                           </span>
@@ -1154,10 +1195,11 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
                       </span>
                     </th>
                   </tr>
-                  {!isCollapsed && group.rows.map((r) => renderDesktopRow(r))}
+                  {!collapsedGroups.has(section.key) &&
+                    section.group.rows.map((r) => renderDesktopRow(r))}
                 </Fragment>
-              );
-            })}
+              ),
+            )}
             {folderRows.length === 0 && (
               <tr>
                 <td colSpan={columnCount} className="px-4 py-12 text-center text-sm text-slate-400">
@@ -1171,26 +1213,28 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
 
       {/* Phones: one card per holding instead of a 760px-wide table. */}
       <ul className="divide-y divide-slate-100 md:hidden">
-        {ungrouped.map((r) => renderMobileCard(r))}
-        {displayGroups.map((group) => {
-          const groupKey = group.folder.id;
-          const isCollapsed = collapsedGroups.has(groupKey);
-          return (
-            <Fragment key={groupKey}>
+        {orderedSections.map((section) =>
+          section.kind === "ungrouped" ? (
+            <Fragment key={section.key}>
+              {ungrouped.map((r) => renderMobileCard(r))}
+            </Fragment>
+          ) : (
+            <Fragment key={section.key}>
               <li
-                {...groupDropProps(groupKey)}
+                {...groupDropProps(section.key)}
                 className={`border-l-2 px-4 py-2 transition ${
-                  groupDrop === groupKey
+                  groupDrop === section.key
                     ? "border-indigo-500 bg-indigo-50/70"
                     : "border-transparent bg-slate-50/60"
                 }`}
               >
-                {groupHeader(group)}
+                {groupHeader(section.group)}
               </li>
-              {!isCollapsed && group.rows.map((r) => renderMobileCard(r))}
+              {!collapsedGroups.has(section.key) &&
+                section.group.rows.map((r) => renderMobileCard(r))}
             </Fragment>
-          );
-        })}
+          ),
+        )}
         {folderRows.length === 0 && (
           <li className="px-4 py-12 text-center text-sm text-slate-400">No holdings match.</li>
         )}

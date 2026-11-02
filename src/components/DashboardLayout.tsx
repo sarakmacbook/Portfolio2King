@@ -15,6 +15,7 @@ import {
   normaliseDashboardStatLabels,
   type DashboardStatKey,
 } from "@/lib/dashboard-stats";
+import { UNGROUPED_SECTION_KEY } from "@/lib/dashboard-order-db";
 import { DEFAULT_HOLDING_FILTER_ORDER, type HoldingFilter } from "@/lib/holdings-filter";
 import type { FolderAssignments, HoldingFolder } from "@/lib/holdings-folders";
 import GripIcon from "./GripIcon";
@@ -23,6 +24,36 @@ import type { DailyPerformanceProps } from "./DailyPerformance";
 import StatsGrid, { type StatCardData } from "./StatsGrid";
 
 /** Column spans so the two charts stay side by side when they are adjacent. */
+/**
+ * Reorders the folders array to follow a section order (the ungrouped key is
+ * ignored); folders the order does not mention keep their relative place at
+ * the end, so a stale or partial order can never drop a folder.
+ */
+function orderFoldersBySections(folders: HoldingFolder[], sections: string[]): HoldingFolder[] {
+  const position = new Map(
+    sections.filter((key) => key !== UNGROUPED_SECTION_KEY).map((id, index) => [id, index]),
+  );
+  return [...folders].sort(
+    (a, b) =>
+      (position.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+      (position.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+  );
+}
+
+/**
+ * Keeps the section order in step with a folder list change: dead keys fall
+ * away, new folders append at the end, and the ungrouped block keeps its
+ * position (or starts on top when it was never arranged).
+ */
+function syncSectionsWithFolders(sections: string[], folders: HoldingFolder[]): string[] {
+  const ids = folders.map((folder) => folder.id);
+  const kept = sections.filter((key) => key === UNGROUPED_SECTION_KEY || ids.includes(key));
+  const missing = ids.filter((id) => !kept.includes(id));
+  return kept.includes(UNGROUPED_SECTION_KEY)
+    ? [...kept, ...missing]
+    : [UNGROUPED_SECTION_KEY, ...kept, ...missing];
+}
+
 const SPAN: Record<DashboardBlockKey, string> = {
   stats: "lg:col-span-5",
   holdings: "lg:col-span-5",
@@ -50,6 +81,7 @@ export default function DashboardLayout({
   initialAssetOrder = [],
   initialFolders = [],
   initialAssignments = {},
+  initialSections = [],
 }: {
   blocks: Record<Exclude<DashboardBlockKey, "stats">, ReactNode>;
   /** Values and hints for the four stat cards, keyed by stat id. */
@@ -66,6 +98,8 @@ export default function DashboardLayout({
   initialFolders?: HoldingFolder[];
   /** Saved folder filing, `assetId → folderId`. */
   initialAssignments?: FolderAssignments;
+  /** Saved top-to-bottom order of the Holdings sections (see holdings-arrange). */
+  initialSections?: string[];
 }) {
   const [order, setOrder] = useState<DashboardBlockKey[]>(initialOrder);
   const [statsOrder, setStatsOrder] = useState<DashboardStatKey[]>(initialStatsOrder);
@@ -74,6 +108,7 @@ export default function DashboardLayout({
   const [assetOrder, setAssetOrder] = useState<number[]>(initialAssetOrder);
   const [folders, setFolders] = useState<HoldingFolder[]>(initialFolders);
   const [assignments, setAssignments] = useState<FolderAssignments>(initialAssignments);
+  const [sections, setSections] = useState<string[]>(initialSections);
   const [arranging, setArranging] = useState(false);
   const [dragging, setDragging] = useState<DashboardBlockKey | null>(null);
   const [drop, setDrop] = useState<{ key: DashboardBlockKey; after: boolean } | null>(null);
@@ -87,6 +122,22 @@ export default function DashboardLayout({
   const savedAssetOrder = useRef<number[]>(initialAssetOrder);
   const savedFolders = useRef<HoldingFolder[]>(initialFolders);
   const savedAssignments = useRef<FolderAssignments>(initialAssignments);
+  const savedSections = useRef<string[]>(initialSections);
+
+  /**
+   * The section order is the single source of truth for where each block of
+   * rows sits in the Holdings table; the folders array mirrors it (minus the
+   * ungrouped key) so chips and selectors keep a consistent folder order.
+   */
+  function changeSections(next: string[]) {
+    setSections(next);
+    setFolders((prev) => orderFoldersBySections(prev, next));
+  }
+
+  function changeFolders(next: HoldingFolder[]) {
+    setFolders(next);
+    setSections((prev) => syncSectionsWithFolders(prev, next));
+  }
 
   const holdingsArrange = useMemo(
     () => ({
@@ -96,17 +147,21 @@ export default function DashboardLayout({
       assetOrder,
       onAssetOrderChange: setAssetOrder,
       folders,
-      onFoldersChange: setFolders,
+      onFoldersChange: changeFolders,
+      sectionsOrder: sections,
+      onSectionsOrderChange: changeSections,
       onClearGroups: () => {
         setFolders([]);
         setAssignments({});
+        setSections([]);
         savedFolders.current = [];
         savedAssignments.current = {};
+        savedSections.current = [];
       },
       assignments,
       onAssignmentsChange: setAssignments,
     }),
-    [arranging, categoryOrder, assetOrder, folders, assignments],
+    [arranging, categoryOrder, assetOrder, folders, sections, assignments],
   );
 
   function clearDrag() {
@@ -122,6 +177,7 @@ export default function DashboardLayout({
     savedAssetOrder.current = assetOrder;
     savedFolders.current = folders;
     savedAssignments.current = assignments;
+    savedSections.current = sections;
     setNotice(null);
     setArranging(true);
   }
@@ -134,6 +190,7 @@ export default function DashboardLayout({
     setAssetOrder(savedAssetOrder.current);
     setFolders(savedFolders.current);
     setAssignments(savedAssignments.current);
+    setSections(savedSections.current);
     clearDrag();
     setArranging(false);
   }
@@ -173,6 +230,7 @@ export default function DashboardLayout({
       fd.set("holdingOrder", JSON.stringify(assetOrder));
       fd.set("holdingFolders", JSON.stringify(folders));
       fd.set("holdingFolderAssignments", JSON.stringify(assignments));
+      fd.set("holdingSections", JSON.stringify(sections));
       const result: ActionState = await saveDashboardLayout({}, fd);
       if (result.error) {
         setNotice({ kind: "error", text: result.error });
@@ -186,6 +244,7 @@ export default function DashboardLayout({
       savedAssetOrder.current = assetOrder;
       savedFolders.current = folders;
       savedAssignments.current = assignments;
+      savedSections.current = sections;
       setArranging(false);
       setNotice({ kind: "ok", text: result.message ?? "Dashboard layout saved." });
     });
@@ -205,6 +264,7 @@ export default function DashboardLayout({
       setAssetOrder([]);
       setFolders([]);
       setAssignments({});
+      setSections([]);
       savedOrder.current = DEFAULT_DASHBOARD_ORDER;
       savedStatsOrder.current = DEFAULT_DASHBOARD_STAT_ORDER;
       savedStatsLabels.current = DEFAULT_DASHBOARD_STAT_LABELS;
@@ -212,6 +272,7 @@ export default function DashboardLayout({
       savedAssetOrder.current = [];
       savedFolders.current = [];
       savedAssignments.current = {};
+      savedSections.current = [];
       clearDrag();
       setArranging(false);
       setNotice({ kind: "ok", text: result.message ?? "Dashboard layout reset to the default." });
