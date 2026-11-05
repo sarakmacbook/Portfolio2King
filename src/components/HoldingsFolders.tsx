@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, type DragEvent } from "react";
+import { useRef, useState, useTransition, type DragEvent } from "react";
 import { clearAllHoldingGroups, createHoldingGroup } from "@/app/actions";
 import {
   FOLDER_COLORS,
@@ -16,6 +16,7 @@ import {
   type HoldingFolder,
 } from "@/lib/holdings-folders";
 import { PRICE_PROVIDERS, PROVIDER_LABELS, type PriceProvider } from "@/lib/market-prices";
+import { FOLDER_LOGO_ACCEPT, folderLogoFromFile } from "@/lib/folder-logo";
 import { money } from "@/lib/format";
 import ExchangeIcon from "./ExchangeIcon";
 import GripIcon from "./GripIcon";
@@ -97,6 +98,10 @@ export default function HoldingsFolders({
   const [draftColor, setDraftColor] = useState<string>(FOLDER_COLORS[0]);
   const [draftIcon, setDraftIcon] = useState<FolderIconKind>("auto");
   const [draftGlyph, setDraftGlyph] = useState("");
+  const [draftLogo, setDraftLogo] = useState("");
+  const [logoError, setLogoError] = useState("");
+  const [processingLogo, setProcessingLogo] = useState(false);
+  const logoRequest = useRef(0);
   const [drop, setDrop] = useState<{ id: string; after: boolean } | null>(null);
   const [dropFolder, setDropFolder] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -135,11 +140,15 @@ export default function HoldingsFolders({
   }
 
   function startEdit(folder: HoldingFolder) {
+    logoRequest.current += 1;
     setEditing(folder.id);
     setDraftName(folder.name);
     setDraftColor(folder.color);
     setDraftIcon(folder.icon);
     setDraftGlyph(folder.glyph);
+    setDraftLogo(folder.logo ?? "");
+    setLogoError("");
+    setProcessingLogo(false);
   }
 
   function clearGroups() {
@@ -157,16 +166,47 @@ export default function HoldingsFolders({
     });
   }
 
+  function chooseIcon(icon: FolderIconKind, glyph = "") {
+    logoRequest.current += 1;
+    setProcessingLogo(false);
+    setLogoError("");
+    setDraftIcon(icon);
+    setDraftGlyph(glyph);
+  }
+
+  async function uploadLogo(file: File | undefined) {
+    if (!file) return;
+    const request = ++logoRequest.current;
+    setProcessingLogo(true);
+    setLogoError("");
+    try {
+      const logo = await folderLogoFromFile(file);
+      if (request !== logoRequest.current) return;
+      setDraftLogo(logo);
+      setDraftIcon("image");
+      setDraftGlyph("");
+      setAnnouncement("Logo ready. Save the folder, then save the layout to keep it.");
+    } catch (error) {
+      if (request === logoRequest.current) {
+        setLogoError(error instanceof Error ? error.message : "Could not read that logo.");
+      }
+    } finally {
+      if (request === logoRequest.current) setProcessingLogo(false);
+    }
+  }
+
   function commitEdit(id: string) {
+    if (processingLogo) return;
     onFoldersChange(
       updateFolder(folders, id, {
         name: draftName,
         color: draftColor,
         icon: draftIcon,
         glyph: draftGlyph,
+        logo: draftLogo || undefined,
       }),
     );
-    setAnnouncement(`${draftName.trim() || "Folder"} updated.`);
+    setAnnouncement(`${draftName.trim() || "Folder"} updated. Save layout to keep the changes.`);
     setEditing(null);
   }
 
@@ -332,6 +372,7 @@ export default function HoldingsFolders({
             <ExchangeIcon
               provider={folder.icon === "exchange" ? (folder.glyph as PriceProvider) : undefined}
               glyph={folder.icon === "emoji" ? folder.glyph : undefined}
+              logo={folder.icon === "image" ? folder.logo : undefined}
               label={folder.name.slice(0, 1)}
               color={folder.color}
               className="h-4 w-4 rounded"
@@ -433,6 +474,7 @@ export default function HoldingsFolders({
                   <ExchangeIcon
                     provider={folder.icon === "exchange" ? (folder.glyph as PriceProvider) : undefined}
                     glyph={folder.icon === "emoji" ? folder.glyph : undefined}
+                    logo={folder.icon === "image" ? folder.logo : undefined}
                     label={folder.name.slice(0, 1)}
                     color={folder.color}
                     className={`h-4 w-4 rounded ${
@@ -578,8 +620,9 @@ export default function HoldingsFolders({
                 type="button"
                 className="btn-primary text-xs"
                 onClick={() => commitEdit(editing)}
+                disabled={processingLogo}
               >
-                Save folder
+                {processingLogo ? "Resizing…" : "Save folder"}
               </button>
               <button
                 type="button"
@@ -614,10 +657,7 @@ export default function HoldingsFolders({
             <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">Icon</span>
             <button
               type="button"
-              onClick={() => {
-                setDraftIcon("auto");
-                setDraftGlyph("");
-              }}
+              onClick={() => chooseIcon("auto")}
               className={`rounded-lg border px-2 py-1 text-[11px] ${
                 draftIcon === "auto" ? "border-indigo-500 text-slate-900" : "border-slate-200 text-slate-500"
               }`}
@@ -625,14 +665,48 @@ export default function HoldingsFolders({
             >
               Letter
             </button>
+            <label
+              className={`cursor-pointer rounded-lg border px-2 py-1 text-[11px] ${
+                draftIcon === "image"
+                  ? "border-indigo-500 text-slate-900"
+                  : "border-slate-200 text-slate-500"
+              } ${processingLogo ? "cursor-wait opacity-60" : ""}`}
+            >
+              {processingLogo
+                ? "Resizing…"
+                : draftIcon === "image" && draftLogo
+                  ? "Replace logo"
+                  : "Upload logo"}
+              <input
+                type="file"
+                className="sr-only"
+                accept={FOLDER_LOGO_ACCEPT}
+                disabled={processingLogo}
+                aria-label="Upload custom group logo"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  void uploadLogo(file);
+                }}
+              />
+            </label>
+            {draftIcon === "image" && draftLogo && (
+              <button
+                type="button"
+                className="rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-rose-600 hover:bg-rose-50"
+                onClick={() => {
+                  chooseIcon("auto");
+                  setDraftLogo("");
+                }}
+              >
+                Remove logo
+              </button>
+            )}
             {PRICE_PROVIDERS.map((provider) => (
               <button
                 key={provider}
                 type="button"
-                onClick={() => {
-                  setDraftIcon("exchange");
-                  setDraftGlyph(provider);
-                }}
+                onClick={() => chooseIcon("exchange", provider)}
                 className={`flex items-center gap-1 rounded-lg border px-1.5 py-1 text-[11px] ${
                   draftIcon === "exchange" && draftGlyph === provider
                     ? "border-indigo-500 text-slate-900"
@@ -646,14 +720,13 @@ export default function HoldingsFolders({
               </button>
             ))}
             <label className="flex items-center gap-1 text-[11px] text-slate-500">
-              <span>Custom</span>
+              <span>Emoji</span>
               <input
                 className="input w-16 py-1 text-center text-sm"
                 value={draftIcon === "emoji" ? draftGlyph : ""}
-                onChange={(event) => {
-                  setDraftIcon(event.target.value ? "emoji" : "auto");
-                  setDraftGlyph(event.target.value.slice(0, 4));
-                }}
+                onChange={(event) =>
+                  chooseIcon(event.target.value ? "emoji" : "auto", event.target.value.slice(0, 4))
+                }
                 placeholder="🏦"
                 maxLength={4}
                 aria-label="Custom folder icon (emoji or short text)"
@@ -664,12 +737,17 @@ export default function HoldingsFolders({
               <ExchangeIcon
                 provider={draftIcon === "exchange" ? (draftGlyph as PriceProvider) : undefined}
                 glyph={draftIcon === "emoji" ? draftGlyph : undefined}
+                logo={draftIcon === "image" ? draftLogo : undefined}
                 label={draftName.trim().slice(0, 1) || "F"}
                 color={draftColor}
                 className="h-6 w-6 rounded-md"
               />
             </span>
           </div>
+          {logoError && <p role="alert" className="mt-2 text-xs text-rose-700">{logoError}</p>}
+          <p className="mt-2 text-[11px] text-slate-400">
+            PNG, JPG, or WebP up to 5 MB. The logo is resized to 96px; click Save folder, then Save layout.
+          </p>
         </div>
       )}
 
