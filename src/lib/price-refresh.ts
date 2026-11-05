@@ -511,7 +511,9 @@ async function dispatchPortfolioRun(input: {
     force: true,
   });
 
-  if (portfolio.autoNote && result.status === "sent") {
+  // Do not burn a note on a failed delivery: a Telegram retry must compose the
+  // same message the recipient was originally meant to receive.
+  if (portfolio.autoNote && result.status === "sent" && (result.pushSent > 0 || result.telegramSent)) {
     await advanceAutoNoteStep(autoNoteStep);
   }
 

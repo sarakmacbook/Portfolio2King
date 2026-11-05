@@ -108,8 +108,12 @@ export function ensureSchema() {
           push_sent integer NOT NULL DEFAULT 0,
           push_failed integer NOT NULL DEFAULT 0,
           telegram_sent integer NOT NULL DEFAULT 0,
+          telegram_attempted_at timestamptz,
           created_at timestamptz NOT NULL DEFAULT now()
         )`);
+      // Existing installations predate Telegram retry tracking. Nullable keeps
+      // the migration non-blocking and makes old failed alerts retryable once.
+      await db.execute(sql`ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS telegram_attempted_at timestamptz`);
       // Fixed first-observed daily price when no prior snapshot is available.
       await db.execute(sql`
         CREATE TABLE IF NOT EXISTS daily_crypto_baselines (

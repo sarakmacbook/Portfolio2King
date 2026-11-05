@@ -358,7 +358,8 @@ export async function sendPortfolioUpdateNowAction(
       settings: previewSettings,
       force: true,
     });
-    const nextStep = autoNoteOn ? await advanceAutoNoteStep(step) : step;
+    const delivered = result.status === "sent" && (result.pushSent > 0 || result.telegramSent);
+    const nextStep = autoNoteOn && delivered ? await advanceAutoNoteStep(step) : step;
     revalidatePath("/alerts");
 
     const described = describePreviewDelivery(result, channels, update.title);

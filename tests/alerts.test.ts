@@ -310,6 +310,11 @@ test("telegram configuration is validated before use", () => {
     telegramConfigFromEnv({ TELEGRAM_BOT_TOKEN: token, TELEGRAM_CHAT_ID: "@my_channel" }),
     { token, chatId: "@my_channel" },
   );
+  // Environment credentials accept the same numeric ids as the connection form.
+  assert.deepEqual(telegramConfigFromEnv({ TELEGRAM_BOT_TOKEN: token, TELEGRAM_CHAT_ID: "42" }), {
+    token,
+    chatId: "42",
+  });
 });
 
 test("telegram requests post JSON to the bot API", () => {
@@ -377,6 +382,44 @@ test("sendTelegramMessage reports success and safe failures", async () => {
     throw new Error("network down");
   }) as typeof fetch;
   assert.match((await sendTelegramMessage("hi")).error ?? "", /unreachable/i);
+});
+
+test("sendTelegramMessage requires a Telegram success envelope, not just HTTP 200", async () => {
+  const token = `987654:${"D".repeat(35)}`;
+  process.env.TELEGRAM_BOT_TOKEN = token;
+  process.env.TELEGRAM_CHAT_ID = "123456789";
+
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ ok: false, error_code: 400, description: "Bad Request: chat not found" }), {
+      status: 200,
+    })) as typeof fetch;
+  const rejected = await sendTelegramMessage("hi");
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.error ?? "", /chat id/i);
+
+  globalThis.fetch = (async () => new Response("<html>proxy login</html>", { status: 200 })) as typeof fetch;
+  const invalid = await sendTelegramMessage("hi");
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.error ?? "", /invalid response/i);
+
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ ok: true, result: { message_id: 7 } }), { status: 200 })) as typeof fetch;
+  assert.deepEqual(await sendTelegramMessage("hi"), { ok: true });
+});
+
+test("sendTelegramMessage explains blocked chats without exposing credentials", async () => {
+  const token = `987654:${"E".repeat(35)}`;
+  process.env.TELEGRAM_BOT_TOKEN = token;
+  process.env.TELEGRAM_CHAT_ID = "123456789";
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ ok: false, error_code: 403, description: "Forbidden: bot was blocked" }), {
+      status: 403,
+    })) as typeof fetch;
+
+  const result = await sendTelegramMessage("hi");
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? "", /allowed to send messages/i);
+  assert.ok(!(result.error ?? "").includes(token));
 });
 
 test("sendTelegramMessage reports missing configuration without calling out", async () => {

@@ -101,6 +101,13 @@ test("verifyBotToken distinguishes a rejected token from a network problem", asy
   assert.match(offline.ok === false ? offline.error : "", /Could not reach api\.telegram\.org/);
 });
 
+test("verifyBotToken does not accept a non-Telegram HTTP 200 response", async () => {
+  const result = await verifyBotToken(TOKEN, fakeFetch(() => new Response("<html>proxy login</html>", { status: 200 })));
+  assert.equal(result.ok, false);
+  assert.equal(result.ok === false && result.rejected, false);
+  assert.match(result.ok === false ? result.error : "", /invalid response/i);
+});
+
 test("discoverChatId explains what to do when no chat exists yet", async () => {
   const empty = await discoverChatId(TOKEN, fakeFetch(() => json({ ok: true, result: [] })));
   assert.equal("error" in empty, true);

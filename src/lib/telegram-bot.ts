@@ -119,6 +119,11 @@ async function callApi(
   if (body && typeof body === "object" && (body as { ok?: unknown }).ok === false) {
     return { ok: false, error: "Telegram rejected the request. Check the bot token.", rejected: true };
   }
+  // Bot API success always includes { ok: true }. A 200 HTML page from a proxy
+  // is not proof that the bot was verified or that getUpdates returned a chat.
+  if (!body || typeof body !== "object" || (body as { ok?: unknown }).ok !== true) {
+    return { ok: false, error: "Telegram returned an invalid response. Try again.", rejected: false };
+  }
   return { ok: true, body };
 }
 

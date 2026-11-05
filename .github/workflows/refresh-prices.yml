@@ -1,10 +1,11 @@
 name: Refresh crypto prices
 
 # Background refresh + alerts without a self-hosted scheduler.
-# Enable it by setting:
-#   Repository variable  APP_URL      e.g. https://portfolio.example.com
-#   Repository secret    CRON_SECRET  the same value configured on the server
-# Scheduled workflows only run from the repository's default branch.
+# Uses this repository's production Vercel deployment by default. Self-hosted
+# installations can override it with a repository variable:
+#   APP_URL      e.g. https://portfolio.example.com
+# If the server has CRON_SECRET configured, add the same value as a repository
+# secret named CRON_SECRET. Scheduled workflows only run from the default branch.
 on:
   schedule:
     - cron: "*/15 * * * *"
@@ -16,12 +17,11 @@ concurrency:
 
 jobs:
   refresh:
-    if: vars.APP_URL != ''
     runs-on: ubuntu-latest
     steps:
       - name: Trigger /api/cron/refresh-prices
         env:
-          APP_URL: ${{ vars.APP_URL }}
+          APP_URL: ${{ vars.APP_URL || 'https://portfolio2-king.vercel.app' }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           set -o pipefail
