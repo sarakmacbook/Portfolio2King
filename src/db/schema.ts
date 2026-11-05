@@ -98,6 +98,8 @@ export const alertEvents = pgTable("alert_events", {
   pushSent: integer("push_sent").notNull().default(0),
   pushFailed: integer("push_failed").notNull().default(0),
   telegramSent: integer("telegram_sent").notNull().default(0),
+  /** Last Telegram attempt; also claims a retry across concurrent schedulers. */
+  telegramAttemptedAt: timestamp("telegram_attempted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

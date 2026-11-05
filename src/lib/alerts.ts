@@ -1,5 +1,5 @@
 import webpush from "web-push";
-import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, like, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { alertEvents, appSettings, assets, pushSubscriptions } from "@/db/schema";
 import { ensureSchema } from "@/lib/portfolio";
@@ -18,6 +18,9 @@ import {
 } from "@/lib/alert-rules";
 
 const TELEGRAM_TIMEOUT_MS = 10_000;
+// A failed Telegram delivery stays retryable without letting concurrent cron
+// runs send it repeatedly. Successful deliveries are never retried.
+const TELEGRAM_RETRY_MS = 60_000;
 const PUSH_TTL_SECONDS = 60 * 60 * 12;
 
 const VAPID_PUBLIC_KEY = "push.vapidPublic";
@@ -305,14 +308,33 @@ export async function sendTelegramMessage(text: string): Promise<{ ok: boolean; 
   const { url, init } = telegramRequest(config, text);
   try {
     const response = await fetch(url, { ...init, cache: "no-store", signal: AbortSignal.timeout(TELEGRAM_TIMEOUT_MS) });
-    if (response.ok) return { ok: true };
-    if (response.status === 401 || response.status === 404) {
+    let body: { ok?: unknown; error_code?: unknown } | null = null;
+    try {
+      body = (await response.json()) as { ok?: unknown; error_code?: unknown };
+    } catch {
+      // A proxy or captive portal can answer 200 with HTML. That is not a
+      // Telegram delivery receipt, so never treat HTTP 2xx alone as success.
+      body = null;
+    }
+
+    if (response.ok && body?.ok === true) return { ok: true };
+
+    // Telegram normally uses the same HTTP status and error_code. Reading both
+    // also handles API/proxy implementations that return { ok: false } in 200.
+    const status = typeof body?.error_code === "number" ? body.error_code : response.status;
+    if (status === 401 || status === 404) {
       return { ok: false, error: "Telegram rejected the bot token" };
     }
-    if (response.status === 400) {
+    if (status === 400) {
       return { ok: false, error: "Telegram rejected the chat id — start a chat with the bot first" };
     }
-    if (response.status === 429) return { ok: false, error: "Telegram rate limit reached" };
+    if (status === 403) {
+      return { ok: false, error: "Telegram could not post to this chat — check that the bot is allowed to send messages" };
+    }
+    if (status === 429) return { ok: false, error: "Telegram rate limit reached" };
+    if (response.ok) {
+      return { ok: false, error: body?.ok === false ? "Telegram rejected the message" : "Telegram returned an invalid response" };
+    }
     return { ok: false, error: `Telegram returned ${response.status}` };
   } catch {
     return { ok: false, error: "Telegram is unreachable" };
@@ -387,6 +409,7 @@ export async function dispatchAlert(input: {
   }
 
   await ensureSchema();
+  const attemptedAt = new Date();
   const inserted = await db
     .insert(alertEvents)
     .values({
@@ -396,24 +419,56 @@ export async function dispatchAlert(input: {
       title: input.title,
       body: input.body,
       channels: channels.join(","),
+      telegramAttemptedAt: channels.includes("telegram") ? attemptedAt : null,
     })
     .onConflictDoNothing({ target: alertEvents.dedupeKey })
     .returning({ id: alertEvents.id });
 
-  const eventId = inserted[0]?.id;
+  let eventId = inserted[0]?.id;
+  let telegramRetry = false;
+
+  if (!eventId && channels.includes("telegram")) {
+    // The first attempt may have failed after the dedupe row was committed.
+    // Atomically claim only its missing Telegram delivery. A successful push is
+    // left alone, and a concurrent scheduler cannot claim the same row because
+    // this update moves telegram_attempted_at beyond the retry cutoff.
+    const claimed = await db
+      .update(alertEvents)
+      .set({ telegramAttemptedAt: attemptedAt })
+      .where(
+        and(
+          eq(alertEvents.dedupeKey, input.dedupeKey),
+          eq(alertEvents.telegramSent, 0),
+          like(alertEvents.channels, "%telegram%"),
+          or(
+            isNull(alertEvents.telegramAttemptedAt),
+            lt(alertEvents.telegramAttemptedAt, new Date(attemptedAt.getTime() - TELEGRAM_RETRY_MS)),
+          ),
+        ),
+      )
+      .returning({ id: alertEvents.id });
+    eventId = claimed[0]?.id;
+    telegramRetry = Boolean(eventId);
+  }
+
   if (!eventId) {
     return { status: "duplicate", pushSent: 0, pushFailed: 0, pushRemoved: 0, telegramSent: false };
   }
 
   const result = await sendToChannels(
     { title: input.title, body: input.body, url: input.url, tag: input.dedupeKey },
-    channels,
+    telegramRetry ? ["telegram"] : channels,
     input.telegramText,
   );
 
   await db
     .update(alertEvents)
-    .set({ pushSent: result.pushSent, pushFailed: result.pushFailed, telegramSent: result.telegramSent ? 1 : 0 })
+    .set({
+      // A Telegram-only retry must not erase the first attempt's push counts.
+      ...(telegramRetry ? {} : { pushSent: result.pushSent, pushFailed: result.pushFailed }),
+      telegramSent: result.telegramSent ? 1 : 0,
+      telegramAttemptedAt: new Date(),
+    })
     .where(eq(alertEvents.id, eventId));
 
   return { status: "sent", ...result };

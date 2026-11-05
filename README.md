@@ -1066,9 +1066,11 @@ and that is used instead. Click **Send test message** to confirm delivery.
 
 Messages are plain text through the Telegram Bot API (no HTML/Markdown to
 escape). Failures are reported on the page — an invalid token says so, a wrong
-chat id tells you to start the chat first, and rate limits are retried on the
-next scheduled run. The token is never returned by an API or written to the
-alert log.
+chat id tells you to start the chat first, and a blocked chat explains the
+permission problem. A failed Telegram delivery becomes retryable after one
+minute; the next scheduled run retries only Telegram, so a browser push that
+already succeeded is not duplicated. Successful Telegram sends stay deduplicated.
+The token is never returned by an API or written to the alert log.
 
 ### Settings
 
@@ -1100,9 +1102,12 @@ page shows each channel’s status.
 [self-hosting step 7](#7-refresh-prices-in-the-background).
 
 **GitHub Actions** — `.github/workflows/refresh-prices.yml` runs every 15 minutes
-once you set the repository variable `APP_URL` (e.g. `https://portfolio.example.com`)
-and the secret `CRON_SECRET`. Scheduled workflows only run from the default
-branch.
+against `https://portfolio2-king.vercel.app` by default, so no repository setup is
+needed for this deployment. Self-hosted installations can set the repository
+variable `APP_URL` (e.g. `https://portfolio.example.com`) to override that URL.
+If the server has `CRON_SECRET` configured, add the same value as a repository
+secret; otherwise no secret is needed. Scheduled workflows only run from the
+default branch.
 
 **Vercel Cron** — add the route to `vercel.json`:
 

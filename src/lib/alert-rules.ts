@@ -1192,7 +1192,7 @@ export type PushPayload = {
 export type TelegramConfig = { token: string; chatId: string };
 
 const TELEGRAM_TOKEN_PATTERN = /^\d{5,}:[A-Za-z0-9_-]{30,}$/;
-const TELEGRAM_CHAT_PATTERN = /^(-?\d{5,}|@[A-Za-z][A-Za-z0-9_]{4,})$/;
+const TELEGRAM_CHAT_PATTERN = /^(-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,})$/;
 
 /** Reads Telegram credentials from the environment; returns null when absent. */
 export function telegramConfigFromEnv(
