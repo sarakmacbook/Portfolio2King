@@ -2,8 +2,24 @@ import type { AssetType, TxKind } from "@/lib/constants";
 
 export const CURRENCY = "USD";
 
+/**
+ * Values this close to zero are float residue, not money. `abs > 0 && abs < 1`
+ * renders six decimals, so anything under half of the smallest shown unit would
+ * otherwise print as a signed zero (a red `-$0.00` in the daily card).
+ */
+const MONEY_EPSILON = 5e-7;
+/** `qty` renders eight decimals, so half of the smallest shown unit is 5e-9. */
+const QTY_EPSILON = 5e-9;
+/** `pct` renders two decimals of a percentage; this only kills a signed zero. */
+const PCT_EPSILON = 1e-9;
+
 export function money(n: number, opts: { sign?: boolean; compact?: boolean } = {}) {
-  const abs = Math.abs(n);
+  // A missing or broken number (NaN from an empty quote, Infinity from a bad
+  // division) is shown as "—", exactly like `pct`, instead of "$NaN".
+  if (!Number.isFinite(n)) return "—";
+  // Collapse float residue to a plain zero so no sign is ever attached to it.
+  const value = Math.abs(n) < MONEY_EPSILON ? 0 : n;
+  const abs = Math.abs(value);
   const s = new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: CURRENCY,
@@ -11,25 +27,33 @@ export function money(n: number, opts: { sign?: boolean; compact?: boolean } = {
     minimumFractionDigits: opts.compact && abs >= 100000 ? 0 : 2,
     maximumFractionDigits: abs > 0 && abs < 1 ? 6 : 2,
   }).format(abs);
-  if (n < 0) return `-${s}`;
-  if (opts.sign && n > 0) return `+${s}`;
+  if (value < 0) return `-${s}`;
+  if (opts.sign && value > 0) return `+${s}`;
   return s;
 }
 
 export function qty(n: number) {
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 }).format(n);
+  if (!Number.isFinite(n)) return "—";
+  const value = Math.abs(n) < QTY_EPSILON ? 0 : n;
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 }).format(value);
 }
 
 export function pct(n: number, sign = true) {
   if (!isFinite(n)) return "—";
-  const s = `${Math.abs(n * 100).toFixed(2)}%`;
-  if (n < 0) return `-${s}`;
-  return sign && n > 0 ? `+${s}` : s;
+  const value = Math.abs(n) < PCT_EPSILON ? 0 : n;
+  const s = `${Math.abs(value * 100).toFixed(2)}%`;
+  if (value < 0) return `-${s}`;
+  return sign && value > 0 ? `+${s}` : s;
 }
 
+/**
+ * Colour for a profit/loss figure. Uses the same threshold as `money`, so a row
+ * that renders `$0.00` is never painted green or red.
+ */
 export function pnlColor(n: number) {
-  if (n > 1e-9) return "text-emerald-600";
-  if (n < -1e-9) return "text-rose-600";
+  if (!Number.isFinite(n)) return "text-slate-500";
+  if (n >= MONEY_EPSILON) return "text-emerald-600";
+  if (n <= -MONEY_EPSILON) return "text-rose-600";
   return "text-slate-500";
 }
 

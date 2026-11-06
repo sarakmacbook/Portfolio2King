@@ -1642,7 +1642,12 @@ vercel --prod
 - All pages render dynamically (`force-dynamic`) since holdings change on
   every write.
 - Currency formatting lives in `src/lib/format.ts` and is USD-only by design; all
-  monetary fields in PostgreSQL are plain `double precision` amounts.
+  monetary fields in PostgreSQL are plain `double precision` amounts. Because
+  those are floats, the helpers refuse to print a signed zero: a value under
+  `$0.0000005` is shown as `$0.00` with no sign and a neutral colour, and a
+  `NaN` / `Infinity` (an empty quote, a bad division) renders as `—` rather than
+  `$NaN`. `money`, `qty`, `pct`, and `pnlColor` all share those rules — pinned
+  down in `tests/format.test.ts`.
 - Web Push uses the `web-push` library with VAPID keys from the environment or
   `app_settings`. `public/sw.js` is a minimal service worker that renders push
   payloads and focuses the matching page when a notification is clicked. It is
