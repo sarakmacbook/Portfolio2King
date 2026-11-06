@@ -907,9 +907,10 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
         <ExchangeIcon
           provider={folder.icon === "exchange" ? (folder.glyph as PriceProvider) : undefined}
           glyph={folder.icon === "emoji" ? folder.glyph : undefined}
+          logo={folder.icon === "image" ? folder.logo : undefined}
           label={folder.name.slice(0, 1)}
           color={folder.color}
-          className="h-3.5 w-3.5 rounded"
+          className="h-5 w-5 rounded-md"
         />
         <span className="truncate">{folderLabel(folder)}</span>
       </span>
@@ -931,9 +932,10 @@ export default function HoldingsTable({ rows }: { rows: HoldingRow[] }) {
         <ExchangeIcon
           provider={group.folder.icon === "exchange" ? (group.folder.glyph as PriceProvider) : undefined}
           glyph={group.folder.icon === "emoji" ? group.folder.glyph : undefined}
+          logo={group.folder.icon === "image" ? group.folder.logo : undefined}
           label={group.folder.name.slice(0, 1)}
           color={group.folder.color}
-          className="h-4 w-4 rounded"
+          className="h-7 w-7 rounded-lg"
         />
         <span className="truncate text-xs font-semibold uppercase tracking-wide text-slate-600">
           {group.folder.name}
