@@ -128,6 +128,7 @@ export default function AssetSubfolders({
               <ExchangeIcon
                 provider={folder.icon === "exchange" ? (folder.glyph as PriceProvider) : undefined}
                 glyph={folder.icon === "emoji" ? folder.glyph : undefined}
+                logo={folder.icon === "image" ? folder.logo : undefined}
                 label={folder.name.slice(0, 1)}
                 color={folder.color}
                 className="h-4 w-4 rounded"
@@ -202,6 +203,7 @@ export default function AssetSubfolders({
                 <ExchangeIcon
                   provider={folder.icon === "exchange" ? (folder.glyph as PriceProvider) : undefined}
                   glyph={folder.icon === "emoji" ? folder.glyph : undefined}
+                  logo={folder.icon === "image" ? folder.logo : undefined}
                   label={folder.name.slice(0, 1)}
                   color={folder.color}
                   className="h-5 w-5 rounded-md"

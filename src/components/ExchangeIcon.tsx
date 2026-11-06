@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { PROVIDER_LABELS, type PriceProvider } from "@/lib/market-prices";
 
 /**
@@ -79,12 +80,13 @@ export function ExchangeMark({ provider }: { provider: PriceProvider }) {
 }
 
 /**
- * A folder icon: an exchange mark, a custom emoji, or the folder's initial. All
- * three render in the same square so a row of folders looks even.
+ * A folder icon: an uploaded logo, exchange mark, emoji, or initial. Every kind
+ * renders in the same square so a row of folders looks even.
  */
 export default function ExchangeIcon({
   provider,
   glyph,
+  logo,
   label,
   color,
   className = "h-7 w-7 rounded-lg",
@@ -94,6 +96,8 @@ export default function ExchangeIcon({
   provider?: PriceProvider | "";
   /** Emoji or short text for a custom icon. */
   glyph?: string;
+  /** Small data URL for an uploaded group logo. */
+  logo?: string;
   /** Fallback initial(s) — usually the first letter of the folder name. */
   label?: string;
   color: string;
@@ -109,7 +113,16 @@ export default function ExchangeIcon({
       style={{ backgroundColor: color }}
       title={title ?? (provider ? PROVIDER_LABELS[provider] : text)}
     >
-      {provider ? (
+      {logo ? (
+        <Image
+          src={logo}
+          alt=""
+          width={96}
+          height={96}
+          unoptimized
+          className="h-full w-full object-contain"
+        />
+      ) : provider ? (
         <ExchangeMark provider={provider} />
       ) : (
         <span className={isEmoji ? "text-[13px] leading-none" : "uppercase"}>{text}</span>

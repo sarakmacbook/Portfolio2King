@@ -123,7 +123,7 @@ export function parseHoldingOrder(raw: string): number[] {
   return ids;
 }
 
-/** The Holdings folders: a JSON array of `{ id, name, color, icon, glyph }`. */
+/** Holdings folders: `{ id, name, color, icon, glyph, logo? }`; logos are validated too. */
 export function parseHoldingsFolders(raw: string): unknown[] {
   const parsed = parseJson(raw || "[]", "holdings folders");
   if (!Array.isArray(parsed)) throw new Error("Could not read the holdings folders.");

@@ -649,8 +649,12 @@ Folders turn a long table into a few groups without changing any numbers:
    collapsible section rows in the holdings list, including while empty; the
    chips remain as quick filters. To customize groups, press ✎ on a folder
    pill in arrange mode: pick a colour and choose an icon — the first letter,
-   an exchange logo (Binance, OKX, Bybit, Coinbase, Kraken, DexScreener) or
-   any emoji you type. Arrange mode also decides *where* each block of rows
+   an exchange logo (Binance, OKX, Bybit, Coinbase, Kraken, DexScreener), any
+   emoji, or your own image. **Upload logo** accepts PNG, JPG, and WebP files up
+   to 5 MB, shows a preview, and resizes the image to a small 96px logo stored
+   with the group. Use **Replace logo** to change it or **Remove logo** to return
+   to the letter icon, then click **Save folder** and **Save layout**. Arrange
+   mode also decides *where* each block of rows
    sits: the strip shows one pill per section — every folder group plus
    **Ungrouped rows** — and dragging a pill (or nudging it with ◀ / ▶) moves
    its section in the table, so a group can sit above or below the plain
