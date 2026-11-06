@@ -79,12 +79,14 @@ export function ExchangeMark({ provider }: { provider: PriceProvider }) {
 }
 
 /**
- * A folder icon: an exchange mark, a custom emoji, or the folder's initial. All
- * three render in the same square so a row of folders looks even.
+ * A folder icon: an uploaded logo, exchange mark, custom emoji, or the folder's
+ * initial. All four render in the same square so a row of folders looks even,
+ * and the emoji/letter scale with the square instead of staying tiny.
  */
 export default function ExchangeIcon({
   provider,
   glyph,
+  logo,
   label,
   color,
   className = "h-7 w-7 rounded-lg",
@@ -94,6 +96,8 @@ export default function ExchangeIcon({
   provider?: PriceProvider | "";
   /** Emoji or short text for a custom icon. */
   glyph?: string;
+  /** Small data URL for an uploaded group logo. */
+  logo?: string;
   /** Fallback initial(s) — usually the first letter of the folder name. */
   label?: string;
   color: string;
@@ -105,14 +109,28 @@ export default function ExchangeIcon({
 
   return (
     <span
-      className={`${className} relative grid shrink-0 place-items-center overflow-hidden text-[11px] font-bold text-white shadow-sm`}
+      className={`${className} relative grid shrink-0 place-items-center overflow-hidden font-bold text-white shadow-sm`}
       style={{ backgroundColor: color }}
       title={title ?? (provider ? PROVIDER_LABELS[provider] : text)}
     >
-      {provider ? (
+      {logo ? (
+        // The logo is already sized and squared by `folderLogoFromFile`; `contain`
+        // keeps a wide or tall image whole. A plain <img> avoids next/image
+        // trying to optimise a data URL on the client.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={logo} alt="" className="h-full w-full object-contain" />
+      ) : provider ? (
         <ExchangeMark provider={provider} />
       ) : (
-        <span className={isEmoji ? "text-[13px] leading-none" : "uppercase"}>{text}</span>
+        <span
+          className={
+            isEmoji
+              ? "text-[0.8em] leading-none"
+              : "text-[0.55em] uppercase leading-none"
+          }
+        >
+          {text}
+        </span>
       )}
     </span>
   );
