@@ -688,12 +688,21 @@ Folders turn a long table into a few groups without changing any numbers:
 A group icon can be an image of your own — a bank logo, a coin mark, a photo —
 instead of a letter or an emoji:
 
-1. In **⇅ Arrange layout**, press ✎ on the folder pill, then **Add image**.
-2. Pick a PNG, JPG, or WebP file up to 5 MB. The browser resizes it to a 128px
-   square (WebP where the browser can encode it, PNG otherwise), so nothing is
-   uploaded at full size.
+1. In **⇅ Arrange layout**, press ✎ on the folder pill, then **Add image…**.
+2. Pick a file however is easiest: click the **Add image…** button or the dashed
+   **Drag an image here from Finder** box to open the system file picker, or
+   drag a picture straight from **Finder** (or the **Files** app on iOS) and
+   drop it on that box. PNG, JPG, WebP, GIF, HEIC/HEIF, AVIF, BMP, TIFF, ICO and
+   SVG are accepted up to 5 MB. The browser resizes the picture to a 128px square
+   (WebP where the browser can encode it, PNG otherwise), so nothing is uploaded
+   at full size.
 3. Press **Save folder**, then **Save layout**. **Replace image** swaps it and
    **Remove image** goes back to the letter.
+
+A dropped file is judged by its **bytes**, not just its name or MIME type — macOS
+routinely hands a dropped image over with an empty type, and a `.png` that is
+really a zip is refused. Anything the browser cannot decode is reported in place
+of the icon row ("That file is not an image…") instead of being saved.
 
 The image is stored as a small data URL beside the rest of the folder record in
 `app_settings` — no file server, no object storage, and a backup JSON carries

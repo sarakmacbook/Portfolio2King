@@ -15,7 +15,12 @@ import {
   type FolderIconKind,
   type HoldingFolder,
 } from "@/lib/holdings-folders";
-import { FOLDER_LOGO_ACCEPT, folderLogoFromFile } from "@/lib/folder-logo";
+import {
+  FOLDER_LOGO_ACCEPT,
+  folderLogoFromFile,
+  imageFileFromDrop,
+  looksLikeImage,
+} from "@/lib/folder-logo";
 import { PRICE_PROVIDERS, PROVIDER_LABELS, type PriceProvider } from "@/lib/market-prices";
 import { money } from "@/lib/format";
 import ExchangeIcon from "./ExchangeIcon";
@@ -101,7 +106,9 @@ export default function HoldingsFolders({
   const [draftLogo, setDraftLogo] = useState("");
   const [logoError, setLogoError] = useState("");
   const [processingLogo, setProcessingLogo] = useState(false);
+  const [logoDragOver, setLogoDragOver] = useState(false);
   const logoRequest = useRef(0);
+  const logoPicker = useRef<HTMLInputElement>(null);
   const [drop, setDrop] = useState<{ id: string; after: boolean } | null>(null);
   const [dropFolder, setDropFolder] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -149,6 +156,7 @@ export default function HoldingsFolders({
     setDraftLogo(folder.logo ?? "");
     setLogoError("");
     setProcessingLogo(false);
+    setLogoDragOver(false);
   }
 
   function clearGroups() {
@@ -194,6 +202,21 @@ export default function HoldingsFolders({
     } finally {
       if (request === logoRequest.current) setProcessingLogo(false);
     }
+  }
+
+  /** Accepts a file dragged out of Finder or the Files app. */
+  async function dropLogo(event: DragEvent<HTMLElement>) {
+    // Only a file drag is ours; the folder chips have their own drag gestures.
+    event.preventDefault();
+    event.stopPropagation();
+    setLogoDragOver(false);
+    if (processingLogo) return;
+    const file = imageFileFromDrop(event.dataTransfer);
+    if (!file) {
+      setLogoError("Drag an image file here — for example from Finder.");
+      return;
+    }
+    await uploadLogo(file);
   }
 
   function commitEdit(id: string) {
@@ -666,31 +689,35 @@ export default function HoldingsFolders({
             >
               Letter
             </button>
-            <label
-              className={`cursor-pointer rounded-lg border px-2 py-1 text-[11px] ${
+            <button
+              type="button"
+              onClick={() => logoPicker.current?.click()}
+              disabled={processingLogo}
+              className={`rounded-lg border px-2 py-1 text-[11px] ${
                 draftIcon === "image"
                   ? "border-indigo-500 text-slate-900"
                   : "border-slate-200 text-slate-500"
-              } ${processingLogo ? "cursor-wait opacity-60" : ""}`}
+              } ${processingLogo ? "cursor-wait opacity-60" : "hover:bg-slate-50"}`}
             >
               {processingLogo
-                ? "Resizing…"
+                ? "Reading image…"
                 : draftIcon === "image" && draftLogo
                   ? "Replace image"
-                  : "Add image"}
-              <input
-                type="file"
-                className="sr-only"
-                accept={FOLDER_LOGO_ACCEPT}
-                disabled={processingLogo}
-                aria-label="Add an image as the group icon"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = "";
-                  void uploadLogo(file);
-                }}
-              />
-            </label>
+                  : "Add image…"}
+            </button>
+            <input
+              ref={logoPicker}
+              type="file"
+              className="sr-only"
+              accept={FOLDER_LOGO_ACCEPT}
+              disabled={processingLogo}
+              aria-label="Choose an image file as the group icon"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                void uploadLogo(file);
+              }}
+            />
             {draftIcon === "image" && draftLogo && (
               <button
                 type="button"
@@ -745,10 +772,54 @@ export default function HoldingsFolders({
               />
             </span>
           </div>
+          <div
+            role="group"
+            aria-label="Group icon image"
+            onDragEnter={(event) => {
+              event.preventDefault();
+              if (!processingLogo) setLogoDragOver(true);
+            }}
+            onDragOver={(event) => {
+              // Without this the browser refuses the drop (and may open the file).
+              event.preventDefault();
+              event.dataTransfer.dropEffect = processingLogo ? "none" : "copy";
+            }}
+            onDragLeave={(event) => {
+              // Ignore the flicker of moving between children.
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setLogoDragOver(false);
+              }
+            }}
+            onDrop={dropLogo}
+            onClick={() => {
+              if (!processingLogo) logoPicker.current?.click();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                if (!processingLogo) logoPicker.current?.click();
+              }
+            }}
+            tabIndex={0}
+            className={`mt-2 flex cursor-pointer items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-[11px] transition ${
+              logoDragOver
+                ? "border-indigo-500 bg-indigo-50 text-indigo-900"
+                : "border-slate-300 text-slate-500 hover:border-indigo-300 hover:bg-slate-50"
+            } ${processingLogo ? "cursor-wait opacity-60" : ""}`}
+          >
+            <span aria-hidden="true" className="text-base leading-none">🖼️</span>
+            <span>
+              {processingLogo
+                ? "Reading the image…"
+                : logoDragOver
+                  ? "Drop the image to use it as this group's icon"
+                  : "Drag an image here from Finder, or click to choose a file"}
+            </span>
+          </div>
           {logoError && <p role="alert" className="mt-2 text-xs text-rose-700">{logoError}</p>}
           <p className="mt-2 text-[11px] text-slate-400">
-            PNG, JPG, or WebP up to 5 MB. The image is resized to 128px and shown in the group
-            header — click Save folder, then Save layout.
+            PNG, JPG, WebP, GIF, HEIC, or SVG up to 5 MB. The image is resized to 128px and shown
+            in the group header — click Save folder, then Save layout.
           </p>
         </div>
       )}
