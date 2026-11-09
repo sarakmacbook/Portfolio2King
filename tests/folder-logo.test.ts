@@ -7,6 +7,8 @@ import {
   MAX_FOLDER_LOGO_SOURCE_BYTES,
   FOLDER_LOGO_SIZE,
   FOLDER_LOGO_ACCEPT,
+  imageFileFromDrop,
+  looksLikeImage,
   normaliseFolderLogo,
 } from "../src/lib/folder-logo";
 import {
@@ -127,7 +129,9 @@ test("the logo budget fits the server-action body limit", () => {
   );
   assert.equal(FOLDER_LOGO_SIZE, 128);
   assert.ok(MAX_FOLDER_LOGO_SOURCE_BYTES >= 5 * 1024 * 1024);
-  assert.ok(FOLDER_LOGO_ACCEPT.includes("image/png"));
+  // The picker offers anything the OS might hold, including iPhone HEIC.
+  assert.ok(FOLDER_LOGO_ACCEPT.includes("image/*"));
+  assert.ok(FOLDER_LOGO_ACCEPT.includes(".heic"));
 });
 
 test("the group editor offers an image and every render site draws it", () => {
@@ -141,6 +145,14 @@ test("the group editor offers an image and every render site draws it", () => {
   assert.ok(editor.includes("Remove image"), "an existing logo can be removed");
   assert.ok(editor.includes('accept={FOLDER_LOGO_ACCEPT}'), "the picker is limited to images");
   assert.ok(editor.includes("disabled={processingLogo}"), "saving waits for the resize");
+
+  // Dragging a file out of Finder (or the Files app) must work too.
+  assert.ok(editor.includes("imageFileFromDrop("), "a dropped file is read from the DataTransfer");
+  assert.ok(editor.includes("onDrop={dropLogo}"), "the drop area handles the drop");
+  assert.ok(editor.includes("event.preventDefault()"), "the drop is not left to the browser");
+  assert.ok(editor.includes("Drag an image here from Finder"), "the drop area says what to do");
+  // A drop must not also trigger the click-to-choose path underneath it.
+  assert.ok(editor.includes("event.stopPropagation()"));
 
   // Logos must reach every place a group is drawn, not just the editor preview.
   for (const file of [
@@ -172,4 +184,69 @@ test("group icons are drawn large enough to be seen", () => {
   );
   assert.ok(icon.includes("text-[0.8em]"), "the emoji scales with the icon");
   assert.ok(icon.includes("text-[0.55em]"), "the letter scales with the icon");
+});
+
+/* ── Files dragged in from Finder ──────────────────────────────────────────── */
+
+function fileOf(bytes: number[], name = "logo", type = ""): File {
+  return new File([new Uint8Array(bytes)], name, { type });
+}
+
+test("an image from Finder is accepted even when the OS reports no type", async () => {
+  // macOS drops the bytes with an empty MIME type; the extension is all there is.
+  assert.equal(await looksLikeImage(fileOf([0x89, 0x50, 0x4e, 0x47, 0x0d], "logo.png")), true);
+  assert.equal(await looksLikeImage(fileOf([0x89, 0x50, 0x4e, 0x47], "screenshot")), true);
+  // A renamed file: no useful type, no usable extension, but real PNG bytes.
+  assert.equal(await looksLikeImage(fileOf([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a], "Untitled")), true);
+});
+
+test("every common image format survives the Finder check", async () => {
+  const samples: Array<[string, number[], string]> = [
+    ["png", [0x89, 0x50, 0x4e, 0x47], "a.png"],
+    ["jpeg", [0xff, 0xd8, 0xff, 0xe0], "a.jpg"],
+    ["gif", [0x47, 0x49, 0x46, 0x38, 0x39, 0x61], "a.gif"],
+    ["webp", [0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50], "a.webp"],
+    ["heic", [0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63], "IMG_0001.HEIC"],
+    ["avif", [0, 0, 0, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66], "a.avif"],
+    ["bmp", [0x42, 0x4d, 0x36], "a.bmp"],
+    ["tiff", [0x49, 0x49, 0x2a, 0x00], "a.tiff"],
+    ["ico", [0x00, 0x00, 0x01, 0x00], "a.ico"],
+  ];
+  for (const [label, bytes, name] of samples) {
+    assert.equal(await looksLikeImage(fileOf(bytes, name, "")), true, `${label} is accepted`);
+  }
+  const svg = new File(["<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"], "logo.svg", { type: "" });
+  assert.equal(await looksLikeImage(svg), true, "svg is accepted");
+});
+
+test("a dropped file that is not an image is refused", async () => {
+  assert.equal(await looksLikeImage(fileOf([0x25, 0x50, 0x44, 0x46], "report.pdf", "application/pdf")), false);
+  assert.equal(await looksLikeImage(new File(["hello"], "notes.txt", { type: "" })), false);
+  assert.equal(await looksLikeImage(new File([], "empty.png", { type: "image/png" })), false);
+  // A zip renamed to .png is caught by the bytes, not the name.
+  assert.equal(await looksLikeImage(fileOf([0x50, 0x4b, 0x03, 0x04], "fake.png", "")), false);
+});
+
+test("an explicitly image-typed file is let through to be decoded", async () => {
+  // e.g. a format this list does not name; the <img> decode is the real test.
+  assert.equal(await looksLikeImage(fileOf([1, 2, 3, 4], "x.heic", "image/heic")), true);
+  assert.equal(await looksLikeImage(fileOf([1, 2, 3, 4], "x.jxl", "image/jxl")), true);
+});
+
+test("imageFileFromDrop copes with Safari and Chrome drop payloads", () => {
+  const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "from-finder.png");
+  // Chrome: DataTransfer.files carries it.
+  const chrome = { files: [file], items: [] } as unknown as DataTransfer;
+  assert.equal(imageFileFromDrop(chrome), file);
+
+  // Safari: only DataTransfer.items does.
+  const safari = {
+    files: [],
+    items: [{ kind: "file", getAsFile: () => file }, { kind: "string", getAsFile: () => null }],
+  } as unknown as DataTransfer;
+  assert.equal(imageFileFromDrop(safari), file);
+
+  assert.equal(imageFileFromDrop(null), undefined);
+  const empty = { files: [], items: [] } as unknown as DataTransfer;
+  assert.equal(imageFileFromDrop(empty), undefined);
 });
